@@ -15,6 +15,7 @@ docs/
 ├── index.md                      # Central documentation hub (this file)
 │
 ├── architecture/                 # 🏛️ System Design & Architectural Concepts
+├── contracts/                    # 🤝 Team & API Conventions (Git Flow, Commits, JSON:API, Error Codes, ...)
 ├── adr/                          # 📜 Architecture Decision Records (ADRs)
 ├── ai_rag/                       # 🧠 AI, NLP & RAG Engine Specifications
 ├── database/                     # 💾 Relational Schemas, ORM Models & Migrations
@@ -22,6 +23,7 @@ docs/
 ├── deployment/                   # 🚀 DevOps, Containerization & Infrastructure
 │
 ├── planning/                     # 📌 Project-level Tracking, Roadmaps & Migration Backlogs
+├── technology-stacks.md          # 🔬 Current & Target Technology Stack
 └── notes/                        # 📝 Collaborative Notes, Spikes & Temporary Scratchpads
 ```
 
@@ -45,7 +47,21 @@ docs/
 
 ---
 
-### 3. `docs/ai_rag/` (AI, NLP & RAG Engine Engineering)
+### 3. `docs/contracts/` (Team & API Conventions)
+* **Purpose**: Shared team conventions and API contracts with the upstream Tavanir system.
+* **What is stored here**:
+  * **Git Flow Guide (`01_Git_Flow_Guide.md`)**: Branch model (`master`/`develop`/`feature`/`release`/`hotfix`) for the single-module repo.
+  * **Git Commit Convention (`02_Git_Commit_Convention.md`)**: Conventional Commits template with Clean Architecture scopes.
+  * **Naming & Data Exchange (`03_Naming_And_Data_Exchange.md`)**: External `camelCase` / header `Title-Case` wire contract, mapped to the domain DTOs.
+  * **JSON API Conventions (`04_JSON_API_Conventions.md`)**: Uniform JSON:API response envelope for success/failure.
+  * **Internal Error Codes (`05_Internal_Error_Codes.md`)**: The `INTERNAL_CODE` dictionary anchored in `src/application/exceptions.py`.
+  * **Authentication & Caller Identity (`06_Authentication_And_Caller_Identity.md`)**: Target service-level `X-API-Key` contract.
+  * **Semantic Versioning (`07_Semantic_Versioning.md`)**: Versioning approach per project maturity.
+  * **User Story Format (`08_User_Story_Format.md`)**: Standard user-story template with project roles.
+
+---
+
+### 4. `docs/ai_rag/` (AI, NLP & RAG Engine Engineering)
 * **Purpose**: Technical documentation and formulas for all Artificial Intelligence, embedding, and retrieval components.
 * **What will be stored here during development**:
   * **Embeddings (`embeddings.md`)**: Embedding model specifications (ParsBERT, Shafagh), vector dimensions (768-d), and L2 normalization formulas.
@@ -54,7 +70,7 @@ docs/
 
 ---
 
-### 4. `docs/database/` (Database & Storage Architecture)
+### 5. `docs/database/` (Database & Storage Architecture)
 * **Purpose**: Relational schema specifications, data dictionaries, and migration workflows.
 * **What will be stored here during development**:
   * **Schema & Models (`schema_and_models.md`)**: Legacy MSSQL table references, CTE query optimizations, and legacy `StatusID` to Persian domain status mappings.
@@ -62,7 +78,7 @@ docs/
 
 ---
 
-### 5. `docs/guides/` (Developer How-To Guides)
+### 6. `docs/guides/` (Developer How-To Guides)
 * **Purpose**: Step-by-step instructions for onboarding developers and common development tasks.
 * **What will be stored here during development**:
   * **Local Development (`local_development.md`)**: Environment setup (.venv, MS ODBC Driver 18, .env, running FastAPI and workers).
@@ -71,7 +87,7 @@ docs/
 
 ---
 
-### 6. `docs/deployment/` (DevOps, Configuration & Operations)
+### 7. `docs/deployment/` (DevOps, Configuration & Operations)
 * **Purpose**: Operational specifications for containerization, production deployment, and runtime settings.
 * **What will be stored here during development**:
   * **Docker & Compose (`docker_and_compose.md`)**: Multi-stage Docker build specifications and multi-container `docker-compose.yaml` setup.
@@ -79,7 +95,7 @@ docs/
 
 ---
 
-### 7. `docs/planning/` (Project Roadmaps & Migration Backlogs)
+### 8. `docs/planning/` (Project Roadmaps & Migration Backlogs)
 * **Purpose**: Project-level milestone tracking, legacy migration checklists, and backlog documentation.
 * **What is stored here**:
   * **Migration Backlog (`v2_unimplemented_features.md`)**: Complete checklist of features, database extractors, vector adapters, and use cases transitioning from legacy V1 to V2 Clean Architecture.
@@ -87,7 +103,14 @@ docs/
 
 ---
 
-### 8. `docs/notes/` (Temporary Collaborative Notes & Spikes)
+### 9. `docs/technology-stacks.md` (Current & Target Stack)
+* **Purpose**: Single reference of verified dependencies and planned technologies, with gaps flagged.
+* **What is stored here**:
+  * The de-facto library set from `requirements.txt` plus imported-but-missing packages (`openai`, `dependency-injector`) and target components (Qdrant, ARQ, MSSQL/Excel extractors).
+
+---
+
+### 10. `docs/notes/` (Temporary Collaborative Notes & Spikes)
 * **Purpose**: Short-term collaborative working notes, investigation logs, benchmark spikes, and meeting minutes.
 * **What will be stored here**:
   * Temporary research findings (e.g., `spike_parsbert_batch_encoding.md`, `meeting_notes_2026_09.md`).

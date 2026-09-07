@@ -64,6 +64,29 @@ class EmbeddingSettings(BaseSettings):
     EMBEDDING_DOCUMENT_PREFIX: str = ""
 
 
+class QdrantSettings(BaseSettings):
+    model_config = _base_config
+
+    QDRANT_HOST: str = "localhost"
+    QDRANT_PORT: int = 6333
+    QDRANT_GRPC_PORT: int = 6334
+    QDRANT_API_KEY: str | None = None
+    QDRANT_PREFER_GRPC: bool = False
+    QDRANT_HTTPS: bool = False
+
+    # ADR-001 Collection Names
+    QDRANT_SUGGESTION_COLLECTION: str = "tavanir_suggestion_v1"
+    QDRANT_REGULATORY_COLLECTION: str = "tavanir_regulatory_knowledge_v1"
+
+    # Search & Batch Defaults
+    QDRANT_BATCH_SIZE: int = 64
+    QDRANT_DENSE_VECTOR_NAME: str = "dense"
+    QDRANT_SPARSE_VECTOR_NAME: str = "sparse"
+    QDRANT_DENSE_SCORE_THRESHOLD: float | None = None
+    QDRANT_SPARSE_SCORE_THRESHOLD: float | None = None
+
+
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 embedding_settings = EmbeddingSettings()
+qdrant_settings = QdrantSettings()

@@ -31,3 +31,35 @@ class SuggestionStatus(Enum):
             if item.status_id == status_id:
                 return item
         raise InvalidSuggestionStatusError(f"Unknown suggestion status ID: {status_id}")
+
+
+class SuggestionChunkType(str, Enum):
+    TITLE = "title"
+    PROBLEM = "problem"
+    SOLUTION = "solution"
+    EVALUATION = "evaluation"
+
+
+class SourceType(Enum):
+    SUGGESTION = ("suggestion", 1)
+    STATUTE = ("statute", 2)
+
+
+class ChunkStatus(str, Enum):
+    ACTIVE = "active"
+    STAGING = "staging"
+    DEPRECATED = "deprecated"
+
+
+class RegulatoryDocumentType(str, Enum):
+    STATUTE = "statute"  # قانون
+    REGULATION = "regulation"  # آیین‌نامه
+    DIRECTIVE = "directive"  # بخشنامه
+    PROCEDURE = "procedure"  # دستورالعمل
+    GUIDELINE = "guideline"  # شیوه‌نامه / راهنما
+
+
+class AuthorityLevel(str, Enum):
+    BINDING = "binding"  # الزامی
+    GUIDANCE = "guidance"  # ارشادی / توصیه‌ای
+

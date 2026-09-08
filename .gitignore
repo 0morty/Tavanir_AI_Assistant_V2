@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Persistent Database Storage (Host Bind Mounts)
+/data/
+/data/qdrant_storage/

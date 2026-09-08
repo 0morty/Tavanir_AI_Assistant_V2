@@ -68,11 +68,12 @@ class QdrantSettings(BaseSettings):
     model_config = _base_config
 
     QDRANT_HOST: str = "localhost"
-    QDRANT_PORT: int = 6333
-    QDRANT_GRPC_PORT: int = 6334
+    QDRANT_PORT: int = 7333
+    QDRANT_GRPC_PORT: int = 7334
     QDRANT_API_KEY: str | None = None
     QDRANT_PREFER_GRPC: bool = False
     QDRANT_HTTPS: bool = False
+    QDRANT_STORAGE_PATH: str = "./data/qdrant_storage"
 
     # ADR-001 Collection Names
     QDRANT_SUGGESTION_COLLECTION: str = "tavanir_suggestion_v1"

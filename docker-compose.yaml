@@ -1,0 +1,25 @@
+services:
+  tavanir_qdrant:
+    image: qdrant/qdrant:v1.17.1
+    container_name: tavanir_qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-7333}:6333"
+      - "${QDRANT_GRPC_PORT:-7334}:6334"
+    volumes:
+      - ${QDRANT_STORAGE_PATH:-./data/qdrant_storage}:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    networks:
+      - tavanir_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -H \"api-key: $${QDRANT__SERVICE__API_KEY}\" http://localhost:6333/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  tavanir_network:
+    driver: bridge

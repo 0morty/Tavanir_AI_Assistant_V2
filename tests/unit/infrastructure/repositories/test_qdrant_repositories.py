@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.http.exceptions import UnexpectedResponse
 from src.infrastructure.db.repositories.qdrant.regulatory_repository import (
     QdrantRegulatoryRepository,
 )
@@ -56,6 +58,9 @@ def suggestion_repo(mock_qdrant_client: AsyncMock) -> QdrantSuggestionRepository
         sparse_vector_name="sparse",
         default_dense_dim=768,
         batch_size=2,
+        max_retries=3,
+        retry_base_delay=0.01,
+        retry_max_delay=0.05,
     )
 
 
@@ -68,6 +73,9 @@ def regulatory_repo(mock_qdrant_client: AsyncMock) -> QdrantRegulatoryRepository
         sparse_vector_name="sparse",
         default_dense_dim=768,
         batch_size=2,
+        max_retries=3,
+        retry_base_delay=0.01,
+        retry_max_delay=0.05,
     )
 
 
@@ -174,6 +182,55 @@ async def test_upsert_chunks_batch_slices_correctly(
     chunks = [sample_suggestion_chunk for _ in range(5)]
     await suggestion_repo.upsert_chunks_batch(chunks)
 
+    assert mock_qdrant_client.upsert.await_count == 3
+
+
+async def test_upsert_chunks_batch_retries_transient_error_and_succeeds(
+    suggestion_repo: QdrantSuggestionRepository,
+    mock_qdrant_client: AsyncMock,
+    sample_suggestion_chunk: Chunk[SuggestionChunkMetadata],
+) -> None:
+    # Attempt 1 raises ConnectError (transient), attempt 2 succeeds
+    mock_qdrant_client.upsert.side_effect = [
+        httpx.ConnectError("Connection refused by Qdrant"),
+        True,
+    ]
+    await suggestion_repo.upsert_chunks_batch([sample_suggestion_chunk])
+
+    assert mock_qdrant_client.upsert.await_count == 2
+
+
+async def test_upsert_chunks_batch_fails_fast_on_poison_pill(
+    suggestion_repo: QdrantSuggestionRepository,
+    mock_qdrant_client: AsyncMock,
+    sample_suggestion_chunk: Chunk[SuggestionChunkMetadata],
+) -> None:
+    # HTTP 400 is a poison-pill error; must fail fast without consuming retries
+    mock_qdrant_client.upsert.side_effect = UnexpectedResponse(
+        status_code=400,
+        reason_phrase="Bad Request",
+        content=b"Invalid vector dimension",
+        headers=httpx.Headers(),
+    )
+    with pytest.raises(VectorStorageError):
+        await suggestion_repo.upsert_chunks_batch([sample_suggestion_chunk])
+
+    # Exactly 1 attempt made (0 extra retries)
+    assert mock_qdrant_client.upsert.await_count == 1
+
+
+async def test_upsert_chunks_batch_exhausts_retries_and_raises_storage_error(
+    suggestion_repo: QdrantSuggestionRepository,
+    mock_qdrant_client: AsyncMock,
+    sample_suggestion_chunk: Chunk[SuggestionChunkMetadata],
+) -> None:
+    # Continuously raise TimeoutException
+    mock_qdrant_client.upsert.side_effect = httpx.TimeoutException("Read timeout")
+    with pytest.raises(VectorStorageError) as exc_info:
+        await suggestion_repo.upsert_chunks_batch([sample_suggestion_chunk])
+
+    assert "Failed to upsert batch" in str(exc_info.value)
+    # Exactly max_retries attempts made
     assert mock_qdrant_client.upsert.await_count == 3
 
 

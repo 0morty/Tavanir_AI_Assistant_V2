@@ -84,6 +84,9 @@ class Container(containers.DeclarativeContainer):
             batch_size=qdrant_settings.QDRANT_BATCH_SIZE,
             dense_score_threshold=qdrant_settings.QDRANT_DENSE_SCORE_THRESHOLD,
             sparse_score_threshold=qdrant_settings.QDRANT_SPARSE_SCORE_THRESHOLD,
+            max_retries=qdrant_settings.QDRANT_MAX_RETRIES,
+            retry_base_delay=qdrant_settings.QDRANT_RETRY_BASE_DELAY,
+            retry_max_delay=qdrant_settings.QDRANT_RETRY_MAX_DELAY,
         )
     )
 
@@ -99,5 +102,8 @@ class Container(containers.DeclarativeContainer):
             batch_size=qdrant_settings.QDRANT_BATCH_SIZE,
             dense_score_threshold=qdrant_settings.QDRANT_DENSE_SCORE_THRESHOLD,
             sparse_score_threshold=qdrant_settings.QDRANT_SPARSE_SCORE_THRESHOLD,
+            max_retries=qdrant_settings.QDRANT_MAX_RETRIES,
+            retry_base_delay=qdrant_settings.QDRANT_RETRY_BASE_DELAY,
+            retry_max_delay=qdrant_settings.QDRANT_RETRY_MAX_DELAY,
         )
     )

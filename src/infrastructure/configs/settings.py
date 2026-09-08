@@ -86,6 +86,11 @@ class QdrantSettings(BaseSettings):
     QDRANT_DENSE_SCORE_THRESHOLD: float | None = None
     QDRANT_SPARSE_SCORE_THRESHOLD: float | None = None
 
+    # Slice Retry Policy
+    QDRANT_MAX_RETRIES: int = 3
+    QDRANT_RETRY_BASE_DELAY: float = 0.5
+    QDRANT_RETRY_MAX_DELAY: float = 8.0
+
 
 core_settings = CoreSettings()
 llm_settings = LLMSettings()

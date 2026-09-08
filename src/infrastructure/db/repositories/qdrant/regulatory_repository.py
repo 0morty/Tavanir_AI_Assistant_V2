@@ -45,6 +45,9 @@ class QdrantRegulatoryRepository(
         batch_size: int = qdrant_settings.QDRANT_BATCH_SIZE,
         dense_score_threshold: float | None = qdrant_settings.QDRANT_DENSE_SCORE_THRESHOLD,
         sparse_score_threshold: float | None = qdrant_settings.QDRANT_SPARSE_SCORE_THRESHOLD,
+        max_retries: int = qdrant_settings.QDRANT_MAX_RETRIES,
+        retry_base_delay: float = qdrant_settings.QDRANT_RETRY_BASE_DELAY,
+        retry_max_delay: float = qdrant_settings.QDRANT_RETRY_MAX_DELAY,
     ) -> None:
         super().__init__(
             client=client,
@@ -55,6 +58,9 @@ class QdrantRegulatoryRepository(
             batch_size=batch_size,
             dense_score_threshold=dense_score_threshold,
             sparse_score_threshold=sparse_score_threshold,
+            max_retries=max_retries,
+            retry_base_delay=retry_base_delay,
+            retry_max_delay=retry_max_delay,
         )
 
     def _build_payload(self, chunk: RegulatoryChunk) -> dict[str, Any]:

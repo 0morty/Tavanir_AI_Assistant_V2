@@ -6,7 +6,7 @@ Early-stage FastAPI project (Tavanir AI Assistant V2) on a Clean Architecture sc
 - Docs (`docs/architecture/clean_architecture.md`, `docs/architecture/high_level_architecture.md`, `docs/index.md`) describe the **target** design and name the domain "JadooChatRAG". Do not assume they match the code — most referenced files are empty placeholders. `high_level_architecture.md` marks each part `[implemented]`/`[planned]`; `docs/planning/v2_unimplemented_features.md` is the authoritative backlog.
 - API wire contracts live in `docs/contracts/` (JSON:API envelope, camelCase external / snake_case internal mapping, internal error-code dictionary, API-key auth). Follow them when building the HTTP layer; auth is a **target** contract only — `src/presentation/security.py` is empty. Error codes map to real exceptions in `src/application/exceptions.py` / `src/domain/exceptions.py`.
 - `docs/technology-stacks.md` lists verified deps (`[pinned]`/`[gap]`/`[planned]` legend) and confirms the `requirements.txt` gaps below. Docs are English; Persian domain terms (suggestion statuses, context titles) appear inline where the code uses them.
-- Implemented so far: domain entities/enums/exceptions (`src/domain/`), application DTOs/exceptions + `IDenseEmbedder` port (`src/application/`), and infrastructure: settings + TEI/vLLM OpenAI-compatible client config, `BaseOpenAIService`, `OpenAIDenseEmbedder`, `LLMClientRegistry`, and DI wiring in `src/containers.py`.
+- Implemented so far: domain entities/enums/exceptions (`src/domain/`), application DTOs/exceptions + `IDenseEmbedder` port + prompt-builder architecture (`src/application/prompt_architecture/`), and infrastructure: settings + TEI/vLLM OpenAI-compatible client config, `BaseOpenAIService`, `OpenAIDenseEmbedder`, `LLMClientRegistry`, and DI wiring in `src/containers.py`.
 - Empty/unwired placeholders: `src/main.py`, `src/worker.py`, everything under `src/presentation/` (lifespan, security, routers, schemas), `src/infrastructure/db/`, repositories, use cases, all `tests/`. There is no runnable entrypoint yet — `uvicorn src.main:app` cannot work.
 - `docs/planning/v2_unimplemented_features.md` is the authoritative backlog of what still needs building.
 
@@ -60,6 +60,7 @@ The LLM / Generation API is responsible for everything that happens **after** re
 |---|---|
 | `src/application/dtos.py` | `AnalyzeSuggestionResponse` — the output contract |
 | `src/application/exceptions.py` | LLM exception hierarchy only: `LLMBaseError`, `LLMConfigurationError`, `LLMConnectionError`, `LLMAPIError`, `LLMAuthenticationError` (lines 55-85). Do NOT touch `ApplicationError`, `ApplicationAPIError`, or any Embedder exception. |
+| `src/application/prompt_architecture/` | Entire package — `PromptSectionType`, `PromptSection` base class, concrete sections (`RoleSection`, `HistorySection`, `ChunksSection`, `SystemInputSection`, `UserInputSection`, `OutputFormatSection`), and `PromptBuilder` |
 | `src/infrastructure/configs/settings.py` | `LLMSettings` class (lines 30-52) and `llm_settings` singleton. Do NOT touch `CoreSettings`, `EmbeddingSettings`, or `embedding_settings`. |
 | `src/infrastructure/configs/llm_provider_configs.py` | Entire file — `LLMProvider`, `APIKeyProvider`, `AsyncOpenAIClientFactory` |
 | `src/infrastructure/services/base_openai_service.py` | Entire file — shared base for OpenAI-compatible error handling |
@@ -69,8 +70,8 @@ The LLM / Generation API is responsible for everything that happens **after** re
 
 | File | Why shared |
 |---|---|
-| `src/domain/entities.py` | `Suggestion`, `SuggestionContent`, `CommitteeEvaluation`, `StatuteDocument`, `ShamsiDate` — consumed by Generation but owned by Domain |
-| `src/domain/enums.py` | `SuggestionStatus` — used across all layers |
+| `src/domain/entities.py` | `Suggestion`, `SuggestionContent`, `CommitteeEvaluation`, `StatuteDocument`, `ShamsiDate`, `Chunk`, `HistoryMessage` — consumed by Generation but owned by Domain |
+| `src/domain/enums.py` | `SuggestionStatus`, `HistoryRole` — used across all layers |
 | `src/domain/exceptions.py` | Base `DomainError` and subtypes |
 | `src/containers.py` | DI composition root — may add Generation providers but must NOT remove or restructure existing embedder providers |
 
@@ -79,13 +80,11 @@ The LLM / Generation API is responsible for everything that happens **after** re
 | Planned File | Purpose |
 |---|---|
 | `src/application/interfaces/i_llm_client.py` | Application-layer port for LLM invocation |
-| `src/application/interfaces/i_prompt_builder.py` | Application-layer port for prompt construction |
 | `src/application/interfaces/i_output_parser.py` | Application-layer port for parsing/validating LLM output |
 | `src/application/dtos.py` (extend) | Generation input DTOs: `GenerationInput`, `CurrentSuggestionInput`, `SimilarSuggestionInput`, `RegulationInput` |
 | `src/application/use_cases/analyze_suggestion_use_case.py` | Generation orchestration use case |
 | `src/infrastructure/configs/settings.py` (extend) | `GenerationSettings` — temperature, max_tokens, model name, token budgets |
 | `src/infrastructure/services/llm/openai_llm_client.py` | Concrete LLM client adapter implementing `ILLMClient` |
-| `src/infrastructure/services/llm/prompt_builder.py` | Concrete prompt builder implementing `IPromptBuilder` |
 | `src/infrastructure/services/llm/output_parser.py` | Concrete output parser implementing `IOutputParser` |
 | `src/infrastructure/services/llm/templates/suggestion_analysis_system.jinja2` | System prompt template |
 | `src/infrastructure/services/llm/templates/suggestion_analysis_user.jinja2` | User prompt template |

@@ -19,5 +19,7 @@ class HistorySection(PromptSection):
         return "History of previous interactions:"
 
     def body(self) -> str:
-        rendered = [f"{message.role}: {message.content}" for message in self._messages]
+        rendered = [
+            f"{message.role.value}: {message.content}" for message in self._messages
+        ]
         return self.separator.join(rendered)

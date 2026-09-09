@@ -1,4 +1,5 @@
 from src.domain.entities import Chunk, HistoryMessage
+from src.domain.enums import HistoryRole
 from src.application.prompt_architecture.chunks_section import ChunksSection
 from src.application.prompt_architecture.history_section import HistorySection
 from src.application.prompt_architecture.output_format_section import OutputFormatSection
@@ -13,6 +14,7 @@ __all__ = [
     "Chunk",
     "ChunksSection",
     "HistoryMessage",
+    "HistoryRole",
     "HistorySection",
     "OutputFormatSection",
     "PromptBuilder",

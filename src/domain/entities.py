@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.domain.enums import SuggestionStatus
+from src.domain.enums import HistoryRole, SuggestionStatus
 from src.domain.exceptions import InvalidShamsiDateFormatError
 
 
@@ -68,7 +68,7 @@ class StatuteDocument:
 
 @dataclass(frozen=True)
 class HistoryMessage:
-    role: str
+    role: HistoryRole
     content: str
 
 

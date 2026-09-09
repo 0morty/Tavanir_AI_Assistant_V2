@@ -60,8 +60,16 @@ Models one entry in conversation history, carrying the sender role and the messa
 
 | Field | Type | Description |
 |---|---|---|
-| `role` | `str` | Sender role (e.g. `user`, `assistant`, `system`) |
+| `role` | `HistoryRole` | Sender role — OpenAI-compatible (`USER` → `"user"`, `SYSTEM` → `"system"`) |
 | `content` | `str` | The message text |
+
+### `HistoryRole` (enum, `src/domain/enums.py`)
+
+Sender-role vocabulary for history messages, stored alongside the OpenAI role string as its value:
+
+- `HistoryRole.USER` → `"user"`
+- `HistoryRole.SYSTEM` → `"system"`
+- `HistoryRole.ASSISTANT` → `"assistant"`
 
 ### `PromptSection` (abstract base class, `src/application/prompt_architecture/prompt_section.py`)
 

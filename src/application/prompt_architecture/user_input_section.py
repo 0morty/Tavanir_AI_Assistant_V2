@@ -1,5 +1,5 @@
-from src.domain.prompt_architecture.prompt_section import PromptSection
-from src.domain.prompt_architecture.section_type import PromptSectionType
+from src.application.prompt_architecture.prompt_section import PromptSection
+from src.application.prompt_architecture.section_type import PromptSectionType
 
 
 class UserInputSection(PromptSection):

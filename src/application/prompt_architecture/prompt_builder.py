@@ -1,6 +1,6 @@
 from typing import Iterable
 
-from src.domain.prompt_architecture.prompt_section import PromptSection
+from src.application.prompt_architecture.prompt_section import PromptSection
 
 
 class PromptBuilder:

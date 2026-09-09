@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from src.domain.prompt_architecture.section_type import PromptSectionType
+from src.application.prompt_architecture.section_type import PromptSectionType
 
 
 class PromptSection(ABC):

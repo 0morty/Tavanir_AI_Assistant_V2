@@ -11,28 +11,28 @@ This document describes the prompt-builder feature: a generic, extensible set of
 
 ## Location
 
-The architecture lives in the `src/domain/prompt_architecture/` package, with the `Chunk` and `HistoryMessage` entities residing in `src/domain/entities.py` alongside the other domain entities:
+The architecture is split across layers: the data entities (`Chunk`, `HistoryMessage`) live in the Domain layer alongside the other domain entities, while the section contracts, concrete sections, and the builder live in the Application layer:
 
 ```
 src/domain/entities.py          # Chunk, HistoryMessage (entities)
-src/domain/prompt_architecture/
+src/application/prompt_architecture/
 ├── __init__.py
-├── section_type.py        # PromptSectionType (enum)
-├── prompt_section.py      # PromptSection (abstract base class)
-├── role_section.py        # RoleSection
-├── history_section.py     # HistorySection
-├── chunks_section.py      # ChunksSection (RAG context)
-├── system_input_section.py   # SystemInputSection
-├── user_input_section.py     # UserInputSection
-├── output_format_section.py  # OutputFormatSection
-└── prompt_builder.py      # PromptBuilder
+├── section_type.py             # PromptSectionType (enum)
+├── prompt_section.py           # PromptSection (abstract base class)
+├── role_section.py             # RoleSection
+├── history_section.py          # HistorySection
+├── chunks_section.py           # ChunksSection (RAG context)
+├── system_input_section.py     # SystemInputSection
+├── user_input_section.py       # UserInputSection
+├── output_format_section.py    # OutputFormatSection
+└── prompt_builder.py           # PromptBuilder
 ```
 
-The package stays pure stdlib, preserving the Clean Architecture domain rules.
+The Application layer depends inward on the Domain: prompt sections consume `Chunk`/`HistoryMessage` and render them for the LLM. The package stays pure stdlib.
 
 ## Entities
 
-### `PromptSectionType` (enum, `section_type.py`)
+### `PromptSectionType` (enum, `src/application/prompt_architecture/section_type.py`)
 
 First-class section labels, in natural prompt order:
 
@@ -63,7 +63,7 @@ Models one entry in conversation history, carrying the sender role and the messa
 | `role` | `str` | Sender role (e.g. `user`, `assistant`, `system`) |
 | `content` | `str` | The message text |
 
-### `PromptSection` (abstract base class, `prompt_section.py`)
+### `PromptSection` (abstract base class, `src/application/prompt_architecture/prompt_section.py`)
 
 Defines the **contract** and the **general rendering algorithm** for every section:
 
@@ -92,14 +92,14 @@ The base class holds **no** section-specific implementation; subclasses override
 
 One concrete section per first-class section type, each owning its `body()`:
 
-- **`RoleSection`** (`role_section.py`) — `ROLE`. Assigns the model its role.
-- **`HistorySection`** (`history_section.py`) — `HISTORY`. Renders `HistoryMessage` turns as the body (each as `role: content`), framed by `pre_context = "History of previous interactions:"`.
-- **`ChunksSection`** (`chunks_section.py`) — `CHUNKS`. Renders RAG context as numbered `Chunk N:` blocks, framed by `pre_context = "Relevant context chunks:"`.
-- **`SystemInputSection`** (`system_input_section.py`) — `SYSTEM_INPUT`. System-level input passed to the model.
-- **`UserInputSection`** (`user_input_section.py`) — `USER_INPUT`. User-provided input passed to the model.
-- **`OutputFormatSection`** (`output_format_section.py`) — `OUTPUT_FORMAT`. Describes the expected output format.
+- **`RoleSection`** (`src/application/prompt_architecture/role_section.py`) — `ROLE`. Assigns the model its role.
+- **`HistorySection`** (`src/application/prompt_architecture/history_section.py`) — `HISTORY`. Renders `HistoryMessage` turns as the body (each as `role: content`), framed by `pre_context = "History of previous interactions:"`.
+- **`ChunksSection`** (`src/application/prompt_architecture/chunks_section.py`) — `CHUNKS`. Renders RAG context as numbered `Chunk N:` blocks, framed by `pre_context = "Relevant context chunks:"`.
+- **`SystemInputSection`** (`src/application/prompt_architecture/system_input_section.py`) — `SYSTEM_INPUT`. System-level input passed to the model.
+- **`UserInputSection`** (`src/application/prompt_architecture/user_input_section.py`) — `USER_INPUT`. User-provided input passed to the model.
+- **`OutputFormatSection`** (`src/application/prompt_architecture/output_format_section.py`) — `OUTPUT_FORMAT`. Describes the expected output format.
 
-### `PromptBuilder` (`prompt_builder.py`)
+### `PromptBuilder` (`src/application/prompt_architecture/prompt_builder.py`)
 
 Composes `PromptSection` instances in order and renders the full prompt:
 

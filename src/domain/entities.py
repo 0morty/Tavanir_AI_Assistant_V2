@@ -1,6 +1,5 @@
 import re
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 from src.domain.enums import SuggestionStatus
@@ -64,7 +63,7 @@ class StatuteDocument:
 # endregion
 
 
-# region Prompt Architecture Entities
+# region Prompt Architecture
 
 
 @dataclass
@@ -73,40 +72,6 @@ class Chunk:
     title: str
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
-
-
-class PromptSectionType(Enum):
-    ROLE = "ROLE"
-    PRE_CONTEXT = "PRE-CONTEXT"
-    CHUNKS = "CHUNKS"
-    POST_CONTEXT = "POST-CONTEXT"
-    SYSTEM_INPUT = "SYSTEM-INPUT"
-    USER_INPUT = "USER-INPUT"
-    OUTPUT_FORMAT = "OUTPUT-FORMAT"
-
-
-@dataclass
-class PromptSection:
-    section_type: PromptSectionType
-    content: str | list[Chunk]
-    separator: str = "\n\n"
-
-
-@dataclass
-class PromptBuildContext:
-    sections: list[PromptSection] = field(default_factory=list)
-
-    def render(self) -> str:
-        parts: list[str] = []
-        for section in self.sections:
-            if isinstance(section.content, list):
-                rendered_chunks = []
-                for i, chunk in enumerate(section.content, 1):
-                    rendered_chunks.append(f"Chunk {i}:\n{chunk.content}")
-                parts.append("\n\n".join(rendered_chunks))
-            else:
-                parts.append(section.content)
-        return section.separator.join(parts)
 
 
 # endregion

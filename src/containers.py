@@ -8,10 +8,17 @@ from src.application.interfaces.i_dense_embedder import IDenseEmbedder
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
     ISuggestionVectorRepository,
+    IUnitOfWork,
 )
 from src.infrastructure.configs.settings import (
+    db_settings,
     embedding_settings,
     qdrant_settings,
+)
+from src.infrastructure.db import (
+    SqlUnitOfWork,
+    create_db_engine,
+    create_session_factory,
 )
 from src.infrastructure.db.repositories import (
     QdrantRegulatoryRepository,
@@ -106,4 +113,13 @@ class Container(containers.DeclarativeContainer):
             retry_base_delay=qdrant_settings.QDRANT_RETRY_BASE_DELAY,
             retry_max_delay=qdrant_settings.QDRANT_RETRY_MAX_DELAY,
         )
+    )
+
+    # 7. Relational Database Engine & Session Factory
+    db_engine = providers.Singleton(create_db_engine, url=db_settings.POSTGRES_URL)
+    db_session_factory = providers.Singleton(create_session_factory, engine=db_engine)
+
+    # 8. Unit of Work Factory
+    unit_of_work: providers.Provider[IUnitOfWork] = providers.Factory(
+        SqlUnitOfWork, session_factory=db_session_factory
     )

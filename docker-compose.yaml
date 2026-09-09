@@ -20,6 +20,27 @@ services:
       timeout: 5s
       retries: 5
 
+  tavanir_postgres:
+    image: postgres:16-alpine
+    container_name: tavanir_postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-7432}:5432"
+    volumes:
+      - ${POSTGRES_STORAGE_PATH:-./data/postgres_storage}:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tavanir_db}
+    networks:
+      - tavanir_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME:-postgres} -d ${POSTGRES_DB:-tavanir_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 networks:
   tavanir_network:
     driver: bridge
+

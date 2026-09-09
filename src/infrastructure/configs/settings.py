@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -92,7 +93,38 @@ class QdrantSettings(BaseSettings):
     QDRANT_RETRY_MAX_DELAY: float = 8.0
 
 
+class DBSettings(BaseSettings):
+    model_config = _base_config
+
+    POSTGRES_SERVER: str = "localhost"
+    POSTGRES_PORT: int = 7432
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_USERNAME: str = "postgres"
+    POSTGRES_DB: str = "tavanir_db"
+    POSTGRES_STORAGE_PATH: str = "./data/postgres_storage"
+
+    # Pool Settings
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: float = 30.0
+    DB_POOL_RECYCLE: int = 1800
+    DB_POOL_PRE_PING: bool = True
+
+    @property
+    def POSTGRES_URL(self) -> str:  # noqa: N802
+        user = quote_plus(self.POSTGRES_USERNAME)
+        password = quote_plus(self.POSTGRES_PASSWORD)
+        return f"postgresql+asyncpg://{user}:{password}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    @property
+    def POSTGRES_URL_SYNC(self) -> str:  # noqa: N802
+        user = quote_plus(self.POSTGRES_USERNAME)
+        password = quote_plus(self.POSTGRES_PASSWORD)
+        return f"postgresql+psycopg2://{user}:{password}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 embedding_settings = EmbeddingSettings()
 qdrant_settings = QdrantSettings()
+db_settings = DBSettings()

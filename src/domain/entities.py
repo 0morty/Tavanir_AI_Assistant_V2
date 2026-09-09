@@ -66,6 +66,12 @@ class StatuteDocument:
 # region Prompt Architecture
 
 
+@dataclass(frozen=True)
+class HistoryMessage:
+    role: str
+    content: str
+
+
 @dataclass
 class Chunk:
     id: str

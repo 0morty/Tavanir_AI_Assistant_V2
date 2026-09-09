@@ -11,10 +11,10 @@ This document describes the prompt-builder feature: a generic, extensible set of
 
 ## Location
 
-The architecture lives in the `src/domain/prompt_architecture/` package, with the `Chunk` entity residing in `src/domain/entities.py` alongside the other domain entities:
+The architecture lives in the `src/domain/prompt_architecture/` package, with the `Chunk` and `HistoryMessage` entities residing in `src/domain/entities.py` alongside the other domain entities:
 
 ```
-src/domain/entities.py          # Chunk (entity)
+src/domain/entities.py          # Chunk, HistoryMessage (entities)
 src/domain/prompt_architecture/
 ├── __init__.py
 ├── section_type.py        # PromptSectionType (enum)
@@ -54,6 +54,15 @@ A `Suggestion`, `StatuteDocument`, or any future document type is mapped into a 
 | `content` | `str` | The text content |
 | `metadata` | `dict[str, Any]` | Optional source-specific data (status, similarity, citation, ...) |
 
+### `HistoryMessage` (a conversation turn, `src/domain/entities.py`)
+
+Models one entry in conversation history, carrying the sender role and the message text.
+
+| Field | Type | Description |
+|---|---|---|
+| `role` | `str` | Sender role (e.g. `user`, `assistant`, `system`) |
+| `content` | `str` | The message text |
+
 ### `PromptSection` (abstract base class, `prompt_section.py`)
 
 Defines the **contract** and the **general rendering algorithm** for every section:
@@ -70,6 +79,7 @@ Defines the **contract** and the **general rendering algorithm** for every secti
 
 | Member | Kind | Responsibility |
 |---|---|---|
+| `separator` | attribute (via `__init__`, default `"\n\n"`) | Delimiter used when joining the section parts |
 | `section_type` | abstract property | First-class identity of the section |
 | `pre_context` | property (default `""`) | Framing before the body |
 | `post_context` | property (default `""`) | Framing after the body |
@@ -83,7 +93,7 @@ The base class holds **no** section-specific implementation; subclasses override
 One concrete section per first-class section type, each owning its `body()`:
 
 - **`RoleSection`** (`role_section.py`) — `ROLE`. Assigns the model its role.
-- **`HistorySection`** (`history_section.py`) — `HISTORY`. Renders prior interactions as the body, framed by `pre_context = "History of previous interactions:"`.
+- **`HistorySection`** (`history_section.py`) — `HISTORY`. Renders `HistoryMessage` turns as the body (each as `role: content`), framed by `pre_context = "History of previous interactions:"`.
 - **`ChunksSection`** (`chunks_section.py`) — `CHUNKS`. Renders RAG context as numbered `Chunk N:` blocks, framed by `pre_context = "Relevant context chunks:"`.
 - **`SystemInputSection`** (`system_input_section.py`) — `SYSTEM_INPUT`. System-level input passed to the model.
 - **`UserInputSection`** (`user_input_section.py`) — `USER_INPUT`. User-provided input passed to the model.

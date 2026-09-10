@@ -1,0 +1,98 @@
+# Vector configuration for Tavanir AI Assistant V2
+# Collects Docker logs, parses Structlog JSON, routes errors to permanent retention stream,
+# and buffers on-disk for zero log loss.
+
+sources:
+  docker_logs:
+    type: docker_logs
+    exclude_containers:
+      - tavanir_vector
+      - tavanir_openobserve
+
+transforms:
+  parse_logs:
+    type: remap
+    inputs:
+      - docker_logs
+    source: |
+      # Clean up container name (remove leading slash)
+      .container_name = replace(to_string!(.container_name), r'^/', "")
+
+      # Parse Structlog JSON if present, else preserve raw text
+      parsed = parse_json(.message) ?? null
+      if parsed != null {
+        ., _ = merge(., parsed)
+      } else {
+        .event = .message
+      }
+
+      # Smart log level classification for plain-text logs (PostgreSQL, Qdrant, etc.)
+      if !exists(.level) {
+        msg = to_string!(.message)
+        if match(msg, r'(?i)\b(FATAL|PANIC|CRITICAL)\b') {
+          .level = "critical"
+        } else if match(msg, r'(?i)\b(ERROR)\b') {
+          .level = "error"
+        } else if match(msg, r'(?i)\b(WARN|WARNING)\b') {
+          .level = "warn"
+        } else if match(msg, r'(?i)\b(INFO|DEBUG|LOG|NOTICE)\b') {
+          .level = "info"
+        } else if .stream == "stderr" {
+          .level = "error"
+        } else {
+          .level = "info"
+        }
+      } else {
+        .level = downcase(to_string!(.level))
+      }
+
+  route_by_level:
+    type: route
+    inputs:
+      - parse_logs
+    route:
+      errors: '.level == "error" || .level == "critical" || .level == "fatal"'
+      general: '!(.level == "error" || .level == "critical" || .level == "fatal")'
+
+sinks:
+  openobserve_errors:
+    type: http
+    inputs:
+      - route_by_level.errors
+    uri: "http://tavanir_openobserve:5080/api/default/error_logs/_json"
+    method: post
+    auth:
+      strategy: basic
+      user: "${OPENOBSERVE_ROOT_USER_EMAIL:-admin@tavanir.local}"
+      password: "${OPENOBSERVE_ROOT_USER_PASSWORD:-TavanirAdmin2026!}"
+    compression: gzip
+    encoding:
+      codec: json
+      timestamp_format: rfc3339
+    buffer:
+      type: disk
+      max_size: 536870912
+    healthcheck:
+      enabled: true
+      uri: "http://tavanir_openobserve:5080/healthz"
+
+  openobserve_general:
+    type: http
+    inputs:
+      - route_by_level.general
+    uri: "http://tavanir_openobserve:5080/api/default/general_logs/_json"
+    method: post
+    auth:
+      strategy: basic
+      user: "${OPENOBSERVE_ROOT_USER_EMAIL:-admin@tavanir.local}"
+      password: "${OPENOBSERVE_ROOT_USER_PASSWORD:-TavanirAdmin2026!}"
+    compression: gzip
+    encoding:
+      codec: json
+      timestamp_format: rfc3339
+    buffer:
+      type: disk
+      max_size: 536870912
+    healthcheck:
+      enabled: true
+      uri: "http://tavanir_openobserve:5080/healthz"

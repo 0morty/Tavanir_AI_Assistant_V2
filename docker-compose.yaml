@@ -14,8 +14,10 @@ services:
       QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
     networks:
       - tavanir_network
+    depends_on:
+      - tavanir_vector
     healthcheck:
-      test: ["CMD-SHELL", "curl -f -H \"api-key: $${QDRANT__SERVICE__API_KEY}\" http://localhost:6333/readyz || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333 && echo -e \"GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && cat <&3 | grep -q \"200 OK\"'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -34,11 +36,47 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tavanir_db}
     networks:
       - tavanir_network
+    depends_on:
+      - tavanir_vector
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME:-postgres} -d ${POSTGRES_DB:-tavanir_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  tavanir_openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:v0.92.2
+    container_name: tavanir_openobserve
+    restart: unless-stopped
+    ports:
+      - "${OPENOBSERVE_PORT:-5080}:5080"
+    volumes:
+      - ${OPENOBSERVE_STORAGE_PATH:-./data/openobserve_storage}:/data
+    environment:
+      ZO_ROOT_USER_EMAIL: ${OPENOBSERVE_ROOT_USER_EMAIL:-admin@tavanir.local}
+      ZO_ROOT_USER_PASSWORD: ${OPENOBSERVE_ROOT_USER_PASSWORD:-TavanirAdmin2026!}
+      ZO_DATA_DIR: /data
+      ZO_TELEMETRY: "false"
+      ZO_COMPACT_DATA_RETENTION_DAYS: 30
+    networks:
+      - tavanir_network
+
+  tavanir_vector:
+    image: timberio/vector:0.43.0-alpine
+    container_name: tavanir_vector
+    restart: unless-stopped
+    user: "0:0"
+    volumes:
+      - ./configs/vector.yaml:/etc/vector/vector.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${VECTOR_DATA_PATH:-./data/vector_data}:/var/lib/vector
+    environment:
+      OPENOBSERVE_ROOT_USER_EMAIL: ${OPENOBSERVE_ROOT_USER_EMAIL:-admin@tavanir.local}
+      OPENOBSERVE_ROOT_USER_PASSWORD: ${OPENOBSERVE_ROOT_USER_PASSWORD:-TavanirAdmin2026!}
+    networks:
+      - tavanir_network
+    depends_on:
+      - tavanir_openobserve
 
 networks:
   tavanir_network:

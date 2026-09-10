@@ -69,7 +69,7 @@ class BaseSqlRepository(Generic[EntityT, ModelT]):
                 val = getattr(entity, field.name)
                 if hasattr(self._model_class, field.name):
                     fields[field.name] = val
-            return cast(ModelT, self._model_class(**fields))
+            return self._model_class(**fields)
 
         raise NotImplementedError(
             f"Cannot auto-map non-dataclass entity to model: {type(entity)}"

@@ -123,8 +123,17 @@ class DBSettings(BaseSettings):
         return f"postgresql+psycopg2://{user}:{password}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
 
+class LoggingSettings(BaseSettings):
+    model_config = _base_config
+
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "console"  # "console" for dev, "json" for docker/prod
+    ENVIRONMENT: str = "development"
+
+
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 embedding_settings = EmbeddingSettings()
 qdrant_settings = QdrantSettings()
 db_settings = DBSettings()
+logging_settings = LoggingSettings()

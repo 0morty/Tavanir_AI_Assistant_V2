@@ -1,7 +1,33 @@
 class DomainError(Exception):
-    """Base exception for all domain-level business rule violations."""
+    """
+    Base exception for all domain-level business rule violations.
 
-    pass
+    Pointer Concept and Responsibility:
+    -----------------------------------
+    A 'pointer' is an RFC 6901 JSON Pointer string (e.g., '/data/currentProblem',
+    '/data/0/status', '/headers/X-API-Key') that identifies the exact location
+    within the caller's request payload or headers that triggered the error.
+
+    Responsibility:
+    - Provides an unambiguous coordinate for upstream clients and frontends.
+    - Enables client applications (e.g., React / Blazor forms) to automatically
+      pinpoint and highlight the offending input field in red without parsing text messages.
+    - In batch operations, indicates the specific array index (e.g., '/data/3') that failed.
+    - Single-request internal errors: When an error is not caused by the caller's input
+      (e.g., server crash or provider timeout), pointer is None and the 'source' field
+      is completely omitted from the wire response.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        pointer: str | None = None,
+        field_name: str | None = None,
+    ):
+        super().__init__(message)
+        self.message = message
+        self.pointer = pointer
+        self.field_name = field_name
 
 
 class InvalidShamsiDateFormatError(DomainError):
@@ -62,4 +88,3 @@ class ParentChildIntegrityError(DomainError):
 
 
 # endregion
-

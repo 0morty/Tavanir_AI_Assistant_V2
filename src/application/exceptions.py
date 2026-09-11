@@ -1,7 +1,44 @@
 class ApplicationError(Exception):
-    """Base exception for all application-level errors."""
+    """
+    Base exception for all application-level errors.
 
-    pass
+    Pointer Concept and Responsibility:
+    -----------------------------------
+    A 'pointer' is an RFC 6901 JSON Pointer string (e.g., '/data/currentProblem',
+    '/data/0/status', '/headers/X-API-Key') that identifies the exact location
+    within the caller's request payload or headers that triggered the error.
+
+    Responsibility:
+    - Provides an unambiguous coordinate for upstream clients and frontends.
+    - Enables client applications to pinpoint and highlight the offending input field.
+    - In batch operations, indicates the specific array index (e.g., '/data/3') that failed.
+    - Single-request internal errors: When an error is not caused by caller input
+      (e.g., downstream provider connection failure), pointer is None and 'source'
+      is completely omitted from the wire response.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        pointer: str | None = None,
+        field_name: str | None = None,
+    ):
+        super().__init__(message)
+        self.message = message
+        self.pointer = pointer
+        self.field_name = field_name
+
+
+class AggregateApplicationError(ApplicationError):
+    """Container for multiple errors occurring in batch or multi-stage operations."""
+
+    def __init__(
+        self,
+        errors: list[Exception],
+        message: str = "Multiple errors occurred",
+    ):
+        super().__init__(message=message)
+        self.errors = errors
 
 
 class ApplicationAPIError(ApplicationError):
@@ -12,8 +49,10 @@ class ApplicationAPIError(ApplicationError):
         message: str,
         status_code: int | None = None,
         retry_after: float | None = None,
+        pointer: str | None = None,
+        field_name: str | None = None,
     ):
-        super().__init__(message)
+        super().__init__(message=message, pointer=pointer, field_name=field_name)
         self.status_code = status_code
         self.retry_after = retry_after
 

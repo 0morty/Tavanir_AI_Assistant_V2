@@ -131,9 +131,17 @@ class LoggingSettings(BaseSettings):
     ENVIRONMENT: str = "development"
 
 
+class SecuritySettings(BaseSettings):
+    API_KEY_NAME: str = "X-API-Key"
+    API_KEY: str = "tavanir_default_secret_api_key_2026"
+
+    model_config = _base_config
+
+
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 embedding_settings = EmbeddingSettings()
 qdrant_settings = QdrantSettings()
 db_settings = DBSettings()
 logging_settings = LoggingSettings()
+security_settings = SecuritySettings()

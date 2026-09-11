@@ -123,3 +123,13 @@ class LLMAuthenticationError(LLMBaseError):
 
 
 # endregion
+
+
+# region Text Processing Exceptions
+class TextNormalizationError(ApplicationError):
+    """Raised when Persian text cleaning or normalization fails."""
+
+    pass
+
+
+# endregion

@@ -5,6 +5,7 @@ from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
 
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
+from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
     ISuggestionVectorRepository,
@@ -28,6 +29,9 @@ from src.infrastructure.services.embeddings.openai_dense_embedder import (
     OpenAIDenseEmbedder,
 )
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
+from src.infrastructure.services.text_processing.shekar_text_normalizer import (
+    ShekarTextNormalizer,
+)
 
 
 async def init_client_registry() -> AsyncGenerator[LLMClientRegistry, None]:
@@ -67,7 +71,12 @@ class Container(containers.DeclarativeContainer):
         document_prefix=embedding_settings.EMBEDDING_DOCUMENT_PREFIX,
     )
 
-    # 4. Qdrant Client (Singleton)
+    # 4. Text Normalizer Service
+    text_normalizer: providers.Provider[ITextNormalizer] = providers.Singleton(
+        ShekarTextNormalizer
+    )
+
+    # 5. Qdrant Client (Singleton)
     qdrant_client: providers.Provider[AsyncQdrantClient] = providers.Singleton(
         AsyncQdrantClient,
         host=qdrant_settings.QDRANT_HOST,

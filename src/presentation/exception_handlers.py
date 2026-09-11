@@ -29,6 +29,7 @@ from src.application.exceptions import (
     LLMBaseError,
     LLMConfigurationError,
     LLMConnectionError,
+    TextNormalizationError,
 )
 from src.domain.exceptions import (
     DomainError,
@@ -159,6 +160,11 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         code="INTERNAL_ERROR",
         default_pointer=None,
     ),
+    TextNormalizationError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="TEXT_NORMALIZATION_FAILED",
+        default_pointer="/data",
+    ),
 }
 
 
@@ -235,11 +241,7 @@ async def validation_exception_handler(
         pointer = f"/data/{'/'.join(loc_parts)}" if loc_parts else "/data"
 
         err_type = err.get("type", "")
-        code = (
-            "MISSING_REQUIRED_FIELD"
-            if "missing" in err_type
-            else "VALIDATION_ERROR"
-        )
+        code = "MISSING_REQUIRED_FIELD" if "missing" in err_type else "VALIDATION_ERROR"
 
         error_items.append(
             ErrorItem(
@@ -304,9 +306,7 @@ async def aggregate_application_exception_handler(
     )
 
 
-async def domain_exception_handler(
-    request: Request, exc: DomainError
-) -> JSONResponse:
+async def domain_exception_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Handles domain-level business rule violations."""
     spec = resolve_error_spec(exc)
     pointer = extract_pointer(exc, spec.default_pointer)
@@ -430,13 +430,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(
         AggregateApplicationError, cast(Any, aggregate_application_exception_handler)
     )
-    app.add_exception_handler(
-        DomainError, cast(Any, domain_exception_handler)
-    )
+    app.add_exception_handler(DomainError, cast(Any, domain_exception_handler))
     app.add_exception_handler(
         ApplicationError, cast(Any, application_exception_handler)
     )
-    app.add_exception_handler(
-        StarletteHTTPException, cast(Any, http_exception_handler)
-    )
+    app.add_exception_handler(StarletteHTTPException, cast(Any, http_exception_handler))
     app.add_exception_handler(Exception, global_unhandled_exception_handler)

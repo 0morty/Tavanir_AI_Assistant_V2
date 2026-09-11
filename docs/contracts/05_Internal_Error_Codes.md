@@ -60,6 +60,7 @@ Whenever a new capability is added or a new error scenario is defined:
 | `GENERATION_FAILED` | 500 | — | answer generation by the model failed |
 | `MSSQL_EXTRACTION_FAILED` | 500 | — | error extracting suggestions from legacy MSSQL **[planned]** |
 | `STATUTE_PARSE_FAILED` | 422 | — | error parsing an Excel statute file **[planned]** |
+| `TEXT_NORMALIZATION_FAILED` | 422 | `TextNormalizationError` | Persian text cleaning or normalization failed |
 | `RATE_LIMITED` | 429 | — | too many requests |
 | `INTERNAL_ERROR` | 500 | `ApplicationError` | unexpected internal service error |
 | `NOT_IMPLEMENTED` | 501 | — | this capability is not yet implemented |

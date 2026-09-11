@@ -29,6 +29,7 @@ from src.application.exceptions import (
     LLMBaseError,
     LLMConfigurationError,
     LLMConnectionError,
+    SparseEmbedderError,
     TextNormalizationError,
 )
 from src.domain.exceptions import (
@@ -126,6 +127,11 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         default_pointer=None,
     ),
     EmbedderBaseError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="EMBEDDING_FAILED",
+        default_pointer=None,
+    ),
+    SparseEmbedderError: ErrorSpec(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         code="EMBEDDING_FAILED",
         default_pointer=None,

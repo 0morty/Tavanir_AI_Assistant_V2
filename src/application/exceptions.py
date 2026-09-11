@@ -88,6 +88,12 @@ class EmbedderContextLengthError(EmbedderBaseError):
     pass
 
 
+class SparseEmbedderError(EmbedderBaseError):
+    """Raised when sparse vector embedding generation fails."""
+
+    pass
+
+
 # endregion
 
 

@@ -5,6 +5,7 @@ from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
 
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
+from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
@@ -12,6 +13,7 @@ from src.domain.interfaces import (
     IUnitOfWork,
 )
 from src.infrastructure.configs.settings import (
+    bm25_settings,
     db_settings,
     embedding_settings,
     qdrant_settings,
@@ -27,6 +29,9 @@ from src.infrastructure.db.repositories import (
 )
 from src.infrastructure.services.embeddings.openai_dense_embedder import (
     OpenAIDenseEmbedder,
+)
+from src.infrastructure.services.embeddings.persian_bm25_embedder import (
+    PersianBm25Embedder,
 )
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
@@ -71,12 +76,18 @@ class Container(containers.DeclarativeContainer):
         document_prefix=embedding_settings.EMBEDDING_DOCUMENT_PREFIX,
     )
 
-    # 4. Text Normalizer Service
+    # 4. Sparse Embedder Service (BM25)
+    sparse_embedder: providers.Provider[ISparseEmbedder] = providers.Singleton(
+        PersianBm25Embedder,
+        config=bm25_settings,
+    )
+
+    # 5. Text Normalizer Service
     text_normalizer: providers.Provider[ITextNormalizer] = providers.Singleton(
         ShekarTextNormalizer
     )
 
-    # 5. Qdrant Client (Singleton)
+    # 6. Qdrant Client (Singleton)
     qdrant_client: providers.Provider[AsyncQdrantClient] = providers.Singleton(
         AsyncQdrantClient,
         host=qdrant_settings.QDRANT_HOST,

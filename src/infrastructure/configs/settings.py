@@ -65,6 +65,15 @@ class EmbeddingSettings(BaseSettings):
     EMBEDDING_DOCUMENT_PREFIX: str = ""
 
 
+class BM25Settings(BaseSettings):
+    model_config = _base_config
+
+    BM25_K: float = 1.2
+    BM25_B: float = 0.2
+    BM25_AVG_LEN: float = 256.0
+    BM25_TOKEN_MAX_LENGTH: int = 40
+
+
 class QdrantSettings(BaseSettings):
     model_config = _base_config
 
@@ -141,6 +150,7 @@ class SecuritySettings(BaseSettings):
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 embedding_settings = EmbeddingSettings()
+bm25_settings = BM25Settings()
 qdrant_settings = QdrantSettings()
 db_settings = DBSettings()
 logging_settings = LoggingSettings()

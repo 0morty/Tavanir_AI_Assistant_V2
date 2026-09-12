@@ -6,7 +6,11 @@ from typing import Any, TypeVar, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
 from src.domain.interfaces.i_unit_of_work import IUnitOfWork
+from src.infrastructure.db.repositories.sql.suggestion_repository import (
+    SqlSuggestionRepository,
+)
 
 RepoT = TypeVar("RepoT")
 
@@ -21,8 +25,12 @@ class SqlUnitOfWork(IUnitOfWork):
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession] | Callable[[], AsyncSession],
+        suggestion_repo_factory: Callable[
+            [AsyncSession], ISuggestionRepository
+        ] = SqlSuggestionRepository,
     ) -> None:
         self._session_factory = session_factory
+        self._suggestion_repo_factory = suggestion_repo_factory
         self._session: AsyncSession | None = None
         self._repo_cache: dict[Any, Any] = {}
 
@@ -34,6 +42,12 @@ class SqlUnitOfWork(IUnitOfWork):
                 "Unit of Work is not active. Access session only within an 'async with uow:' context."
             )
         return self._session
+
+    @property
+    def suggestions(self) -> ISuggestionRepository:
+        """Access the suggestion repository bound to the active transaction."""
+        return self.get_repository(self._suggestion_repo_factory)
+
 
     def get_repository(self, repo_cls: Callable[[AsyncSession], RepoT]) -> RepoT:
         """
@@ -48,7 +62,6 @@ class SqlUnitOfWork(IUnitOfWork):
         if repo_cls not in self._repo_cache:
             self._repo_cache[repo_cls] = repo_cls(self._session)
         return cast(RepoT, self._repo_cache[repo_cls])
-
 
     async def __aenter__(self) -> SqlUnitOfWork:
         self._session = self._session_factory()
@@ -74,7 +87,6 @@ class SqlUnitOfWork(IUnitOfWork):
                 await self._session.close()
                 self._session = None
                 self._repo_cache.clear()
-
 
     async def commit(self) -> None:
         if self._session is not None:

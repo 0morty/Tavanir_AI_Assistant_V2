@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from types import TracebackType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
 
 
 class IUnitOfWork(ABC):
@@ -24,6 +28,12 @@ class IUnitOfWork(ABC):
             await self.rollback()
         else:
             await self.commit()
+
+    @property
+    @abstractmethod
+    def suggestions(self) -> ISuggestionRepository:
+        """Suggestion repository port bound to this transactional boundary."""
+        pass
 
     @abstractmethod
     async def commit(self) -> None:

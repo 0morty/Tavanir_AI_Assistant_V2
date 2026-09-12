@@ -1,5 +1,4 @@
 from src.application.prompt_architecture.prompt_section import PromptSection
-from src.application.prompt_architecture.section_type import PromptSectionType
 
 
 class UserInputSection(PromptSection):
@@ -10,8 +9,8 @@ class UserInputSection(PromptSection):
         self._content = content
 
     @property
-    def section_type(self) -> PromptSectionType:
-        return PromptSectionType.USER_INPUT
+    def section_type(self) -> str:
+        return "USER-INPUT"
 
     def body(self) -> str:
         return self._content

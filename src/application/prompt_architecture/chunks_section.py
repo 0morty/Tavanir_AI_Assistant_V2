@@ -1,6 +1,5 @@
 from src.domain.entities import Chunk
 from src.application.prompt_architecture.prompt_section import PromptSection
-from src.application.prompt_architecture.section_type import PromptSectionType
 
 
 class ChunksSection(PromptSection):
@@ -11,8 +10,8 @@ class ChunksSection(PromptSection):
         self._chunks = chunks
 
     @property
-    def section_type(self) -> PromptSectionType:
-        return PromptSectionType.CHUNKS
+    def section_type(self) -> str:
+        return "CHUNKS"
 
     @property
     def pre_context(self) -> str:

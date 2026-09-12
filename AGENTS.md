@@ -24,7 +24,7 @@ Early-stage FastAPI project (Tavanir AI Assistant V2) on a Clean Architecture sc
 ## Conventions
 - Clean Architecture dependency rule: `src/domain/` must stay pure stdlib (no FastAPI, SQLAlchemy, Pydantic); outer layers depend inward through ports under `src/domain/interfaces/` and `src/application/interfaces/`.
 - Domain uses Persian suggestion statuses: `SuggestionStatus` in `src/domain/enums.py` converts legacy `status_id` ints and Persian titles via `from_id()`/`from_string()`.
-- Commit messages: always short and meaningful (Conventional Commits, per `docs/contracts/02_Git_Commit_Convention.md`); add a body only when extra description is genuinely needed.
+- **Commit messages: always generate short and meaningful commits** (Conventional Commits, per `docs/contracts/02_Git_Commit_Convention.md`); add a body only when extra description is genuinely needed.
 
 ---
 
@@ -60,7 +60,7 @@ The LLM / Generation API is responsible for everything that happens **after** re
 |---|---|
 | `src/application/dtos.py` | `AnalyzeSuggestionResponse` — the output contract |
 | `src/application/exceptions.py` | LLM exception hierarchy only: `LLMBaseError`, `LLMConfigurationError`, `LLMConnectionError`, `LLMAPIError`, `LLMAuthenticationError` (lines 55-85). Do NOT touch `ApplicationError`, `ApplicationAPIError`, or any Embedder exception. |
-| `src/application/prompt_architecture/` | Entire package — `PromptSectionType`, `PromptSection` base class, concrete sections (`RoleSection`, `HistorySection`, `ChunksSection`, `SystemInputSection`, `UserInputSection`, `OutputFormatSection`), and `PromptBuilder` |
+| `src/application/prompt_architecture/` | Entire package — `PromptSection` base class, concrete sections (`RoleSection`, `HistorySection`, `ChunksSection`, `SystemInputSection`, `SystemOutputSection`, `UserInputSection`, `OutputFormatSection`, `StringSection`), and `PromptBuilder` |
 | `src/infrastructure/configs/settings.py` | `LLMSettings` class (lines 30-52) and `llm_settings` singleton. Do NOT touch `CoreSettings`, `EmbeddingSettings`, or `embedding_settings`. |
 | `src/infrastructure/configs/llm_provider_configs.py` | Entire file — `LLMProvider`, `APIKeyProvider`, `AsyncOpenAIClientFactory` |
 | `src/infrastructure/services/base_openai_service.py` | Entire file — shared base for OpenAI-compatible error handling |

@@ -1,8 +1,8 @@
 from src.application.prompt_architecture.prompt_section import PromptSection
 
 
-class OutputFormatSection(PromptSection):
-    """Describes the expected output format."""
+class SystemOutputSection(PromptSection):
+    """System-level output expected from the model."""
 
     def __init__(self, content: str) -> None:
         super().__init__()
@@ -10,7 +10,7 @@ class OutputFormatSection(PromptSection):
 
     @property
     def section_type(self) -> str:
-        return "OUTPUT-FORMAT"
+        return "SYSTEM-OUTPUT"
 
     def body(self) -> str:
         return self._content

@@ -1,6 +1,5 @@
 from src.domain.entities import HistoryMessage
 from src.application.prompt_architecture.prompt_section import PromptSection
-from src.application.prompt_architecture.section_type import PromptSectionType
 
 
 class HistorySection(PromptSection):
@@ -11,8 +10,8 @@ class HistorySection(PromptSection):
         self._messages = messages
 
     @property
-    def section_type(self) -> PromptSectionType:
-        return PromptSectionType.HISTORY
+    def section_type(self) -> str:
+        return "HISTORY"
 
     @property
     def pre_context(self) -> str:

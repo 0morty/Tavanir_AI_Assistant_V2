@@ -26,6 +26,7 @@ from src.infrastructure.db import (
 from src.infrastructure.db.repositories import (
     QdrantRegulatoryRepository,
     QdrantSuggestionRepository,
+    SqlSuggestionRepository,
 )
 from src.infrastructure.services.embeddings.openai_dense_embedder import (
     OpenAIDenseEmbedder,
@@ -141,5 +142,7 @@ class Container(containers.DeclarativeContainer):
 
     # 8. Unit of Work Factory
     unit_of_work: providers.Provider[IUnitOfWork] = providers.Factory(
-        SqlUnitOfWork, session_factory=db_session_factory
+        SqlUnitOfWork,
+        session_factory=db_session_factory,
+        suggestion_repo_factory=providers.Object(SqlSuggestionRepository),
     )

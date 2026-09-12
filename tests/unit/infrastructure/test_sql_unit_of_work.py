@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.orm import Mapped, mapped_column
-
 from src.infrastructure.db.repositories.sql.base_sql_repository import BaseSqlRepository
 from src.infrastructure.db.sql_models.base import Base
 from src.infrastructure.db.unit_of_work import SqlUnitOfWork
@@ -81,7 +80,26 @@ async def test_uow_get_repository_lazy_instantiation_and_caching():
         assert repo1 is repo2  # Cached instance within same transaction
 
 
+@pytest.mark.asyncio
+async def test_uow_suggestions_property_uses_injected_factory():
+    mock_session = AsyncMock()
+    mock_session_factory = MagicMock(return_value=mock_session)
+    mock_repo = MagicMock()
+    mock_repo_factory = MagicMock(return_value=mock_repo)
+
+    uow = SqlUnitOfWork(
+        session_factory=mock_session_factory,
+        suggestion_repo_factory=mock_repo_factory,
+    )
+
+    async with uow:
+        repo = uow.suggestions
+        assert repo is mock_repo
+        mock_repo_factory.assert_called_once_with(mock_session)
+
+
 def test_base_sql_repository_mapping():
+
     mock_session = MagicMock()
     repo = DummyRepository(mock_session)
 

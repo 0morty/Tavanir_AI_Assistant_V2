@@ -1,7 +1,9 @@
-from src.application.prompt_architecture.prompt_section import PromptSection
+from typing import ClassVar
+
+from src.application.context.section import Section
 
 
-class StringSection(PromptSection):
+class StringSection(Section):
     """Generic string-backed section identified by an arbitrary name.
 
     This is the escape hatch for sections that are plain text:
@@ -11,8 +13,12 @@ class StringSection(PromptSection):
     subclasses.
     """
 
-    def __init__(self, name: str, content: str) -> None:
-        super().__init__()
+    default_importance: ClassVar[float] = 0.5
+
+    def __init__(
+        self, name: str, content: str, *, importance: float | None = None
+    ) -> None:
+        super().__init__(importance=importance)
         self._name = name
         self._content = content
 

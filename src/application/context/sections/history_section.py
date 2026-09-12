@@ -1,12 +1,18 @@
+from typing import ClassVar
+
 from src.domain.entities import HistoryMessage
-from src.application.prompt_architecture.prompt_section import PromptSection
+from src.application.context.section import Section
 
 
-class HistorySection(PromptSection):
+class HistorySection(Section):
     """Conversation/interaction history, distinct from RAG context chunks."""
 
-    def __init__(self, messages: list[HistoryMessage]) -> None:
-        super().__init__(separator="\n\n")
+    default_importance: ClassVar[float] = 0.3
+
+    def __init__(
+        self, messages: list[HistoryMessage], *, importance: float | None = None
+    ) -> None:
+        super().__init__(separator="\n\n", importance=importance)
         self._messages = messages
 
     @property

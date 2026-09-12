@@ -1,12 +1,16 @@
+from typing import ClassVar
+
 from src.domain.entities import Chunk
-from src.application.prompt_architecture.prompt_section import PromptSection
+from src.application.context.section import Section
 
 
-class ChunksSection(PromptSection):
+class ChunksSection(Section):
     """Retrieval (RAG) context chunks."""
 
-    def __init__(self, chunks: list[Chunk]) -> None:
-        super().__init__(separator="\n\n")
+    default_importance: ClassVar[float] = 0.4
+
+    def __init__(self, chunks: list[Chunk], *, importance: float | None = None) -> None:
+        super().__init__(separator="\n\n", importance=importance)
         self._chunks = chunks
 
     @property

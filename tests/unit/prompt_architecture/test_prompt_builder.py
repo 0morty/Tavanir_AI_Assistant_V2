@@ -1,12 +1,12 @@
 from src.domain.entities import Chunk, HistoryMessage
 from src.domain.enums import HistoryRole
+from src.application.context.section import Section
+from src.application.context.sections.role_section import RoleSection
+from src.application.context.sections.string_section import StringSection
 from src.application.prompt_architecture.prompt_builder import PromptBuilder
-from src.application.prompt_architecture.prompt_section import PromptSection
-from src.application.prompt_architecture.role_section import RoleSection
-from src.application.prompt_architecture.string_section import StringSection
 
 
-class RegulationSection(PromptSection):
+class RegulationSection(Section):
     """A custom section introduced without touching any central enum."""
 
     @property
@@ -37,7 +37,7 @@ def test_typed_setters_configure_default_sections():
     builder = PromptBuilder()
     builder.set_role("You are an assistant.")
     builder.set_history([HistoryMessage(role=HistoryRole.USER, content="Hello")])
-    builder.set_chunks([Chunk(id="1", title="t", content="chunk content")])
+    builder.set_chunks([Chunk(chunk_id="1", parent_id="p1", content="chunk content", metadata={})])
     builder.set_system_input("system input")
     builder.set_system_output("system output")
     builder.set_output_format("Markdown")
@@ -83,7 +83,7 @@ def test_set_section_wraps_raw_string_into_string_section():
     assert "some text" in builder.render()
 
 
-def test_set_section_accepts_custom_prompt_section_instance():
+def test_set_section_accepts_custom_section_instance():
     builder = PromptBuilder()
     builder.set_section("REGULATION", RegulationSection())
 

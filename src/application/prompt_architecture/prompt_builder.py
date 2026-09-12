@@ -1,33 +1,33 @@
 from collections.abc import Iterable
 
 from src.domain.entities import Chunk, HistoryMessage
-from src.application.prompt_architecture.chunks_section import ChunksSection
-from src.application.prompt_architecture.history_section import HistorySection
-from src.application.prompt_architecture.output_format_section import OutputFormatSection
-from src.application.prompt_architecture.prompt_section import PromptSection
-from src.application.prompt_architecture.role_section import RoleSection
-from src.application.prompt_architecture.string_section import StringSection
-from src.application.prompt_architecture.system_input_section import SystemInputSection
-from src.application.prompt_architecture.system_output_section import SystemOutputSection
+from src.application.context.section import Section
+from src.application.context.sections.chunks_section import ChunksSection
+from src.application.context.sections.history_section import HistorySection
+from src.application.context.sections.output_format_section import OutputFormatSection
+from src.application.context.sections.role_section import RoleSection
+from src.application.context.sections.string_section import StringSection
+from src.application.context.sections.system_input_section import SystemInputSection
+from src.application.context.sections.system_output_section import SystemOutputSection
 
 
 def _canonical_name(name: str) -> str:
     """Normalize a section name into its registry identity."""
     canonical = name.strip().upper()
     if not canonical:
-        raise ValueError("Prompt section name must be a non-empty string.")
+        raise ValueError("Section name must be a non-empty string.")
     return canonical
 
 
 class PromptBuilder:
-    """Composes :class:`PromptSection` instances into an ordered prompt.
+    """Composes :class:`Section` instances into an ordered prompt.
 
-    The builder relies on the ``PromptSection`` contract rather than on any
-    fixed set of section types. Section identity is the string returned by
-    ``PromptSection.section_type``, so new sections (REGULATION, METADATA,
-    INSTRUCTIONS, ...) can be introduced without modifying central code --
-    either by subclassing ``PromptSection`` or by passing a raw string to
-    :meth:`set_section`.
+    The builder relies on the :class:`~src.application.context.section.Section`
+    contract rather than on any fixed set of section types. Section identity
+    is the string returned by ``Section.section_type``, so new sections
+    (REGULATION, METADATA, INSTRUCTIONS, ...) can be introduced without
+    modifying central code -- either by subclassing ``Section`` or by
+    passing a raw string to :meth:`set_section`.
 
     The default builder ships with the canonical sections:
 
@@ -41,11 +41,11 @@ class PromptBuilder:
 
     def __init__(
         self,
-        sections: Iterable[PromptSection] | None = None,
+        sections: Iterable[Section] | None = None,
         *,
         seed_defaults: bool = True,
     ) -> None:
-        self._sections: dict[str, PromptSection] = {}
+        self._sections: dict[str, Section] = {}
         if seed_defaults:
             self.set_role("")
             self.set_history([])
@@ -56,16 +56,16 @@ class PromptBuilder:
         for section in sections or []:
             self.set_section(section.section_type, section)
 
-    def set_section(self, name: str, value: str | PromptSection) -> None:
+    def set_section(self, name: str, value: str | Section) -> None:
         """Register a section under ``name``.
 
-        ``value`` may be a ``PromptSection`` instance (whose own
+        ``value`` may be a ``Section`` instance (whose own
         ``section_type`` must match ``name``) or a raw string, which is
         wrapped in a :class:`StringSection`. An existing name is replaced
         in place; a new name appends the section to the end.
         """
         canonical = _canonical_name(name)
-        if isinstance(value, PromptSection):
+        if isinstance(value, Section):
             if _canonical_name(value.section_type) != canonical:
                 raise ValueError(
                     f"Section name {name!r} does not match the section's "
@@ -76,7 +76,7 @@ class PromptBuilder:
             section = StringSection(canonical, value)
         self._sections[canonical] = section
 
-    def add_section(self, section: PromptSection) -> None:
+    def add_section(self, section: Section) -> None:
         """Append a section keyed by its own ``section_type``.
 
         Raises ``ValueError`` if that name is already registered; use
@@ -87,7 +87,7 @@ class PromptBuilder:
             raise ValueError(f"A section named {canonical!r} is already registered.")
         self._sections[canonical] = section
 
-    def get_section(self, name: str) -> PromptSection | None:
+    def get_section(self, name: str) -> Section | None:
         """Return the section registered under ``name``, or ``None``."""
         return self._sections.get(_canonical_name(name))
 
@@ -114,7 +114,7 @@ class PromptBuilder:
         self.set_section("OUTPUT-FORMAT", OutputFormatSection(content))
 
     @property
-    def sections(self) -> list[PromptSection]:
+    def sections(self) -> list[Section]:
         return list(self._sections.values())
 
     def render(self) -> str:

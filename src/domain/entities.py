@@ -20,6 +20,11 @@ TMetadata = TypeVar("TMetadata")
 
 # Semantic type alias for dense embedding vectors
 DenseVector: TypeAlias = Sequence[float]
+from dataclasses import dataclass, field
+from typing import Any
+
+from src.domain.enums import HistoryRole, SuggestionStatus
+from src.domain.exceptions import InvalidShamsiDateFormatError
 
 
 @dataclass(frozen=True)
@@ -192,6 +197,11 @@ SuggestionSearchResult = SearchResultChunk[SuggestionChunkMetadata]
 RegulatorySearchResult = SearchResultChunk[RegulatoryChunkMetadata]
 # endregion
 
+@dataclass(frozen=True)
+class HistoryMessage:
+    role: HistoryRole
+    content: str
+
 
 __all__ = [
     "ShamsiDate",
@@ -210,4 +220,5 @@ __all__ = [
     "SearchResultChunk",
     "SuggestionSearchResult",
     "RegulatorySearchResult",
+    "HistoryMessage"
 ]

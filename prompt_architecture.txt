@@ -1,0 +1,47 @@
+Every section follows the same framing:
+
++------------------+
+|   pre-context    |
++------------------+
+|      body        |
++------------------+
+|  post-context    |
++------------------+
+
+A prompt is assembled from sections in order:
+
++------------------+
+|       ROLE       |
+|      system      |
++------------------+
+
++------------------+
+|     HISTORY      |
+|                  |
+|  system: ...     |
+|  user: ...       |
++------------------+
+
++------------------+
+|      CHUNKS      |
+|                  |
+|    Chunk 1       |
+|    Chunk 2       |
+|    Chunk N       |
++------------------+
+
++------------------+
+|  SYSTEM-INPUT    |
+|      system      |
++------------------+
+
++------------------+
+|   USER-INPUT     |
+|       user       |
++------------------+
+
++------------------+
+|  OUTPUT-FORMAT   |
+|      system      |
++------------------+
+

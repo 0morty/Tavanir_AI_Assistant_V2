@@ -32,7 +32,7 @@ src/application/prompt_architecture/
 └── prompt_builder.py           # PromptBuilder (name-keyed registry)
 ```
 
-The Application layer depends inward on the Domain: sections consume `Chunk`/`HistoryMessage` and render them for the LLM. The packages stay pure stdlib. A future context/token-allocation component consumes the same `Section` concept (via its `importance` weight) without touching the prompt layer.
+The Application layer depends inward on the Domain: sections consume `Chunk`/`HistoryMessage` and render them for the LLM. The packages stay pure stdlib. A future context/token-allocation component consumes the same `Section` concept (via its `importance` and `demand` values) without touching the prompt layer.
 
 ## Entities
 
@@ -66,7 +66,7 @@ Sender-role vocabulary for history messages, stored alongside the OpenAI role st
 
 ### `Section` (abstract base class, `src/application/context/section.py`)
 
-Defines the **contract** and the **general rendering algorithm** for every section. It is a general-purpose logical section of a context, not a prompt-specific concept: `PromptBuilder` is just one consumer, and a future context/token-allocation component can use the same concept (especially the `importance` weight) without touching the prompt layer.
+Defines the **contract** and the **general rendering algorithm** for every section. It is a general-purpose logical section of a context, not a prompt-specific concept: `PromptBuilder` is just one consumer, and a future context/token-allocation component can use the same concept (especially the `importance` and `demand` values) without touching the prompt layer.
 
 ```
 +--------------+
@@ -83,28 +83,30 @@ Defines the **contract** and the **general rendering algorithm** for every secti
 | `separator` | attribute (via `__init__`, default `"\n\n"`) | Delimiter used when joining the section parts |
 | `section_type` | abstract property (`str`) | **String-based** identity/name of the section, e.g. `"HISTORY"`, `"CHUNKS"`, or a custom `"REGULATION"` |
 | `default_importance` | constructor parameter (`float`, default `0.5`) | Default importance applied by the base class when no explicit `importance` is given; each subclass passes its own via `super().__init__(..., default_importance=...)` |
-| `importance` | property (`float`) | Relative importance in `[0.0, 1.0]` used when allocating token capacity; validated per-section, never normalized, no sum-to-`1.0` rule |
+| `default_demand` | constructor parameter (`float`, default `0.5`) | Default demand applied by the base class when no explicit `demand` is given; each subclass passes its own via `super().__init__(..., default_demand=...)` |
+| `importance` | property (`float`) | Intrinsic semantic importance in `[0.0, 1.0]`, used as a weight when redistributing unused token capacity. **Not** a token percentage; validated per-section, never normalized, no sum-to-`1.0` rule |
+| `demand` | property (`float`) | Relative context-capacity demand in `[0.0, 1.0]`, used to calculate the section's initial proportional token capacity. Validated per-section, never normalized, no sum-to-`1.0` rule |
 | `pre_context` | property (default `""`) | Framing before the body |
 | `post_context` | property (default `""`) | Framing after the body |
 | `body()` | abstract method | Constructs the section's main content — behaves conceptually like a property |
 | `render()` | method | Joins `pre_context` + `body()` + `post_context` into one string; returns `""` when the body is empty |
 
-The base class holds **no** section-specific implementation; subclasses override `section_type` and `body()` (and framing where needed) and pass their default importance to the base constructor. There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` is an instance property owned by the base class; its values for several sections are independent weights: the base class validates each value against `[0.0, 1.0]` but never normalizes them and never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
+The base class holds **no** section-specific implementation; subclasses override `section_type` and `body()` (and framing where needed) and pass their default `importance` and `demand` to the base constructor. There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` and `demand` are instance properties owned by the base class; their values for several sections are independent and never normalized: the base class validates each value against `[0.0, 1.0]` but never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
 
 ### Concrete sections
 
-One concrete section per canonical section type, each owning its `body()` and default importance:
+One concrete section per canonical section type, each owning its `body()`, default importance, and default demand:
 
-- **`RoleSection`** (`src/application/context/sections/role_section.py`) — `ROLE`, default importance `0.5`. Assigns the model its role.
-- **`HistorySection`** (`src/application/context/sections/history_section.py`) — `HISTORY`, default importance `0.3`. Renders `HistoryMessage` turns as the body (each as `role: content`), framed by `pre_context = "History of previous interactions:"`.
-- **`ChunksSection`** (`src/application/context/sections/chunks_section.py`) — `CHUNKS`, default importance `0.4`. Renders RAG context as numbered `Chunk N:` blocks, framed by `pre_context = "Relevant context chunks:"`.
-- **`SystemInputSection`** (`src/application/context/sections/system_input_section.py`) — `SYSTEM-INPUT`, default importance `0.5`. System-level input passed to the model.
-- **`UserInputSection`** (`src/application/context/sections/user_input_section.py`) — `USER-INPUT`, default importance `0.5`. User-provided input passed to the model.
-- **`OutputFormatSection`** (`src/application/context/sections/output_format_section.py`) — `OUTPUT-FORMAT`, default importance `0.1`. Describes the expected output format.
+- **`RoleSection`** (`src/application/context/sections/role_section.py`) — `ROLE`, default importance `0.5`, default demand `0.3`. Assigns the model its role.
+- **`HistorySection`** (`src/application/context/sections/history_section.py`) — `HISTORY`, default importance `0.3`, default demand `0.4`. Renders `HistoryMessage` turns as the body (each as `role: content`), framed by `pre_context = "History of previous interactions:"`.
+- **`ChunksSection`** (`src/application/context/sections/chunks_section.py`) — `CHUNKS`, default importance `0.4`, default demand `0.5`. Renders RAG context as numbered `Chunk N:` blocks, framed by `pre_context = "Relevant context chunks:"`.
+- **`SystemInputSection`** (`src/application/context/sections/system_input_section.py`) — `SYSTEM-INPUT`, default importance `0.5`, default demand `0.5`. System-level input passed to the model.
+- **`UserInputSection`** (`src/application/context/sections/user_input_section.py`) — `USER-INPUT`, default importance `0.5`, default demand `0.4`. User-provided input passed to the model.
+- **`OutputFormatSection`** (`src/application/context/sections/output_format_section.py`) — `OUTPUT-FORMAT`, default importance `0.1`, default demand `0.2`. Describes the expected output format.
 
 ### Adding a custom section
 
-Every section is **designed by a developer**. There is no generic "string" section and no raw-text escape hatch: a new section must be an explicit `Section` subclass that owns its identity (`section_type`), content (`body()`), and default importance. Adding one requires **no central enum or framework code changes**:
+Every section is **designed by a developer**. There is no generic "string" section and no raw-text escape hatch: a new section must be an explicit `Section` subclass that owns its identity (`section_type`), content (`body()`), default importance, and default demand. Adding one requires **no central enum or framework code changes**:
 
 ```python
 class RegulationSection(Section):

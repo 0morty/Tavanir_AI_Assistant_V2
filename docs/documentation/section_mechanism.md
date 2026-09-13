@@ -10,7 +10,7 @@ Every logical part of a prompt is a dedicated, named, developer-owned class:
 
 - each class owns its **identity** (`section_type`)
 - each class owns its **content** (`body()`)
-- each class supplies its **default importance** to the base constructor
+- each class supplies its **default importance** and **default demand** to the base constructor
 - each class owns its **framing** (`pre_context` / `post_context`) when needed
 
 This rule is what makes the architecture **open/closed**: you extend the prompt by adding a subclass, never by weakening the contract. A developer must *think* about what the section is for, give it a meaningful identity, and decide how it renders.
@@ -30,15 +30,19 @@ Earlier iterations shipped two convenience classes that violated this rule and w
 
 ## The `Section` contract
 
-A `Section` subclass decides what the section is; `importance` is an instance property **owned by the base class**, not a class-level contract redeclared in each subclass:
+A `Section` subclass decides what the section is; `importance` and `demand` are instance properties **owned by the base class**, not class-level contracts redeclared in each subclass:
 
 | Member | Role |
 |---|---|
 | `section_type` (abstract property) | String identity, e.g. `"HISTORY"`, `"CHUNKS"`, `"REGULATION"`. Cannot be empty and is normalized to uppercase |
 | `body()` (abstract method) | The section's main content |
-| `importance` (base-owned property) | The section's weight in `[0.0, 1.0]`, applied unless overridden at construction |
-| `default_importance` (base-constructor parameter, default `0.5`) | Default weight used when no explicit `importance` is passed; each subclass passes its own via `super().__init__(..., default_importance=...)` |
+| `importance` (base-owned property) | Intrinsic semantic importance in `[0.0, 1.0]`, used as a weight when redistributing unused token capacity. **Not** a token percentage |
+| `demand` (base-owned property) | Relative context-capacity demand in `[0.0, 1.0]`, used to calculate the section's initial proportional token capacity |
+| `default_importance` (base-constructor parameter, default `0.5`) | Default importance used when no explicit `importance` is passed; each subclass passes its own via `super().__init__(..., default_importance=...)` |
+| `default_demand` (base-constructor parameter, default `0.5`) | Default demand used when no explicit `demand` is passed; each subclass passes its own via `super().__init__(..., default_demand=...)` |
 | `pre_context` / `post_context` (properties) | Optional framing around the body (default empty) |
+
+Neither `importance` nor `demand` is a token percentage, neither needs to sum to `1.0` across sections, and `Section` never normalizes them or allocates capacity itself.
 
 `Section.render()` joins `pre_context`, `body()`, and `post_context` (skipping empty parts) into a single string.
 
@@ -46,7 +50,7 @@ A `Section` subclass decides what the section is; `importance` is an instance pr
 
 1. Create a subclass of `Section` in `src/application/context/sections/`.
 2. Give it a stable `section_type` and a `body()`.
-3. Choose a default importance in `[0.0, 1.0]` and pass it to the base constructor (defaults to `0.5` when omitted).
+3. Choose a default importance and a default demand, each in `[0.0, 1.0]`, and pass them to the base constructor (both default to `0.5` when omitted).
 4. Export it from `src/application/context/sections/__init__.py` (and `src/application/context/__init__.py` if it should be part of the public `context` API).
 5. Register it on a builder with `set_section("...", MySection(...))` or `add_section(MySection(...))`.
 
@@ -58,8 +62,19 @@ from src.application.context.section import Section
 
 class RegulationSection(Section):
 
-    def __init__(self, content: str, *, importance: float | None = None) -> None:
-        super().__init__(importance=importance, default_importance=0.4)
+    def __init__(
+        self,
+        content: str,
+        *,
+        importance: float | None = None,
+        demand: float | None = None,
+    ) -> None:
+        super().__init__(
+            importance=importance,
+            demand=demand,
+            default_importance=0.4,
+            default_demand=0.5,
+        )
         self._content = content
 
     @property
@@ -82,7 +97,7 @@ builder.set_section("REGULATION", RegulationSection("Law 137 ..."))
 - `name` must match the section's `section_type` after normalization (`strip().upper()`); a mismatch raises `ValueError`.
 - A blank name raises `ValueError`.
 - `add_section(section)` appends a section keyed by its own `section_type` and rejects duplicates with `ValueError`.
-- Importance is validated against `[0.0, 1.0]` per section; the base class never normalizes or sums importances.
+- Both `importance` and `demand` are validated against `[0.0, 1.0]` per section; the base class never normalizes or sums them.
 
 ## Where custom sections come from
 
@@ -102,4 +117,5 @@ Custom sections live in the same package as the canonicals and are plain subclas
 
 ## Related documents
 
+- [Section Properties: `importance` and `demand`](section_properties.md) — definitions of the two Section weights.
 - [Prompt-Builder Architecture](prompt_builder_entities.md) — the `PromptBuilder` registry, canonical sections, and rendering logic.

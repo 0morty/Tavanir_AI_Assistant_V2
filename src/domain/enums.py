@@ -3,6 +3,14 @@ from enum import Enum
 from src.domain.exceptions import InvalidSuggestionStatusError
 
 
+class HistoryRole(Enum):
+    """Sender role of a history message, OpenAI-compatible for chat history."""
+
+    USER = "user"
+    SYSTEM = "system"
+    ASSISTANT = "assistant"
+
+
 class SuggestionStatus(Enum):
     NOT_ACCEPTED = ("عدم پذیرش", 1)
     REJECTED = ("رد", 2)

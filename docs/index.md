@@ -21,6 +21,7 @@ docs/
 ├── database/                     # 💾 Relational Schemas, ORM Models & Migrations
 ├── guides/                       # 🛠️ Developer How-To Guides & Recipes
 ├── deployment/                   # 🚀 DevOps, Containerization & Infrastructure
+├── documentation/                # 📚 Feature-Specific Technical Documentation (e.g. prompt_builder_entities.md)
 │
 ├── planning/                     # 📌 Project-level Tracking, Roadmaps & Migration Backlogs
 ├── technology-stacks.md          # 🔬 Current & Target Technology Stack

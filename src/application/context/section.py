@@ -23,26 +23,35 @@ class Section(ABC):
     Subclasses own the section's identity and body construction by
     overriding ``section_type`` and ``body()``; pre/post context framing is
     optional and defaults to empty strings. Each subclass passes its default
-    importance to the base constructor. A section whose ``body()`` is empty
-    renders as an empty string, so unconfigured sections never leak framing
-    or separators.
+    ``importance`` and ``demand`` to the base constructor. A section whose
+    ``body()`` is empty renders as an empty string, so unconfigured sections
+    never leak framing or separators.
 
-    ``importance`` is a weight in the range ``[0.0, 1.0]`` describing the
-    relative importance of the section when allocating token capacity.
-    Importance values of several sections are independent weights: they do
-    not need to sum to ``1.0``, and a ``Section`` never normalizes them or
-    allocates capacity itself. Normalization and allocation are the
-    responsibility of the context/token-allocation logic.
+    ``importance`` is the intrinsic semantic importance of the section in the
+    range ``[0.0, 1.0]``; it is used as a weight when redistributing unused
+    token capacity and is **not** a token percentage.
+
+    ``demand`` is the section's relative context-capacity demand in the range
+    ``[0.0, 1.0]``; it is used to calculate the section's initial
+    proportional token capacity.
+
+    Both values of several sections are independent: they do not need to sum
+    to ``1.0``, and a ``Section`` never normalizes them or allocates capacity
+    itself. Normalization and allocation are the responsibility of the
+    context/token-allocation logic.
     """
 
     def __init__(
         self,
         separator: str = "\n\n",
         importance: float | None = None,
+        demand: float | None = None,
         default_importance: float = 0.5,
+        default_demand: float = 0.5,
     ) -> None:
         self.separator = separator
         self.importance = default_importance if importance is None else importance
+        self.demand = default_demand if demand is None else demand
 
     @property
     @abstractmethod
@@ -51,7 +60,7 @@ class Section(ABC):
 
     @property
     def importance(self) -> float:
-        """Relative importance used when allocating token capacity."""
+        """Intrinsic semantic importance used when redistributing unused capacity."""
         return self._importance
 
     @importance.setter
@@ -61,6 +70,19 @@ class Section(ABC):
                 f"Section importance must be in the range [0.0, 1.0]; got {value!r}."
             )
         self._importance = value
+
+    @property
+    def demand(self) -> float:
+        """Relative context-capacity demand used for the initial token capacity."""
+        return self._demand
+
+    @demand.setter
+    def demand(self, value: float) -> None:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(
+                f"Section demand must be in the range [0.0, 1.0]; got {value!r}."
+            )
+        self._demand = value
 
     @property
     def pre_context(self) -> str:

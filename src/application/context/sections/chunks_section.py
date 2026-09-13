@@ -5,8 +5,20 @@ from src.application.context.section import Section
 class ChunksSection(Section):
     """Retrieval (RAG) context chunks."""
 
-    def __init__(self, chunks: list[Chunk], *, importance: float | None = None) -> None:
-        super().__init__(separator="\n\n", importance=importance, default_importance=0.4)
+    def __init__(
+        self,
+        chunks: list[Chunk],
+        *,
+        importance: float | None = None,
+        demand: float | None = None,
+    ) -> None:
+        super().__init__(
+            separator="\n\n",
+            importance=importance,
+            demand=demand,
+            default_importance=0.4,
+            default_demand=0.5,
+        )
         self._chunks = chunks
 
     @property

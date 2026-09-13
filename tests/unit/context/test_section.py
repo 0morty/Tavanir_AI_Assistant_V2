@@ -40,11 +40,27 @@ def test_predefined_sections_have_expected_default_importance():
     assert OutputFormatSection("").importance == 0.1
 
 
+def test_predefined_sections_have_expected_default_demand():
+    assert RoleSection("").demand == 0.3
+    assert HistorySection([]).demand == 0.4
+    assert ChunksSection([]).demand == 0.5
+    assert SystemInputSection("").demand == 0.5
+    assert UserInputSection("").demand == 0.4
+    assert OutputFormatSection("").demand == 0.2
+
+
 def test_explicit_importance_overrides_default():
     assert ChunksSection([], importance=0.7).importance == 0.7
     assert HistorySection([], importance=0.2).importance == 0.2
     assert OutputFormatSection("", importance=0.0).importance == 0.0
     assert RoleSection("", importance=1.0).importance == 1.0
+
+
+def test_explicit_demand_overrides_default():
+    assert ChunksSection([], demand=0.9).demand == 0.9
+    assert HistorySection([], demand=0.1).demand == 0.1
+    assert OutputFormatSection("", demand=0.0).demand == 0.0
+    assert RoleSection("", demand=1.0).demand == 1.0
 
 
 def test_importance_below_zero_is_rejected():
@@ -67,9 +83,31 @@ def test_importance_above_one_is_rejected():
             factory()
 
 
+def test_demand_below_zero_is_rejected():
+    for factory in (
+        lambda: ChunksSection([], demand=-0.1),
+        lambda: HistorySection([], demand=-1.0),
+        lambda: RoleSection("", demand=-0.01),
+    ):
+        with pytest.raises(ValueError):
+            factory()
+
+
+def test_demand_above_one_is_rejected():
+    for factory in (
+        lambda: ChunksSection([], demand=1.1),
+        lambda: HistorySection([], demand=2.0),
+        lambda: RoleSection("", demand=1.01),
+    ):
+        with pytest.raises(ValueError):
+            factory()
+
+
 def test_boundary_values_are_accepted():
     assert ChunksSection([], importance=0.0).importance == 0.0
     assert ChunksSection([], importance=1.0).importance == 1.0
+    assert ChunksSection([], demand=0.0).demand == 0.0
+    assert ChunksSection([], demand=1.0).demand == 1.0
 
 
 def test_arbitrary_importance_values_across_sections_are_allowed():
@@ -80,6 +118,16 @@ def test_arbitrary_importance_values_across_sections_are_allowed():
     ]
     assert [s.importance for s in sections] == [0.8, 0.8, 0.5]
     assert sum(s.importance for s in sections) == pytest.approx(2.1)
+
+
+def test_arbitrary_demand_values_across_sections_are_allowed():
+    sections = [
+        ChunksSection([], demand=0.8),
+        HistorySection([], demand=0.8),
+        RoleSection("", demand=0.5),
+    ]
+    assert [s.demand for s in sections] == [0.8, 0.8, 0.5]
+    assert sum(s.demand for s in sections) == pytest.approx(2.1)
 
 
 def test_no_requirement_for_importance_to_sum_to_one():
@@ -97,9 +145,35 @@ def test_no_requirement_for_importance_to_sum_to_one():
     assert sum(s.importance for s in high) != pytest.approx(1.0)
 
 
+def test_no_requirement_for_demand_to_sum_to_one():
+    low = [
+        RoleSection("", demand=0.2),
+        SystemInputSection("", demand=0.1),
+        UserInputSection("", demand=0.1),
+    ]
+    high = [
+        ChunksSection([], demand=0.8),
+        HistorySection([], demand=0.8),
+        RoleSection("", demand=0.5),
+    ]
+    assert sum(s.demand for s in low) != pytest.approx(1.0)
+    assert sum(s.demand for s in high) != pytest.approx(1.0)
+
+
 def test_importance_is_only_metadata_not_normalized():
     section = ChunksSection([], importance=0.7)
     assert section.importance == 0.7
+
+
+def test_demand_is_only_metadata_not_normalized():
+    section = ChunksSection([], demand=0.7)
+    assert section.demand == 0.7
+
+
+def test_importance_and_demand_are_independent():
+    section = ChunksSection([], importance=0.2, demand=0.9)
+    assert section.importance == 0.2
+    assert section.demand == 0.9
 
 
 def test_prompt_builder_behavior_remains_intact():
@@ -131,3 +205,7 @@ def test_prompt_builder_registers_sections_with_default_importance():
     assert builder.get_section("CHUNKS").importance == pytest.approx(0.4)
     assert builder.get_section("HISTORY").importance == pytest.approx(0.3)
     assert builder.get_section("OUTPUT-FORMAT").importance == pytest.approx(0.1)
+
+    assert builder.get_section("CHUNKS").demand == pytest.approx(0.5)
+    assert builder.get_section("HISTORY").demand == pytest.approx(0.4)
+    assert builder.get_section("OUTPUT-FORMAT").demand == pytest.approx(0.2)

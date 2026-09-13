@@ -1,5 +1,3 @@
-from typing import ClassVar
-
 from src.domain.entities import HistoryMessage
 from src.application.context.section import Section
 
@@ -7,12 +5,10 @@ from src.application.context.section import Section
 class HistorySection(Section):
     """Conversation/interaction history, distinct from RAG context chunks."""
 
-    default_importance: ClassVar[float] = 0.3
-
     def __init__(
         self, messages: list[HistoryMessage], *, importance: float | None = None
     ) -> None:
-        super().__init__(separator="\n\n", importance=importance)
+        super().__init__(separator="\n\n", importance=importance, default_importance=0.3)
         self._messages = messages
 
     @property

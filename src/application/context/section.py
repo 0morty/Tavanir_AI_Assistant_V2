@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import ClassVar
 
 
 class Section(ABC):
@@ -21,11 +20,12 @@ class Section(ABC):
     | post-context |
     +--------------+
 
-    Subclasses own the section's identity, default importance, and body
-    construction by overriding ``default_importance``, ``section_type``,
-    and ``body()``; pre/post context framing is optional and defaults to
-    empty strings. A section whose ``body()`` is empty renders as an empty
-    string, so unconfigured sections never leak framing or separators.
+    Subclasses own the section's identity and body construction by
+    overriding ``section_type`` and ``body()``; pre/post context framing is
+    optional and defaults to empty strings. Each subclass passes its default
+    importance to the base constructor. A section whose ``body()`` is empty
+    renders as an empty string, so unconfigured sections never leak framing
+    or separators.
 
     ``importance`` is a weight in the range ``[0.0, 1.0]`` describing the
     relative importance of the section when allocating token capacity.
@@ -35,15 +35,14 @@ class Section(ABC):
     responsibility of the context/token-allocation logic.
     """
 
-    default_importance: ClassVar[float] = 0.5
-
     def __init__(
         self,
         separator: str = "\n\n",
         importance: float | None = None,
+        default_importance: float = 0.5,
     ) -> None:
         self.separator = separator
-        self.importance = self.default_importance if importance is None else importance
+        self.importance = default_importance if importance is None else importance
 
     @property
     @abstractmethod

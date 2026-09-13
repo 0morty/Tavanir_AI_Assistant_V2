@@ -82,18 +82,18 @@ Defines the **contract** and the **general rendering algorithm** for every secti
 |---|---|---|
 | `separator` | attribute (via `__init__`, default `"\n\n"`) | Delimiter used when joining the section parts |
 | `section_type` | abstract property (`str`) | **String-based** identity/name of the section, e.g. `"HISTORY"`, `"CHUNKS"`, or a custom `"REGULATION"` |
-| `default_importance` | class attribute (`float`, default `0.5`) | Subclass-provided default importance, applied when no explicit value is given |
+| `default_importance` | constructor parameter (`float`, default `0.5`) | Default importance applied by the base class when no explicit `importance` is given; each subclass passes its own via `super().__init__(..., default_importance=...)` |
 | `importance` | property (`float`) | Relative importance in `[0.0, 1.0]` used when allocating token capacity; validated per-section, never normalized, no sum-to-`1.0` rule |
 | `pre_context` | property (default `""`) | Framing before the body |
 | `post_context` | property (default `""`) | Framing after the body |
 | `body()` | abstract method | Constructs the section's main content — behaves conceptually like a property |
 | `render()` | method | Joins `pre_context` + `body()` + `post_context` into one string; returns `""` when the body is empty |
 
-The base class holds **no** section-specific implementation; subclasses override `default_importance`, `section_type`, and `body()` (and framing where needed). There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` values of several sections are independent weights: the base class validates each value against `[0.0, 1.0]` but never normalizes them and never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
+The base class holds **no** section-specific implementation; subclasses override `section_type` and `body()` (and framing where needed) and pass their default importance to the base constructor. There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` is an instance property owned by the base class; its values for several sections are independent weights: the base class validates each value against `[0.0, 1.0]` but never normalizes them and never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
 
 ### Concrete sections
 
-One concrete section per canonical section type, each owning its `default_importance` and `body()`:
+One concrete section per canonical section type, each owning its `body()` and default importance:
 
 - **`RoleSection`** (`src/application/context/sections/role_section.py`) — `ROLE`, default importance `0.5`. Assigns the model its role.
 - **`HistorySection`** (`src/application/context/sections/history_section.py`) — `HISTORY`, default importance `0.3`. Renders `HistoryMessage` turns as the body (each as `role: content`), framed by `pre_context = "History of previous interactions:"`.

@@ -1,5 +1,3 @@
-from typing import ClassVar
-
 from src.domain.entities import Chunk
 from src.application.context.section import Section
 
@@ -7,10 +5,8 @@ from src.application.context.section import Section
 class ChunksSection(Section):
     """Retrieval (RAG) context chunks."""
 
-    default_importance: ClassVar[float] = 0.4
-
     def __init__(self, chunks: list[Chunk], *, importance: float | None = None) -> None:
-        super().__init__(separator="\n\n", importance=importance)
+        super().__init__(separator="\n\n", importance=importance, default_importance=0.4)
         self._chunks = chunks
 
     @property

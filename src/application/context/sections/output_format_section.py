@@ -1,15 +1,11 @@
-from typing import ClassVar
-
 from src.application.context.section import Section
 
 
 class OutputFormatSection(Section):
     """Describes the expected output format."""
 
-    default_importance: ClassVar[float] = 0.1
-
     def __init__(self, content: str, *, importance: float | None = None) -> None:
-        super().__init__(importance=importance)
+        super().__init__(importance=importance, default_importance=0.1)
         self._content = content
 
     @property

@@ -60,7 +60,7 @@ The LLM / Generation API is responsible for everything that happens **after** re
 |---|---|
 | `src/application/dtos.py` | `AnalyzeSuggestionResponse` — the output contract |
 | `src/application/exceptions.py` | LLM exception hierarchy only: `LLMBaseError`, `LLMConfigurationError`, `LLMConnectionError`, `LLMAPIError`, `LLMAuthenticationError` (lines 55-85). Do NOT touch `ApplicationError`, `ApplicationAPIError`, or any Embedder exception. |
-| `src/application/context/` | `Section` base class (general-purpose, with `importance` weight) and the predefined sections (`RoleSection`, `HistorySection`, `ChunksSection`, `SystemInputSection`, `SystemOutputSection`, `UserInputSection`, `OutputFormatSection`, `StringSection`) |
+| `src/application/context/` | `Section` base class (general-purpose, with `importance` weight) and the predefined sections (`RoleSection`, `HistorySection`, `ChunksSection`, `SystemInputSection`, `UserInputSection`, `OutputFormatSection`). New sections are developer-designed `Section` subclasses — there is no generic string section. |
 | `src/application/prompt_architecture/` | `PromptBuilder` (prompt composition/rendering only) |
 | `src/infrastructure/configs/settings.py` | `LLMSettings` class (lines 30-52) and `llm_settings` singleton. Do NOT touch `CoreSettings`, `EmbeddingSettings`, or `embedding_settings`. |
 | `src/infrastructure/configs/llm_provider_configs.py` | Entire file — `LLMProvider`, `APIKeyProvider`, `AsyncOpenAIClientFactory` |

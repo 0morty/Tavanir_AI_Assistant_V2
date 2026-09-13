@@ -25,10 +25,8 @@ src/application/context/
     ├── history_section.py      # HistorySection
     ├── chunks_section.py       # ChunksSection (RAG context)
     ├── system_input_section.py # SystemInputSection
-    ├── system_output_section.py# SystemOutputSection
     ├── user_input_section.py   # UserInputSection
     ├── output_format_section.py# OutputFormatSection
-    └── string_section.py       # StringSection (generic, name + raw string)
 src/application/prompt_architecture/
 ├── __init__.py
 └── prompt_builder.py           # PromptBuilder (name-keyed registry)
@@ -101,14 +99,12 @@ One concrete section per canonical section type, each owning its `default_import
 - **`HistorySection`** (`src/application/context/sections/history_section.py`) — `HISTORY`, default importance `0.3`. Renders `HistoryMessage` turns as the body (each as `role: content`), framed by `pre_context = "History of previous interactions:"`.
 - **`ChunksSection`** (`src/application/context/sections/chunks_section.py`) — `CHUNKS`, default importance `0.4`. Renders RAG context as numbered `Chunk N:` blocks, framed by `pre_context = "Relevant context chunks:"`.
 - **`SystemInputSection`** (`src/application/context/sections/system_input_section.py`) — `SYSTEM-INPUT`, default importance `0.5`. System-level input passed to the model.
-- **`SystemOutputSection`** (`src/application/context/sections/system_output_section.py`) — `SYSTEM-OUTPUT`, default importance `0.5`. System-level output expected from the model.
 - **`UserInputSection`** (`src/application/context/sections/user_input_section.py`) — `USER-INPUT`, default importance `0.5`. User-provided input passed to the model.
 - **`OutputFormatSection`** (`src/application/context/sections/output_format_section.py`) — `OUTPUT-FORMAT`, default importance `0.1`. Describes the expected output format.
-- **`StringSection`** (`src/application/context/sections/string_section.py`) — arbitrary `name` + raw string content, default importance `0.5`. The escape hatch used by `PromptBuilder.set_section(name, "text")` for custom text-only sections.
 
 ### Adding a custom section
 
-A developer introduces a new section by subclassing — **no central enum or framework code changes required**:
+Every section is **designed by a developer**. There is no generic "string" section and no raw-text escape hatch: a new section must be an explicit `Section` subclass that owns its identity (`section_type`), content (`body()`), and default importance. Adding one requires **no central enum or framework code changes**:
 
 ```python
 class RegulationSection(Section):
@@ -121,6 +117,8 @@ class RegulationSection(Section):
         return "Relevant regulations."
 ```
 
+See [Section Mechanism](section_mechanism.md) for the full design rules.
+
 ### `PromptBuilder` (`src/application/prompt_architecture/prompt_builder.py`)
 
 A **name-keyed ordered registry** of `Section` instances. It ships the canonical sections and renders them in order:
@@ -128,7 +126,7 @@ A **name-keyed ordered registry** of `Section` instances. It ships the canonical
 | Member | Kind | Responsibility |
 |---|---|---|
 | `__init__(sections=None, *, seed_defaults=True)` | constructor | Seeds the canonical sections (empty) unless `seed_defaults=False`; merges any provided sections |
-| `set_section(name, value)` | method | Register a section under `name`. `value` is a `Section` instance (its `section_type` must match `name`) or a raw string (wrapped in `StringSection`). New names append; existing names replace in place |
+| `set_section(name, value)` | method | Register a section under `name`. `value` must be a `Section` instance whose `section_type` matches `name` (anything else raises `TypeError`). New names append; existing names replace in place |
 | `add_section(section)` | method | Append a section keyed by its own `section_type`; raises `ValueError` on a duplicate name |
 | `get_section(name)` | method | Return the registered section or `None` |
 | `has_section(name)` | method | Whether a section is registered |
@@ -136,20 +134,19 @@ A **name-keyed ordered registry** of `Section` instances. It ships the canonical
 | `set_history(messages)` | method | Configure the `HISTORY` default section |
 | `set_chunks(chunks)` | method | Configure the `CHUNKS` default section |
 | `set_system_input(content)` | method | Configure the `SYSTEM-INPUT` default section |
-| `set_system_output(content)` | method | Configure the `SYSTEM-OUTPUT` default section |
 | `set_output_format(content)` | method | Configure the `OUTPUT-FORMAT` default section |
 | `sections` | property | Ordered list of composed sections |
 | `render()` | method | Render all non-empty sections in order, joined by `\n\n` |
 
-**Canonical section order** (defaults): `ROLE, HISTORY, CHUNKS, SYSTEM-INPUT, SYSTEM-OUTPUT, OUTPUT-FORMAT`. Names are normalized with `strip().upper()`, so `"regulation"`, `"REGULATION"`, and `" Regulation "` address the same slot. Setting an existing name replaces it **in place**; a new name appends after the defaults.
+**Canonical section order** (defaults): `ROLE, HISTORY, CHUNKS, SYSTEM-INPUT, OUTPUT-FORMAT`. Names are normalized with `strip().upper()`, so `"regulation"`, `"REGULATION"`, and `" Regulation "` address the same slot. Setting an existing name replaces it **in place**; a new name appends after the defaults.
 
-Custom sections coexist with the defaults:
+Custom sections (developer-designed `Section` subclasses) coexist with the defaults:
 
 ```python
 builder = PromptBuilder()
 builder.set_role("You are a legal analyst.")
 builder.set_section("REGULATION", RegulationSection())
-builder.set_section("INSTRUCTIONS", "Be concise.")
+builder.set_section("INSTRUCTIONS", InstructionsSection("Be concise."))
 ```
 
 ## Rendering Logic

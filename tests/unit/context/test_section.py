@@ -8,9 +8,7 @@ from src.application.context import (
     OutputFormatSection,
     RoleSection,
     Section,
-    StringSection,
     SystemInputSection,
-    SystemOutputSection,
     UserInputSection,
 )
 from src.domain.entities import Chunk, HistoryMessage
@@ -38,10 +36,8 @@ def test_predefined_sections_have_expected_default_importance():
     assert HistorySection([]).importance == 0.3
     assert ChunksSection([]).importance == 0.4
     assert SystemInputSection("").importance == 0.5
-    assert SystemOutputSection("").importance == 0.5
     assert UserInputSection("").importance == 0.5
     assert OutputFormatSection("").importance == 0.1
-    assert StringSection("REGULATION", "").importance == 0.5
 
 
 def test_explicit_importance_overrides_default():
@@ -65,7 +61,7 @@ def test_importance_above_one_is_rejected():
     for factory in (
         lambda: ChunksSection([], importance=1.1),
         lambda: HistorySection([], importance=2.0),
-        lambda: StringSection("X", "", importance=1.01),
+        lambda: RoleSection("", importance=1.01),
     ):
         with pytest.raises(ValueError):
             factory()
@@ -88,9 +84,9 @@ def test_arbitrary_importance_values_across_sections_are_allowed():
 
 def test_no_requirement_for_importance_to_sum_to_one():
     low = [
-        StringSection("A", "", importance=0.2),
-        StringSection("B", "", importance=0.1),
-        StringSection("C", "", importance=0.1),
+        RoleSection("", importance=0.2),
+        SystemInputSection("", importance=0.1),
+        UserInputSection("", importance=0.1),
     ]
     high = [
         ChunksSection([], importance=0.8),
@@ -114,7 +110,6 @@ def test_prompt_builder_behavior_remains_intact():
         [Chunk(chunk_id="1", parent_id="p1", content="chunk content", metadata={})]
     )
     builder.set_system_input("system input")
-    builder.set_system_output("system output")
     builder.set_output_format("Markdown")
 
     rendered = builder.render()
@@ -124,7 +119,6 @@ def test_prompt_builder_behavior_remains_intact():
         "HISTORY",
         "CHUNKS",
         "SYSTEM-INPUT",
-        "SYSTEM-OUTPUT",
         "OUTPUT-FORMAT",
     ]
     assert rendered.startswith("You are an assistant.")

@@ -2,19 +2,35 @@ from src.domain.entities import Chunk, HistoryMessage
 from src.domain.enums import HistoryRole
 from src.application.context.section import Section
 from src.application.context.sections.role_section import RoleSection
-from src.application.context.sections.string_section import StringSection
 from src.application.prompt_architecture.prompt_builder import PromptBuilder
 
 
 class RegulationSection(Section):
     """A custom section introduced without touching any central enum."""
 
+    def __init__(self, content: str = "Relevant regulations.") -> None:
+        self._content = content
+
     @property
     def section_type(self) -> str:
         return "REGULATION"
 
     def body(self) -> str:
-        return "Relevant regulations."
+        return self._content
+
+
+class InstructionsSection(Section):
+    """Another developer-designed custom section."""
+
+    def __init__(self, content: str) -> None:
+        self._content = content
+
+    @property
+    def section_type(self) -> str:
+        return "INSTRUCTIONS"
+
+    def body(self) -> str:
+        return self._content
 
 
 def test_default_builder_contains_canonical_sections_in_order():
@@ -24,7 +40,6 @@ def test_default_builder_contains_canonical_sections_in_order():
         "HISTORY",
         "CHUNKS",
         "SYSTEM-INPUT",
-        "SYSTEM-OUTPUT",
         "OUTPUT-FORMAT",
     ]
 
@@ -39,7 +54,6 @@ def test_typed_setters_configure_default_sections():
     builder.set_history([HistoryMessage(role=HistoryRole.USER, content="Hello")])
     builder.set_chunks([Chunk(chunk_id="1", parent_id="p1", content="chunk content", metadata={})])
     builder.set_system_input("system input")
-    builder.set_system_output("system output")
     builder.set_output_format("Markdown")
 
     rendered = builder.render()
@@ -48,7 +62,6 @@ def test_typed_setters_configure_default_sections():
     assert "user: Hello" in rendered
     assert "Chunk 1:" in rendered
     assert "system input" in rendered
-    assert "system output" in rendered
     assert "Markdown" in rendered
     assert rendered.startswith("You are an assistant.")
 
@@ -56,16 +69,15 @@ def test_typed_setters_configure_default_sections():
 def test_typed_setters_replace_in_place_keeping_order():
     builder = PromptBuilder()
     builder.set_role("first role")
-    builder.set_section("REGULATION", "content one")
+    builder.set_section("REGULATION", RegulationSection("content one"))
     builder.set_role("second role")
-    builder.set_section("REGULATION", "content two")
+    builder.set_section("REGULATION", RegulationSection("content two"))
 
     assert [s.section_type for s in builder.sections] == [
         "ROLE",
         "HISTORY",
         "CHUNKS",
         "SYSTEM-INPUT",
-        "SYSTEM-OUTPUT",
         "OUTPUT-FORMAT",
         "REGULATION",
     ]
@@ -73,14 +85,14 @@ def test_typed_setters_replace_in_place_keeping_order():
     assert builder.get_section("REGULATION").body() == "content two"
 
 
-def test_set_section_wraps_raw_string_into_string_section():
+def test_set_section_rejects_non_section_value():
     builder = PromptBuilder()
-    builder.set_section("REGULATION", "some text")
-
-    section = builder.get_section("regUlation")
-    assert isinstance(section, StringSection)
-    assert section.section_type == "REGULATION"
-    assert "some text" in builder.render()
+    try:
+        builder.set_section("REGULATION", "some text")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("Expected TypeError for non-Section value")
 
 
 def test_set_section_accepts_custom_section_instance():
@@ -105,7 +117,7 @@ def test_set_section_rejects_blank_name():
     builder = PromptBuilder()
     for blank in ("", "   "):
         try:
-            builder.set_section(blank, "text")
+            builder.set_section(blank, RegulationSection())
         except ValueError:
             pass
         else:
@@ -127,8 +139,8 @@ def test_add_section_appends_and_rejects_duplicates():
 
 def test_get_and_has_section():
     builder = PromptBuilder()
-    builder.set_section("METADATA", "meta")
-    assert builder.has_section("metadata")
+    builder.set_section("REGULATION", RegulationSection())
+    assert builder.has_section("regulation")
     assert not builder.has_section("UNKNOWN")
     assert builder.get_section("UNKNOWN") is None
 
@@ -136,8 +148,8 @@ def test_get_and_has_section():
 def test_custom_sections_coexist_with_defaults():
     builder = PromptBuilder()
     builder.set_role("You are a legal analyst.")
-    builder.set_section("REGULATION", "Regulation 1 content")
-    builder.set_section("INSTRUCTIONS", "Be concise.")
+    builder.set_section("REGULATION", RegulationSection("Regulation 1 content"))
+    builder.set_section("INSTRUCTIONS", InstructionsSection("Be concise."))
 
     rendered = builder.render()
     assert rendered.index("You are a legal analyst.") < rendered.index("Regulation 1 content")
@@ -147,7 +159,7 @@ def test_custom_sections_coexist_with_defaults():
 def test_seed_defaults_can_be_disabled():
     builder = PromptBuilder(seed_defaults=False)
     assert builder.sections == []
-    builder.set_section("REGULATION", "text")
+    builder.set_section("REGULATION", RegulationSection())
     assert [s.section_type for s in builder.sections] == ["REGULATION"]
 
 

@@ -33,12 +33,15 @@ from src.application.exceptions import (
     TextNormalizationError,
 )
 from src.domain.exceptions import (
+    ChunkingError,
     DomainError,
     EntityNotFoundError,
     InvalidShamsiDateFormatError,
     InvalidSparseVectorError,
     InvalidSuggestionStatusError,
     ParentChildIntegrityError,
+    RegulatoryChunkingError,
+    SuggestionChunkingError,
     VectorCollectionProvisioningError,
     VectorPayloadValidationError,
     VectorSearchError,
@@ -104,6 +107,21 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         code="RETRIEVAL_FAILED",
         default_pointer=None,
+    ),
+    ChunkingError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="CHUNKING_FAILED",
+        default_pointer="/data",
+    ),
+    SuggestionChunkingError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="CHUNKING_FAILED",
+        default_pointer="/data",
+    ),
+    RegulatoryChunkingError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="CHUNKING_FAILED",
+        default_pointer="/data",
     ),
     # --- Application Exceptions ---
     EmbedderConnectionError: ErrorSpec(

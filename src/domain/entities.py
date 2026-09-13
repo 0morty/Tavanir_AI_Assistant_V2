@@ -110,6 +110,7 @@ class SuggestionChunkMetadata:
     """Filterable, strongly-typed metadata payload for suggestion child chunks (ADR-002)."""
 
     chunk_type: SuggestionChunkType
+    sub_index: int = 0
     status: SuggestionStatus | None = None
     context_title: str | None = None
     date: ShamsiDate | None = None

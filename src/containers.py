@@ -9,6 +9,7 @@ from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
+    ISuggestionChunker,
     ISuggestionVectorRepository,
     IUnitOfWork,
 )
@@ -28,6 +29,7 @@ from src.infrastructure.db.repositories import (
     QdrantSuggestionRepository,
     SqlSuggestionRepository,
 )
+from src.infrastructure.services.chunkers import FieldAwareSuggestionChunker
 from src.infrastructure.services.embeddings.openai_dense_embedder import (
     OpenAIDenseEmbedder,
 )
@@ -145,4 +147,9 @@ class Container(containers.DeclarativeContainer):
         SqlUnitOfWork,
         session_factory=db_session_factory,
         suggestion_repo_factory=providers.Object(SqlSuggestionRepository),
+    )
+
+    # 9. Suggestion Chunker Strategy
+    suggestion_chunker: providers.Provider[ISuggestionChunker] = providers.Factory(
+        FieldAwareSuggestionChunker
     )

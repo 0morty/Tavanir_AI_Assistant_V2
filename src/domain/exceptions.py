@@ -88,3 +88,25 @@ class ParentChildIntegrityError(DomainError):
 
 
 # endregion
+
+
+# region Chunking Exceptions
+class ChunkingError(DomainError):
+    """Base domain exception for document decomposition failures."""
+
+    pass
+
+
+class SuggestionChunkingError(ChunkingError):
+    """Raised when decomposing a Suggestion entity into vector chunks fails."""
+
+    pass
+
+
+class RegulatoryChunkingError(ChunkingError):
+    """Raised when decomposing a RegulatoryDocument into vector chunks fails."""
+
+    pass
+
+
+# endregion

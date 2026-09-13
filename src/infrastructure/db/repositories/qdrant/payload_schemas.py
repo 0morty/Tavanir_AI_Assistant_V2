@@ -36,6 +36,7 @@ class SuggestionChunkPayloadDTO(BaseChunkPayloadDTO):
     """DTO for serializing/deserializing suggestion chunks to/from Qdrant payload."""
 
     chunk_type: str
+    sub_index: int = 0
     status: str | None = None
     context_title: str | None = None
     date: str | None = None
@@ -51,6 +52,7 @@ class SuggestionChunkPayloadDTO(BaseChunkPayloadDTO):
             parent_content=chunk.parent_content,
             chunk_status=chunk.chunk_status.value,
             chunk_type=chunk.metadata.chunk_type.value,
+            sub_index=chunk.metadata.sub_index,
             status=chunk.metadata.status.title_fa if chunk.metadata.status else None,
             context_title=chunk.metadata.context_title,
             date=str(chunk.metadata.date) if chunk.metadata.date else None,
@@ -59,6 +61,7 @@ class SuggestionChunkPayloadDTO(BaseChunkPayloadDTO):
     def to_domain(self, score: float = 0.0) -> SuggestionSearchResult:
         metadata = SuggestionChunkMetadata(
             chunk_type=SuggestionChunkType(self.chunk_type),
+            sub_index=self.sub_index,
             status=SuggestionStatus.from_string(self.status) if self.status else None,
             context_title=self.context_title,
             date=ShamsiDate(self.date) if self.date else None,

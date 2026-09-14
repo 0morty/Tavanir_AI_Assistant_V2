@@ -1,8 +1,9 @@
 from src.domain.entities import HistoryMessage
-from src.application.context.section import Section
+from src.domain.overflow_strategy_stack import OverflowStrategyStack
+from src.application.interfaces import ISection
 
 
-class HistorySection(Section):
+class HistorySection(ISection):
     """Conversation/interaction history, distinct from RAG context chunks."""
 
     def __init__(
@@ -11,6 +12,7 @@ class HistorySection(Section):
         *,
         importance: float | None = None,
         demand: float | None = None,
+        overflow_strategies: OverflowStrategyStack | None = None,
     ) -> None:
         super().__init__(
             separator="\n\n",
@@ -18,6 +20,7 @@ class HistorySection(Section):
             demand=demand,
             default_importance=0.3,
             default_demand=0.4,
+            overflow_strategies=overflow_strategies,
         )
         self._messages = messages
 

@@ -4,7 +4,7 @@ This document describes **how prompt/context sections are designed and registere
 
 ## The core rule: every section is designed by a developer
 
-> **A new section must be an explicit `Section` subclass designed by the developer. There is no generic section and no raw-text escape hatch.**
+> **A new section must be an explicit `ISection` subclass designed by the developer. There is no generic section and no raw-text escape hatch.**
 
 Every logical part of a prompt is a dedicated, named, developer-owned class:
 
@@ -24,13 +24,13 @@ Earlier iterations shipped two convenience classes that violated this rule and w
 
 `StringSection` was the real anti-pattern: it let `set_section("INSTRUCTIONS", "Be concise.")` create a section without any dedicated class, so section types multiplied without design intent, and `section_type` stopped being reliable identity. With it gone:
 
-- `PromptBuilder.set_section(name, value)` accepts **only** `Section` instances.
-- A non-`Section` value raises `TypeError` immediately.
-- Every section in the prompt is traceable to a real `Section` subclass.
+- `PromptBuilder.set_section(name, value)` accepts **only** `ISection` instances.
+- A non-`ISection` value raises `TypeError` immediately.
+- Every section in the prompt is traceable to a real `ISection` subclass.
 
-## The `Section` contract
+## The `ISection` contract
 
-A `Section` subclass decides what the section is; `importance` and `demand` are instance properties **owned by the base class**, not class-level contracts redeclared in each subclass:
+An `ISection` subclass decides what the section is; `importance`, `demand`, and `overflow_strategies` are instance properties **owned by the base class**, not class-level contracts redeclared in each subclass:
 
 | Member | Role |
 |---|---|
@@ -38,29 +38,31 @@ A `Section` subclass decides what the section is; `importance` and `demand` are 
 | `body()` (abstract method) | The section's main content |
 | `importance` (base-owned property) | Intrinsic semantic importance in `[0.0, 1.0]`, used as a weight when redistributing unused token capacity. **Not** a token percentage |
 | `demand` (base-owned property) | Relative context-capacity demand in `[0.0, 1.0]`, used to calculate the section's initial proportional token capacity |
+| `overflow_strategies` (base-owned property) | The section's `OverflowStrategyStack`: ordered overflow strategies (lower index = higher priority) plus the restart policy; pure configuration — no execution |
 | `default_importance` (base-constructor parameter, default `0.5`) | Default importance used when no explicit `importance` is passed; each subclass passes its own via `super().__init__(..., default_importance=...)` |
 | `default_demand` (base-constructor parameter, default `0.5`) | Default demand used when no explicit `demand` is passed; each subclass passes its own via `super().__init__(..., default_demand=...)` |
+| `default_overflow_strategies` (base-constructor parameter) | Default overflow stack used when no explicit `overflow_strategies` is passed; falls back to `OverflowStrategyStack()` (`(TRUNCATE, IGNORE)`, no restart) |
 | `pre_context` / `post_context` (properties) | Optional framing around the body (default empty) |
 
-Neither `importance` nor `demand` is a token percentage, neither needs to sum to `1.0` across sections, and `Section` never normalizes them or allocates capacity itself.
+Neither `importance` nor `demand` is a token percentage, neither needs to sum to `1.0` across sections, and `ISection` never normalizes them or allocates capacity itself.
 
-`Section.render()` joins `pre_context`, `body()`, and `post_context` (skipping empty parts) into a single string.
+`ISection.render()` joins `pre_context`, `body()`, and `post_context` (skipping empty parts) into a single string.
 
 ## Adding a new section
 
-1. Create a subclass of `Section` in `src/application/context/sections/`.
+1. Create an `ISection` subclass in `src/application/context/sections/` (the abstract contract lives in `src/application/interfaces/i_section.py`).
 2. Give it a stable `section_type` and a `body()`.
-3. Choose a default importance and a default demand, each in `[0.0, 1.0]`, and pass them to the base constructor (both default to `0.5` when omitted).
+3. Choose a default importance and a default demand, each in `[0.0, 1.0]`, and pass them to the base constructor (both default to `0.5` when omitted). Configure `overflow_strategies` only when the section needs a non-default overflow stack.
 4. Export it from `src/application/context/sections/__init__.py` (and `src/application/context/__init__.py` if it should be part of the public `context` API).
 5. Register it on a builder with `set_section("...", MySection(...))` or `add_section(MySection(...))`.
 
 Example — a regulation section designed for the job:
 
 ```python
-from src.application.context.section import Section
+from src.application.interfaces import ISection
 
 
-class RegulationSection(Section):
+class RegulationSection(ISection):
 
     def __init__(
         self,
@@ -93,7 +95,7 @@ builder.set_section("REGULATION", RegulationSection("Law 137 ..."))
 
 ## Registration constraints
 
-- `set_section(name, value)` requires `isinstance(value, Section)`; otherwise it raises `TypeError`.
+- `set_section(name, value)` requires `isinstance(value, ISection)`; otherwise it raises `TypeError`.
 - `name` must match the section's `section_type` after normalization (`strip().upper()`); a mismatch raises `ValueError`.
 - A blank name raises `ValueError`.
 - `add_section(section)` appends a section keyed by its own `section_type` and rejects duplicates with `ValueError`.
@@ -102,7 +104,7 @@ builder.set_section("REGULATION", RegulationSection("Law 137 ..."))
 ## Where custom sections come from
 
 ```text
-                    Section (abstract base)
+                    ISection (abstract base / app port)
                             │
            ┌────────────────┼──────────────────────┐
            │                │                      │
@@ -118,4 +120,5 @@ Custom sections live in the same package as the canonicals and are plain subclas
 ## Related documents
 
 - [Section Properties: `importance` and `demand`](section_properties.md) — definitions of the two Section weights.
+- [Overflow Strategies: `OverflowStrategy` and `OverflowStrategyStack`](overflow_strategies.md) — the section overflow-strategy data model.
 - [Prompt-Builder Architecture](prompt_builder_entities.md) — the `PromptBuilder` registry, canonical sections, and rendering logic.

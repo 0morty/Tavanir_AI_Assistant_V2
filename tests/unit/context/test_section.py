@@ -7,28 +7,37 @@ from src.application.context import (
     HistorySection,
     OutputFormatSection,
     RoleSection,
-    Section,
     SystemInputSection,
     UserInputSection,
 )
+from src.application.interfaces import ISection
 from src.domain.entities import Chunk, HistoryMessage
-from src.domain.enums import HistoryRole
-from src.application.prompt_architecture import PromptBuilder
+from src.domain.enums import HistoryRole, OverflowStrategy
+from src.domain.overflow_strategy_stack import OverflowStrategyStack
+from src.application.prompt import PromptBuilder
 
 
-def test_section_is_available_from_general_purpose_location():
-    from src.application.context.section import Section as ModuleSection
+def test_section_interface_is_available_from_interfaces():
+    from src.application.interfaces.i_section import ISection as ModuleISection
 
-    assert ModuleSection is Section
-    assert issubclass(ChunksSection, Section)
+    assert ModuleISection is ISection
+    assert issubclass(ChunksSection, ISection)
 
 
-def test_prompt_architecture_no_longer_owns_section():
+def test_context_no_longer_owns_section_interface():
     with pytest.raises(ImportError):
-        importlib.import_module("src.application.prompt_architecture.prompt_section")
+        importlib.import_module("src.application.context.section")
 
     with pytest.raises(AttributeError):
-        importlib.import_module("src.application.prompt_architecture").Section
+        importlib.import_module("src.application.context").Section
+
+
+def test_prompt_no_longer_owns_section():
+    with pytest.raises(ImportError):
+        importlib.import_module("src.application.prompt.prompt_section")
+
+    with pytest.raises(AttributeError):
+        importlib.import_module("src.application.prompt").Section
 
 
 def test_predefined_sections_have_expected_default_importance():
@@ -176,6 +185,62 @@ def test_importance_and_demand_are_independent():
     assert section.demand == 0.9
 
 
+def test_predefined_sections_use_default_overflow_strategies():
+    expected = OverflowStrategyStack()
+    for section in (
+        RoleSection(""),
+        HistorySection([]),
+        ChunksSection([]),
+        SystemInputSection(""),
+        UserInputSection(""),
+        OutputFormatSection(""),
+    ):
+        stack = section.overflow_strategies
+        assert isinstance(stack, OverflowStrategyStack)
+        assert stack == expected
+
+
+def test_overflow_strategies_can_be_overridden():
+    custom = OverflowStrategyStack(
+        [
+            OverflowStrategy.SUMMARIZE,
+            OverflowStrategy.TRUNCATE,
+            OverflowStrategy.IGNORE,
+        ],
+        restart=True,
+        max_restarts=1,
+    )
+    section = ChunksSection([], overflow_strategies=custom)
+    assert section.overflow_strategies is custom
+
+
+def test_overflow_strategies_rejects_non_stack():
+    with pytest.raises(TypeError):
+        ChunksSection([], overflow_strategies=[OverflowStrategy.TRUNCATE])
+
+
+def test_section_default_overflow_strategies_can_be_overridden_by_subclass():
+    class CustomSection(ISection):
+        def __init__(self) -> None:
+            super().__init__(
+                default_overflow_strategies=OverflowStrategyStack(
+                    [OverflowStrategy.SUMMARIZE]
+                )
+            )
+
+        @property
+        def section_type(self) -> str:
+            return "CUSTOM"
+
+        def body(self) -> str:
+            return ""
+
+    assert CustomSection().overflow_strategies == OverflowStrategyStack(
+        [OverflowStrategy.SUMMARIZE]
+    )
+    assert CustomSection().overflow_strategies != OverflowStrategyStack()
+
+
 def test_prompt_builder_behavior_remains_intact():
     builder = PromptBuilder()
     builder.set_role("You are an assistant.")
@@ -193,6 +258,7 @@ def test_prompt_builder_behavior_remains_intact():
         "HISTORY",
         "CHUNKS",
         "SYSTEM-INPUT",
+        "USER-INPUT",
         "OUTPUT-FORMAT",
     ]
     assert rendered.startswith("You are an assistant.")
@@ -209,3 +275,6 @@ def test_prompt_builder_registers_sections_with_default_importance():
     assert builder.get_section("CHUNKS").demand == pytest.approx(0.5)
     assert builder.get_section("HISTORY").demand == pytest.approx(0.4)
     assert builder.get_section("OUTPUT-FORMAT").demand == pytest.approx(0.2)
+
+    assert builder.get_section("USER-INPUT").importance == pytest.approx(0.5)
+    assert builder.get_section("USER-INPUT").demand == pytest.approx(0.4)

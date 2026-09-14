@@ -67,6 +67,14 @@ class RegulatoryDocumentType(str, Enum):
     GUIDELINE = "guideline"  # شیوه‌نامه / راهنما
 
 
+class OverflowStrategy(str, Enum):
+    """Overflow handling strategy for content that exceeds its capacity."""
+
+    TRUNCATE = "truncate"
+    SUMMARIZE = "summarize"
+    IGNORE = "ignore"
+
+
 class AuthorityLevel(str, Enum):
     BINDING = "binding"  # الزامی
     GUIDANCE = "guidance"  # ارشادی / توصیه‌ای

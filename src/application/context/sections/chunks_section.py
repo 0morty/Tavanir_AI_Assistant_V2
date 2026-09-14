@@ -1,8 +1,9 @@
 from src.domain.entities import Chunk
-from src.application.context.section import Section
+from src.domain.overflow_strategy_stack import OverflowStrategyStack
+from src.application.interfaces import ISection
 
 
-class ChunksSection(Section):
+class ChunksSection(ISection):
     """Retrieval (RAG) context chunks."""
 
     def __init__(
@@ -11,6 +12,7 @@ class ChunksSection(Section):
         *,
         importance: float | None = None,
         demand: float | None = None,
+        overflow_strategies: OverflowStrategyStack | None = None,
     ) -> None:
         super().__init__(
             separator="\n\n",
@@ -18,6 +20,7 @@ class ChunksSection(Section):
             demand=demand,
             default_importance=0.4,
             default_demand=0.5,
+            overflow_strategies=overflow_strategies,
         )
         self._chunks = chunks
 

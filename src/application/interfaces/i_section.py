@@ -1,13 +1,15 @@
 from abc import ABC, abstractmethod
 
+from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
-class Section(ABC):
+
+class ISection(ABC):
     """General-purpose logical section of a context.
 
-    A ``Section`` is a reusable logical part of a context. Prompting is
-    just one consumer: the ``PromptBuilder`` composes ``Section`` instances
+    An ``ISection`` is a reusable logical part of a context. Prompting is
+    just one consumer: the ``PromptBuilder`` composes ``ISection`` instances
     into an ordered prompt. Other components -- such as context
-    construction or token allocation -- may consume the same ``Section``
+    construction or token allocation -- may consume the same ``ISection``
     concept without ever touching the prompt layer.
 
     Every section renders as three stacked parts:
@@ -36,9 +38,14 @@ class Section(ABC):
     proportional token capacity.
 
     Both values of several sections are independent: they do not need to sum
-    to ``1.0``, and a ``Section`` never normalizes them or allocates capacity
-    itself. Normalization and allocation are the responsibility of the
-    context/token-allocation logic.
+    to ``1.0``, and an ``ISection`` never normalizes them or allocates
+    capacity itself. Normalization and allocation are the responsibility of
+    the context/token-allocation logic.
+
+    ``overflow_strategies`` is an :class:`OverflowStrategyStack`: the ordered
+    list of overflow strategies (lower index means higher priority) plus the
+    restart policy for this section. It is pure configuration/state; the
+    section never executes a strategy or runs any fallback/retry logic.
     """
 
     def __init__(
@@ -48,10 +55,20 @@ class Section(ABC):
         demand: float | None = None,
         default_importance: float = 0.5,
         default_demand: float = 0.5,
+        overflow_strategies: OverflowStrategyStack | None = None,
+        default_overflow_strategies: OverflowStrategyStack | None = None,
     ) -> None:
         self.separator = separator
         self.importance = default_importance if importance is None else importance
         self.demand = default_demand if demand is None else demand
+        resolved_default = (
+            default_overflow_strategies
+            if default_overflow_strategies is not None
+            else OverflowStrategyStack()
+        )
+        self.overflow_strategies = (
+            resolved_default if overflow_strategies is None else overflow_strategies
+        )
 
     @property
     @abstractmethod
@@ -83,6 +100,20 @@ class Section(ABC):
                 f"Section demand must be in the range [0.0, 1.0]; got {value!r}."
             )
         self._demand = value
+
+    @property
+    def overflow_strategies(self) -> OverflowStrategyStack:
+        """Ordered overflow strategies for this section, highest priority first."""
+        return self._overflow_strategies
+
+    @overflow_strategies.setter
+    def overflow_strategies(self, value: OverflowStrategyStack) -> None:
+        if not isinstance(value, OverflowStrategyStack):
+            raise TypeError(
+                "Section overflow_strategies must be an OverflowStrategyStack "
+                f"instance, got {type(value).__name__}."
+            )
+        self._overflow_strategies = value
 
     @property
     def pre_context(self) -> str:

@@ -3,6 +3,7 @@ import pytest
 from src.domain.enums import (
     AuthorityLevel,
     ChunkStatus,
+    OverflowStrategy,
     RegulatoryDocumentType,
     SourceType,
     SuggestionChunkType,
@@ -50,6 +51,12 @@ def test_chunk_status():
     assert ChunkStatus.ACTIVE.value == "active"
     assert ChunkStatus.STAGING.value == "staging"
     assert ChunkStatus.DEPRECATED.value == "deprecated"
+
+
+def test_overflow_strategy():
+    assert OverflowStrategy.TRUNCATE.value == "truncate"
+    assert OverflowStrategy.SUMMARIZE.value == "summarize"
+    assert OverflowStrategy.IGNORE.value == "ignore"
 
 
 def test_source_type():

@@ -1,11 +1,11 @@
 from src.domain.entities import Chunk, HistoryMessage
 from src.domain.enums import HistoryRole
-from src.application.context.section import Section
+from src.application.interfaces import ISection
 from src.application.context.sections.role_section import RoleSection
-from src.application.prompt_architecture.prompt_builder import PromptBuilder
+from src.application.prompt.prompt_builder import PromptBuilder
 
 
-class RegulationSection(Section):
+class RegulationSection(ISection):
     """A custom section introduced without touching any central enum."""
 
     def __init__(self, content: str = "Relevant regulations.") -> None:
@@ -19,7 +19,7 @@ class RegulationSection(Section):
         return self._content
 
 
-class InstructionsSection(Section):
+class InstructionsSection(ISection):
     """Another developer-designed custom section."""
 
     def __init__(self, content: str) -> None:
@@ -35,13 +35,15 @@ class InstructionsSection(Section):
 
 def test_default_builder_contains_canonical_sections_in_order():
     builder = PromptBuilder()
-    assert [s.section_type for s in builder.sections] == [
+    expected = [
         "ROLE",
         "HISTORY",
         "CHUNKS",
         "SYSTEM-INPUT",
+        "USER-INPUT",
         "OUTPUT-FORMAT",
     ]
+    assert [s.section_type for s in builder.sections] == expected
 
 
 def test_empty_builder_renders_empty_string():
@@ -78,6 +80,7 @@ def test_typed_setters_replace_in_place_keeping_order():
         "HISTORY",
         "CHUNKS",
         "SYSTEM-INPUT",
+        "USER-INPUT",
         "OUTPUT-FORMAT",
         "REGULATION",
     ]

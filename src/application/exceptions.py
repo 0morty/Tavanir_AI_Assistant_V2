@@ -139,3 +139,13 @@ class TextNormalizationError(ApplicationError):
 
 
 # endregion
+
+
+# region Tokenizer Exceptions
+class TokenizerError(ApplicationError):
+    """Raised when LLM text tokenization or decoding fails."""
+
+    pass
+
+
+# endregion

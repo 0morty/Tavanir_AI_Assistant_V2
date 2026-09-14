@@ -96,7 +96,18 @@ docs/
 
 ---
 
-### 8. `docs/planning/` (Project Roadmaps & Migration Backlogs)
+### 8. `docs/documentation/` (Feature-Specific Technical Documentation)
+* **Purpose**: Deep technical documentation for individual implemented features, components, or algorithms.
+* **What is stored here**:
+  * **Prompt-Builder Architecture (`prompt_builder_entities.md`)**: `PromptBuilder`, canonical sections, and rendering.
+  * **Section Mechanism (`section_mechanism.md`)**: The `ISection` contract and how new sections are added.
+  * **Section Properties (`section_properties.md`)**: The Section weights `importance` and `demand`.
+  * **Overflow Strategies (`overflow_strategies.md`)**: `OverflowStrategy` enum and `OverflowStrategyStack` semantics.
+  * **Word-Boundary Binary Search Truncation (`word_boundary_binary_search_truncation.md`)**: Deterministic token-budget truncation via binary search on word boundaries (the `TRUNCATE` overflow implementation).
+
+---
+
+### 9. `docs/planning/` (Project Roadmaps & Migration Backlogs)
 * **Purpose**: Project-level milestone tracking, legacy migration checklists, and backlog documentation.
 * **What is stored here**:
   * **Migration Backlog (`v2_unimplemented_features.md`)**: Complete checklist of features, database extractors, vector adapters, and use cases transitioning from legacy V1 to V2 Clean Architecture.
@@ -104,14 +115,14 @@ docs/
 
 ---
 
-### 9. `docs/technology-stacks.md` (Current & Target Stack)
+### 10. `docs/technology-stacks.md` (Current & Target Stack)
 * **Purpose**: Single reference of verified dependencies and planned technologies, with gaps flagged.
 * **What is stored here**:
   * The de-facto library set from `requirements.txt` plus imported-but-missing packages (`openai`, `dependency-injector`) and target components (Qdrant, ARQ, MSSQL/Excel extractors).
 
 ---
 
-### 10. `docs/notes/` (Temporary Collaborative Notes & Spikes)
+### 11. `docs/notes/` (Temporary Collaborative Notes & Spikes)
 * **Purpose**: Short-term collaborative working notes, investigation logs, benchmark spikes, and meeting minutes.
 * **What will be stored here**:
   * Temporary research findings (e.g., `spike_parsbert_batch_encoding.md`, `meeting_notes_2026_09.md`).

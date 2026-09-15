@@ -104,6 +104,7 @@ docs/
   * **Section Properties (`section_properties.md`)**: The Section weights `importance` and `demand`.
   * **Overflow Strategies (`overflow_strategies.md`)**: `OverflowStrategy` enum and `OverflowStrategyStack` semantics.
   * **Word-Boundary Binary Search Truncation (`word_boundary_binary_search_truncation.md`)**: Deterministic token-budget truncation via binary search on word boundaries (the `TRUNCATE` overflow implementation).
+  * **Gemma Tokenizer Usage (`gemma_tokenizer_usage.md`)**: Fast Gemma tokenizer integration for the ContextBuilder — offset mapping, token counting, and exact-substring truncation.
 
 ---
 

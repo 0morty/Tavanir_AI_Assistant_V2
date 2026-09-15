@@ -163,7 +163,7 @@ offsets = encoding["offset_mapping"]
 - Special tokens (e.g. the default `<bos>`) are typically reported with an offset of `(0, 0)`. `[L]` Consumers must skip/ignore those entries.
 - `padding_side = "left"` means padding tokens appear at the start of a padded `BatchEncoding` — a relevant detail if we ever batch inputs. `[S]`
 
-**Our adapter** calls `self._tokenizer(text, return_offsets_mapping=True)` in `encode_with_offsets` and returns `list(encoding["offset_mapping"])`.
+**Our adapter** calls `self._tokenizer(text, return_offsets_mapping=True)` inside `encode` and returns each `(token_id, (start, end))` pair.
 
 ---
 
@@ -183,7 +183,7 @@ Truncation must produce a prefix of the original text (the requirement of the wo
 text = "بررسی پیشنهاد... " (original user/retrieval text)
          │
          ▼
-offsets = encode_with_offsets(text)   # token boundaries as (start, end)
+offsets = [o for _, o in encode(text)]       # token boundaries as (start, end)
          │
          ▼
 choose k-th token end = offsets[k][1] such that:
@@ -252,16 +252,15 @@ Concrete mapping (`src/domain/context/tokenizer.py` ↔ `src/infrastructure/serv
 
 | Abstraction member | GemmaAdapter implementation | Notes |
 |---|---|---|
-| `supports_offset_mapping` (read-only property, no setter) | `return True` | The fast backend provides offsets (`[L]`); the property advertises the capability without forcing a feature-detection call. |
-| `encode(text) -> list[int]` | `list(self._tokenizer.encode(text))` | Returns token IDs **including default `<bos>`** (see §4.2). |
+| `supports_offset_mapping` (read-only property, no setter) | `return True` | Part of the interface contract; the flag documents that offsets are available (the fast backend provides them, `[L]`). |
+| `encode(text) -> list[tuple[int, tuple[int,int]]]` | `self._tokenizer(text, return_offsets_mapping=True)` → `zip(ids, offset_mapping)` | Each element is `(token_id, (start, end))` **including default `<bos>`** (see §4.2); offsets are into the original string; skip `(0,0)` special-token entries before using cut indices (see §5, §6). |
 | `count_tokens(text) -> int` | `len(self.encode(text))` | Counts exactly what `encode` produces; consistent with the budget sent to the LLM. |
-| `encode_with_offsets(text) -> list[tuple[int,int]]` | `self._tokenizer(text, return_offsets_mapping=True)["offset_mapping"]` | Offsets into the original string; skip `(0,0)` special-token entries before using cut indices (see §5, §6). |
 
 Design rules that follow:
 
 - The abstraction stays minimal and pure-stdlib; it never imports `transformers`. `[A]`
 - The adapter is a thin translation layer; it contains **no** truncation, summarizing, or overflow logic. `[A]`
-- Offset-capability is *offered*, never assumed: consumers should check `supports_offset_mapping` before calling `encode_with_offsets`, and fall back gracefully (e.g. to prefix counting) if `False`. `[A]`
+- Offsets are part of the `encode` contract; `supports_offset_mapping` remains a read-only indicator that every concrete adapter must expose, and current implementations return `True`. `[A]`
 - BOS-inclusive counting is the current contract of `count_tokens`. If the token budget must exclude `<bos>`, the exclusion is applied at the call site (via `add_special_tokens=False`), not inside the adapter. `[L][A]`
 
 ---

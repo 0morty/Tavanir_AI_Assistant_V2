@@ -25,18 +25,14 @@ class GemmaTokenizer(Tokenizer):
         """Hugging Face fast tokenizers (``GemmaTokenizerFast``) support offset mapping."""
         return True
 
-    def encode(self, text: str) -> list[int]:
-        """Encode ``text`` into token IDs using the wrapped Hugging Face tokenizer."""
-        return list(self._tokenizer.encode(text))
-
-    def encode_with_offsets(self, text: str) -> list[tuple[int, int]]:
-        """Encode ``text`` and return per-token character offsets into the original text.
+    def encode(self, text: str) -> list[tuple[int, tuple[int, int]]]:
+        """Encode ``text`` and return each token ID paired with its character offsets.
 
         Offsets are requested from Hugging Face with ``return_offsets_mapping=True``,
         preserving the original text boundaries.
         """
         encoding = self._tokenizer(text, return_offsets_mapping=True)
-        return list(encoding["offset_mapping"])
+        return list(zip(encoding["input_ids"], encoding["offset_mapping"]))
 
     def count_tokens(self, text: str) -> int:
         """Return the number of tokens that encoding ``text`` would produce."""

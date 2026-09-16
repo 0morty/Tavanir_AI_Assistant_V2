@@ -1,11 +1,15 @@
+import dataclasses
+import hashlib
 import re
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Generic, TypeAlias, TypeVar
+from dataclasses import dataclass, field
+from typing import Any, Generic, TypeAlias, TypeVar
 
 from src.domain.enums import (
     AuthorityLevel,
     ChunkStatus,
+    HistoryRole,
     RegulatoryDocumentType,
     SuggestionChunkType,
     SuggestionStatus,
@@ -20,11 +24,6 @@ TMetadata = TypeVar("TMetadata")
 
 # Semantic type alias for dense embedding vectors
 DenseVector: TypeAlias = Sequence[float]
-from dataclasses import dataclass, field
-from typing import Any
-
-from src.domain.enums import HistoryRole, SuggestionStatus
-from src.domain.exceptions import InvalidShamsiDateFormatError
 
 
 @dataclass(frozen=True)
@@ -197,6 +196,78 @@ SuggestionSearchResult = SearchResultChunk[SuggestionChunkMetadata]
 RegulatorySearchResult = SearchResultChunk[RegulatoryChunkMetadata]
 # endregion
 
+
+# region Reference
+@dataclass(frozen=True)
+class ReferenceDetails:
+    """
+    Structural description of the currently available properties of a Reference.
+
+    Describes the property *shape* (name and runtime type of each available
+    property), not the runtime values. Properties whose value is `None` are
+    excluded, so different instances of the same Reference class may produce
+    different `ReferenceDetails`.
+    """
+
+    properties: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+
+    @classmethod
+    def from_instance(cls, reference: "Reference") -> "ReferenceDetails":
+        if not dataclasses.is_dataclass(reference):
+            return cls()
+        available: list[tuple[str, str]] = []
+        for dataclass_field in dataclasses.fields(reference):
+            value = getattr(reference, dataclass_field.name)
+            if value is None:
+                continue
+            available.append((dataclass_field.name, type(value).__name__))
+        return cls(properties=tuple(available))
+
+    def canonical(self) -> str:
+        """Deterministically sorted canonical descriptor: `name|type,name|type,...`."""
+        descriptors = sorted(
+            f"{name}|{property_type}"
+            for name, property_type in self.properties
+        )
+        return ",".join(descriptors)
+
+    def hash(self) -> str:
+        """Stable hash of the reference property shape (not instance values)."""
+        return hashlib.sha256(self.canonical().encode("utf-8")).hexdigest()
+
+
+class Reference(ABC):
+    """
+    Domain entity describing where a Section's content originated.
+
+    A `Reference` owns its state, a semantic `description`, its structural
+    `ReferenceDetails`, and an optional native `fluent_text()` behavior.
+    """
+
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """Human-readable meaning of the Reference (not its final rendered text)."""
+
+    @property
+    def details(self) -> ReferenceDetails:
+        """Structural description of the currently available properties."""
+        return ReferenceDetails.from_instance(self)
+
+    def fluent_text(self) -> str:
+        """
+        Native human-readable rendering of the Reference.
+
+        The base implementation signals that native rendering is unavailable;
+        the caller should fall back to the external generation mechanism.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not provide native fluent-text rendering."
+        )
+
+
+# endregion
+
 @dataclass(frozen=True)
 class HistoryMessage:
     role: HistoryRole
@@ -220,5 +291,7 @@ __all__ = [
     "SearchResultChunk",
     "SuggestionSearchResult",
     "RegulatorySearchResult",
+    "ReferenceDetails",
+    "Reference",
     "HistoryMessage"
 ]

@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 
 from src.application.context.sections.referenced_section import ReferencedSection
+from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.domain.entities import Reference, ReferenceItem
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
@@ -22,6 +23,8 @@ class ReferencedCollectionSection(ReferencedSection):
         self,
         items: Sequence[ReferenceItem],
         reference: Reference | None = None,
+        *,
+        reference_generator: IReferenceGenerator | None = None,
         separator: str = "\n\n",
         importance: float | None = None,
         demand: float | None = None,
@@ -32,6 +35,7 @@ class ReferencedCollectionSection(ReferencedSection):
     ) -> None:
         super().__init__(
             reference=reference,
+            reference_generator=reference_generator,
             separator=separator,
             importance=importance,
             demand=demand,
@@ -59,6 +63,9 @@ class ReferencedCollectionSection(ReferencedSection):
                 continue
 
             reference_text = self._resolve_reference_text(item.reference)
+            if not reference_text:
+                rendered.append(content)
+                continue
             rendered.append(
                 self.compose_referenced_content(reference_text, content)
             )

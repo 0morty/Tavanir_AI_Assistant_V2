@@ -1,4 +1,8 @@
 from src.application.interfaces import ISection
+from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.application.reference.deterministic_reference_generator import (
+    DeterministicReferenceGenerator,
+)
 from src.domain.entities import Reference
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
@@ -20,6 +24,7 @@ class ReferencedSection(ISection):
     def __init__(
         self,
         reference: Reference | None = None,
+        reference_generator: IReferenceGenerator | None = None,
         *,
         separator: str = "\n\n",
         importance: float | None = None,
@@ -39,6 +44,11 @@ class ReferencedSection(ISection):
             default_overflow_strategies=default_overflow_strategies,
         )
         self._reference = reference
+        self._reference_generator = (
+            reference_generator
+            if reference_generator is not None
+            else DeterministicReferenceGenerator()
+        )
 
     @property
     def reference(self) -> Reference | None:
@@ -49,9 +59,7 @@ class ReferencedSection(ISection):
         try:
             return reference.fluent_text()
         except NotImplementedError:
-            raise NotImplementedError(
-                "External reference generation is not yet implemented."
-            )
+            return self._reference_generator.generate(reference)
 
     def append_reference(self) -> str:
         """Return the Section body enriched with its Reference text.
@@ -67,6 +75,8 @@ class ReferencedSection(ISection):
             return content
 
         reference_text = self._resolve_reference_text(self._reference)
+        if not reference_text:
+            return content
         return self.compose_referenced_content(reference_text, content)
 
     def compose_referenced_content(self, reference_text: str, content: str) -> str:

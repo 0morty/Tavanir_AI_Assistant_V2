@@ -73,8 +73,8 @@ def test_normalize_suggestion_preserves_none_fields(
         id="SUG-9002",
         content=SuggestionContent(
             title="عنوان طرح پيشنهادي",
-            problem=None,
-            solution=None,
+            problem="شرح مشكل سيستم توزيع برق",
+            solution="راهكار اصلاح شبكه فشار ضعيف",
         ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.PENDING,
@@ -89,8 +89,8 @@ def test_normalize_suggestion_preserves_none_fields(
 
     assert clean_suggestion.id == "SUG-9002"
     assert clean_suggestion.content.title == "عنوان طرح پیشنهادی"
-    assert clean_suggestion.content.problem is None
-    assert clean_suggestion.content.solution is None
+    assert clean_suggestion.content.problem == "شرح مشکل سیستم توزیع برق"
+    assert clean_suggestion.content.solution == "راهکار اصلاح شبکه فشار ضعیف"
     assert clean_suggestion.evaluation.scrutiny is None
     assert clean_suggestion.evaluation.description is None
     assert clean_suggestion.context_title is None

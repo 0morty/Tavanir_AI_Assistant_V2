@@ -13,6 +13,7 @@ from src.domain.enums import (
 from src.domain.exceptions import (
     InvalidShamsiDateFormatError,
     InvalidSparseVectorError,
+    InvalidSuggestionContentError,
     VectorPayloadValidationError,
 )
 
@@ -20,11 +21,25 @@ TMetadata = TypeVar("TMetadata")
 
 # Semantic type alias for dense embedding vectors
 DenseVector: TypeAlias = Sequence[float]
-from dataclasses import dataclass, field
-from typing import Any
 
-from src.domain.enums import HistoryRole, SuggestionStatus
-from src.domain.exceptions import InvalidShamsiDateFormatError
+from src.domain.enums import HistoryRole
+
+NOISE_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "-",
+        "--",
+        "---",
+        ".",
+        "..",
+        "...",
+        "ندارد",
+        "بدون شرح",
+        "هیچ",
+        "ثبت نشده",
+        "موردی ندارد",
+        "عدم وجود",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -48,8 +63,35 @@ class ShamsiDate:
 @dataclass(frozen=True)
 class SuggestionContent:
     title: str
-    problem: str | None
-    solution: str | None
+    problem: str
+    solution: str
+
+    def __post_init__(self):
+        self._validate_field("title", self.title, min_len=5, pointer="/data/title")
+        self._validate_field(
+            "problem", self.problem, min_len=5, pointer="/data/problem"
+        )
+        self._validate_field(
+            "solution", self.solution, min_len=5, pointer="/data/solution"
+        )
+
+    @staticmethod
+    def _validate_field(
+        field_name: str, value: str, min_len: int, pointer: str
+    ) -> None:
+        if not value or not value.strip():
+            raise InvalidSuggestionContentError(
+                f"Suggestion {field_name} must not be empty.",
+                pointer=pointer,
+                field_name=field_name,
+            )
+        cleaned = value.strip()
+        if len(cleaned) < min_len or cleaned in NOISE_PLACEHOLDERS:
+            raise InvalidSuggestionContentError(
+                f"Suggestion {field_name} must contain substantive content, got '{cleaned}'.",
+                pointer=pointer,
+                field_name=field_name,
+            )
 
 
 @dataclass(frozen=True)
@@ -168,8 +210,8 @@ class Chunk(Generic[TMetadata]):
 
 
 # Type aliases for explicit domain consumption
-SuggestionChunk = Chunk[SuggestionChunkMetadata]
-RegulatoryChunk = Chunk[RegulatoryChunkMetadata]
+SuggestionChunk: TypeAlias = Chunk[SuggestionChunkMetadata]
+RegulatoryChunk: TypeAlias = Chunk[RegulatoryChunkMetadata]
 
 
 @dataclass(frozen=True)
@@ -194,9 +236,10 @@ class SearchResultChunk(Generic[TMetadata]):
         return self.chunk.parent_id
 
 
-SuggestionSearchResult = SearchResultChunk[SuggestionChunkMetadata]
-RegulatorySearchResult = SearchResultChunk[RegulatoryChunkMetadata]
+SuggestionSearchResult: TypeAlias = SearchResultChunk[SuggestionChunkMetadata]
+RegulatorySearchResult: TypeAlias = SearchResultChunk[RegulatoryChunkMetadata]
 # endregion
+
 
 @dataclass(frozen=True)
 class HistoryMessage:
@@ -221,5 +264,6 @@ __all__ = [
     "SearchResultChunk",
     "SuggestionSearchResult",
     "RegulatorySearchResult",
-    "HistoryMessage"
+    "HistoryMessage",
+    "NOISE_PLACEHOLDERS",
 ]

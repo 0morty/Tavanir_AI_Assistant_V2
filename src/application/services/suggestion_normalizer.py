@@ -13,16 +13,8 @@ def normalize_suggestion(
     """
     # 1. Normalize SuggestionContent
     normalized_title = normalizer.normalize(suggestion.content.title)
-    normalized_problem = (
-        normalizer.normalize(suggestion.content.problem)
-        if suggestion.content.problem is not None
-        else None
-    )
-    normalized_solution = (
-        normalizer.normalize(suggestion.content.solution)
-        if suggestion.content.solution is not None
-        else None
-    )
+    normalized_problem = normalizer.normalize(suggestion.content.problem)
+    normalized_solution = normalizer.normalize(suggestion.content.solution)
     normalized_content = SuggestionContent(
         title=normalized_title,
         problem=normalized_problem,

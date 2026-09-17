@@ -5,6 +5,7 @@ from typing import TypeGuard
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.domain.entities import (
+    NOISE_PLACEHOLDERS,
     Chunk,
     Suggestion,
     SuggestionChunk,
@@ -12,10 +13,14 @@ from src.domain.entities import (
 )
 from src.domain.enums import ChunkStatus, SuggestionChunkType
 from src.domain.exceptions import SuggestionChunkingError
-from src.domain.interfaces.i_chunking_strategy import ISuggestionChunker
+from src.domain.interfaces.i_chunking_strategy import (
+    IChunkingStrategy,
+)
 
 
-class FieldAwareSuggestionChunker(ISuggestionChunker):
+class FieldAwareSuggestionChunker(
+    IChunkingStrategy[Suggestion, SuggestionChunkMetadata]
+):
     """
     Production-grade field-aware chunker for historical employee suggestions (ADR-002).
 
@@ -26,23 +31,7 @@ class FieldAwareSuggestionChunker(ISuggestionChunker):
     """
 
     DEFAULT_SEPARATORS: list[str] = ["\n\n", "\n", "؛", ".", "!", "؟", " "]
-
-    DEFAULT_NOISE_PLACEHOLDERS: frozenset[str] = frozenset(
-        {
-            "-",
-            "--",
-            "---",
-            ".",
-            "..",
-            "...",
-            "ندارد",
-            "بدون شرح",
-            "هیچ",
-            "ثبت نشده",
-            "موردی ندارد",
-            "عدم وجود",
-        }
-    )
+    DEFAULT_NOISE_PLACEHOLDERS: frozenset[str] = NOISE_PLACEHOLDERS
 
     def __init__(
         self,
@@ -115,6 +104,16 @@ class FieldAwareSuggestionChunker(ISuggestionChunker):
                 "Suggestion must have a valid non-empty title."
             )
 
+        if not self._is_valid_content(document.content.problem):
+            raise SuggestionChunkingError(
+                "Suggestion must have a valid non-empty problem."
+            )
+
+        if not self._is_valid_content(document.content.solution):
+            raise SuggestionChunkingError(
+                "Suggestion must have a valid non-empty solution."
+            )
+
         chunks: list[SuggestionChunk] = []
 
         # 1. TITLE Chunk (Domain Anchoring: context_title + title)
@@ -142,50 +141,46 @@ class FieldAwareSuggestionChunker(ISuggestionChunker):
         )
 
         # 2. PROBLEM Chunk (Strict Field Isolation: pure defect text)
-        problem = document.content.problem
-        if self._is_valid_content(problem):
-            problem_text = problem.strip()
-            sub_texts = self._split_text(problem_text)
-            for idx, sub_text in enumerate(sub_texts):
-                chunks.append(
-                    Chunk[SuggestionChunkMetadata](
-                        chunk_id=str(uuid.uuid4()),
-                        parent_id=document.id,
-                        content=sub_text,
-                        metadata=SuggestionChunkMetadata(
-                            chunk_type=SuggestionChunkType.PROBLEM,
-                            sub_index=idx,
-                            status=document.evaluation.status,
-                            context_title=document.context_title,
-                            date=document.date,
-                        ),
-                        parent_content=None,
-                        chunk_status=ChunkStatus.ACTIVE,
-                    )
+        problem_text = document.content.problem.strip()
+        sub_texts = self._split_text(problem_text)
+        for idx, sub_text in enumerate(sub_texts):
+            chunks.append(
+                Chunk[SuggestionChunkMetadata](
+                    chunk_id=str(uuid.uuid4()),
+                    parent_id=document.id,
+                    content=sub_text,
+                    metadata=SuggestionChunkMetadata(
+                        chunk_type=SuggestionChunkType.PROBLEM,
+                        sub_index=idx,
+                        status=document.evaluation.status,
+                        context_title=document.context_title,
+                        date=document.date,
+                    ),
+                    parent_content=None,
+                    chunk_status=ChunkStatus.ACTIVE,
                 )
+            )
 
         # 3. SOLUTION Chunk (Strict Field Isolation: pure engineering mechanism)
-        solution = document.content.solution
-        if self._is_valid_content(solution):
-            solution_text = solution.strip()
-            sub_texts = self._split_text(solution_text)
-            for idx, sub_text in enumerate(sub_texts):
-                chunks.append(
-                    Chunk[SuggestionChunkMetadata](
-                        chunk_id=str(uuid.uuid4()),
-                        parent_id=document.id,
-                        content=sub_text,
-                        metadata=SuggestionChunkMetadata(
-                            chunk_type=SuggestionChunkType.SOLUTION,
-                            sub_index=idx,
-                            status=document.evaluation.status,
-                            context_title=document.context_title,
-                            date=document.date,
-                        ),
-                        parent_content=None,
-                        chunk_status=ChunkStatus.ACTIVE,
-                    )
+        solution_text = document.content.solution.strip()
+        sub_texts = self._split_text(solution_text)
+        for idx, sub_text in enumerate(sub_texts):
+            chunks.append(
+                Chunk[SuggestionChunkMetadata](
+                    chunk_id=str(uuid.uuid4()),
+                    parent_id=document.id,
+                    content=sub_text,
+                    metadata=SuggestionChunkMetadata(
+                        chunk_type=SuggestionChunkType.SOLUTION,
+                        sub_index=idx,
+                        status=document.evaluation.status,
+                        context_title=document.context_title,
+                        date=document.date,
+                    ),
+                    parent_content=None,
+                    chunk_status=ChunkStatus.ACTIVE,
                 )
+            )
 
         # 4. EVALUATION Chunk (Consolidation without empty lines)
         scrutiny = document.evaluation.scrutiny

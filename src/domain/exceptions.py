@@ -110,3 +110,15 @@ class RegulatoryChunkingError(ChunkingError):
 
 
 # endregion
+
+
+class InvalidSuggestionContentError(DomainError):
+    """Raised when suggestion content fields violate domain invariants (e.g. empty, noise placeholders)."""
+
+    pass
+
+
+class SuggestionAlreadyExistsError(DomainError):
+    """Raised when attempting to ingest a suggestion whose ID already exists."""
+
+    pass

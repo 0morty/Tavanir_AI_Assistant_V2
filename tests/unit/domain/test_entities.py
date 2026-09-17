@@ -28,6 +28,7 @@ from src.domain.enums import (
 from src.domain.exceptions import (
     InvalidShamsiDateFormatError,
     InvalidSparseVectorError,
+    InvalidSuggestionContentError,
     VectorPayloadValidationError,
 )
 
@@ -90,6 +91,38 @@ def test_suggestion_entity():
     assert suggestion.id == "SUG-101"
     assert suggestion.content.title == "نصب سنسور حرارتی"
     assert suggestion.evaluation.status == SuggestionStatus.APPROVED
+
+
+def test_suggestion_content_invariants():
+    # Valid content
+    content = SuggestionContent(
+        title="عنوان پیشنهاد تستی",
+        problem="مشکل حرارت بیش از حد",
+        solution="راهکار بهینه‌سازی فن‌ها",
+    )
+    assert content.title == "عنوان پیشنهاد تستی"
+
+    # Empty or short fields
+    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+        SuggestionContent(title="", problem="مشکل معتبر است", solution="راهکار معتبر است")
+    assert exc_info.value.pointer == "/data/title"
+
+    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+        SuggestionContent(title="عنوان معتبر", problem="  ", solution="راهکار معتبر است")
+    assert exc_info.value.pointer == "/data/problem"
+
+    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+        SuggestionContent(title="عنوان معتبر", problem="مشکل معتبر", solution="راه")
+    assert exc_info.value.pointer == "/data/solution"
+
+    # Noise placeholders
+    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+        SuggestionContent(title="عنوان معتبر", problem="ندارد", solution="راهکار معتبر است")
+    assert exc_info.value.pointer == "/data/problem"
+
+    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+        SuggestionContent(title="عنوان معتبر", problem="مشکل معتبر است", solution="بدون شرح")
+    assert exc_info.value.pointer == "/data/solution"
 
 
 def test_regulatory_document_entity():

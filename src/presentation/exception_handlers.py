@@ -38,9 +38,11 @@ from src.domain.exceptions import (
     EntityNotFoundError,
     InvalidShamsiDateFormatError,
     InvalidSparseVectorError,
+    InvalidSuggestionContentError,
     InvalidSuggestionStatusError,
     ParentChildIntegrityError,
     RegulatoryChunkingError,
+    SuggestionAlreadyExistsError,
     SuggestionChunkingError,
     VectorCollectionProvisioningError,
     VectorPayloadValidationError,
@@ -63,6 +65,16 @@ class ErrorSpec:
 # Declarative registry mapping concrete exceptions to their contract specifications
 ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
     # --- Domain Exceptions ---
+    InvalidSuggestionContentError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="INVALID_SUGGESTION_CONTENT",
+        default_pointer="/data",
+    ),
+    SuggestionAlreadyExistsError: ErrorSpec(
+        status_code=status.HTTP_409_CONFLICT,
+        code="SUGGESTION_ALREADY_EXISTS",
+        default_pointer="/data/suggestionId",
+    ),
     InvalidShamsiDateFormatError: ErrorSpec(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         code="INVALID_SHAMSI_DATE",

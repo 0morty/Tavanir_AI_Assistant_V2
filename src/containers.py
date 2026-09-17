@@ -7,6 +7,7 @@ from qdrant_client import AsyncQdrantClient
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
 from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
+from src.application.use_cases import IngestSuggestionUseCase
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
     ISuggestionChunker,
@@ -57,6 +58,10 @@ async def init_embedding_client(
 
 
 class Container(containers.DeclarativeContainer):
+    wiring_config = containers.WiringConfiguration(
+        packages=["src.presentation.routers"],
+    )
+
     # 1. Centralized Registry (Shared across Embedding and future LLM services)
     client_registry = providers.Resource(init_client_registry)
 
@@ -152,4 +157,17 @@ class Container(containers.DeclarativeContainer):
     # 9. Suggestion Chunker Strategy
     suggestion_chunker: providers.Provider[ISuggestionChunker] = providers.Factory(
         FieldAwareSuggestionChunker
+    )
+
+    # 10. Suggestion Ingestion Use Case
+    ingest_suggestion_use_case: providers.Provider[IngestSuggestionUseCase] = (
+        providers.Factory(
+            IngestSuggestionUseCase,
+            uow=unit_of_work,
+            normalizer=text_normalizer,
+            chunker=suggestion_chunker,
+            dense_embedder=dense_embedder,
+            sparse_embedder=sparse_embedder,
+            vector_repo=suggestion_vector_repository,
+        )
     )

@@ -115,7 +115,7 @@ async def test_rule_of_omission_for_missing_fields(
         id="SUG-3001",
         content=SuggestionContent(
             title="بهینه‌سازی سیستم روشنایی ساختمان",
-            problem=None,  # Missing
+            problem="افت ولتاژ در طبقات اداری به دلیل بار روشنایی",
             solution="تعویض لامپ‌های فلورسنت با پنل‌های ال‌ای‌دی کم‌مصرف هوشمند.",
         ),
         evaluation=CommitteeEvaluation(
@@ -129,9 +129,13 @@ async def test_rule_of_omission_for_missing_fields(
 
     chunks = await chunker.chunk(suggestion)
 
-    assert len(chunks) == 2
+    assert len(chunks) == 3
     types = [c.metadata.chunk_type for c in chunks]
-    assert types == [SuggestionChunkType.TITLE, SuggestionChunkType.SOLUTION]
+    assert types == [
+        SuggestionChunkType.TITLE,
+        SuggestionChunkType.PROBLEM,
+        SuggestionChunkType.SOLUTION,
+    ]
 
     # Title without context_title has no separator
     assert chunks[0].content == "بهینه‌سازی سیستم روشنایی ساختمان"
@@ -146,7 +150,7 @@ async def test_noise_and_placeholder_filtering(
         id="SUG-4001",
         content=SuggestionContent(
             title="مدیریت بار پیک مصرف تابستان",
-            problem="--",  # Noise placeholder
+            problem="بار مصرفی در ساعات اوج تابستان شبکه را ناپایدار می‌کند.",
             solution="اجرای طرح پاسخگویی بار با هماهنگی صنایع همکار در ساعات اوج بار شبکه.",
         ),
         evaluation=CommitteeEvaluation(
@@ -160,10 +164,14 @@ async def test_noise_and_placeholder_filtering(
 
     chunks = await chunker.chunk(suggestion)
 
-    # Problem and Evaluation should be omitted due to noise/length
-    assert len(chunks) == 2
+    # Evaluation should be omitted due to noise/length in optional fields
+    assert len(chunks) == 3
     types = [c.metadata.chunk_type for c in chunks]
-    assert types == [SuggestionChunkType.TITLE, SuggestionChunkType.SOLUTION]
+    assert types == [
+        SuggestionChunkType.TITLE,
+        SuggestionChunkType.PROBLEM,
+        SuggestionChunkType.SOLUTION,
+    ]
 
 
 @pytest.mark.asyncio
@@ -173,7 +181,11 @@ async def test_evaluation_partial_formatting(
     # Case A: Only Scrutiny
     sugg_a = Suggestion(
         id="SUG-5001",
-        content=SuggestionContent(title="طرح تست الف", problem=None, solution=None),
+        content=SuggestionContent(
+            title="طرح تست الف",
+            problem="شرح نقص فنی ترانس",
+            solution="تعویض قطعات فرسوده با نو",
+        ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.REJECTED,
             scrutiny="فاقد توجیه اقتصادی و خارج از اولویت‌های شرکت.",
@@ -192,7 +204,11 @@ async def test_evaluation_partial_formatting(
     # Case B: Only Description
     sugg_b = Suggestion(
         id="SUG-5002",
-        content=SuggestionContent(title="طرح تست ب", problem=None, solution=None),
+        content=SuggestionContent(
+            title="طرح تست ب",
+            problem="افت بازدهی حرارتی توربین",
+            solution="شستشوی پره‌های کمپرسور",
+        ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.EXECUTED,
             scrutiny=None,
@@ -262,22 +278,10 @@ async def test_invalid_suggestion_raises_error(
             Suggestion(
                 id="",
                 content=SuggestionContent(
-                    title="عنوان معتبر", problem=None, solution=None
+                    title="عنوان معتبر",
+                    problem="مشکل معتبر تستی",
+                    solution="راهکار معتبر تستی",
                 ),
-                evaluation=CommitteeEvaluation(
-                    status=SuggestionStatus.PENDING, scrutiny=None, description=None
-                ),
-                date=None,
-                context_title=None,
-            )
-        )
-
-    # Empty Title
-    with pytest.raises(SuggestionChunkingError, match="valid non-empty title"):
-        await chunker.chunk(
-            Suggestion(
-                id="SUG-7001",
-                content=SuggestionContent(title="   ", problem=None, solution=None),
                 evaluation=CommitteeEvaluation(
                     status=SuggestionStatus.PENDING, scrutiny=None, description=None
                 ),

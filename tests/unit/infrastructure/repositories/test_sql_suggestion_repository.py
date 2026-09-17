@@ -104,8 +104,8 @@ def test_mapper_with_nullable_fields():
         id="SUG-MINIMAL",
         content=SuggestionContent(
             title="عنوان بدون شرح مشکل و راهکار",
-            problem=None,
-            solution=None,
+            problem="شرح مشکل معتبر است",
+            solution="ارائه راهکار معتبر است",
         ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.NOT_ACCEPTED,
@@ -117,8 +117,8 @@ def test_mapper_with_nullable_fields():
     )
 
     model = repo._to_model(minimal_suggestion)
-    assert model.problem is None
-    assert model.solution is None
+    assert model.problem == "شرح مشکل معتبر است"
+    assert model.solution == "ارائه راهکار معتبر است"
     assert model.scrutiny is None
     assert model.description is None
     assert model.shamsi_date is None
@@ -126,8 +126,8 @@ def test_mapper_with_nullable_fields():
 
     hydrated = repo._to_entity(model)
     assert hydrated.id == "SUG-MINIMAL"
-    assert hydrated.content.problem is None
-    assert hydrated.content.solution is None
+    assert hydrated.content.problem == "شرح مشکل معتبر است"
+    assert hydrated.content.solution == "ارائه راهکار معتبر است"
     assert hydrated.evaluation.status == SuggestionStatus.NOT_ACCEPTED
     assert hydrated.date is None
     assert hydrated.context_title is None

@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from src.domain.enums import SuggestionStatus
+
 
 @dataclass
 class AnalyzeSuggestionResponse:
@@ -15,3 +17,30 @@ class AnalyzeSuggestionResponse:
 
     # 3. Applicable Statutes & Distances
     applied_statute_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CreateSuggestionDTO:
+    suggestion_id: str
+    title: str
+    problem: str
+    solution: str
+    status: SuggestionStatus
+    scrutiny: str | None = None
+    description: str | None = None
+    shamsi_date: str | None = None
+    context_title: str | None = None
+
+
+@dataclass(frozen=True)
+class IngestSuggestionResponseDTO:
+    suggestion_id: str
+    chunks_count: int
+    status: str = "CREATED"
+
+
+__all__ = [
+    "AnalyzeSuggestionResponse",
+    "CreateSuggestionDTO",
+    "IngestSuggestionResponseDTO",
+]

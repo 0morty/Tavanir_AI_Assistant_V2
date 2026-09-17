@@ -23,8 +23,8 @@ class SuggestionModel(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    problem: Mapped[str | None] = mapped_column(Text, nullable=True)
-    solution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    problem: Mapped[str] = mapped_column(Text, nullable=False)
+    solution: Mapped[str] = mapped_column(Text, nullable=False)
     status_id: Mapped[int] = mapped_column(SmallInteger, nullable=False, index=True)
     scrutiny: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

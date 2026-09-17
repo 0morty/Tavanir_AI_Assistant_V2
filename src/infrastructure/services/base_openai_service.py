@@ -44,8 +44,9 @@ class BaseOpenAIService(ABC):
     @staticmethod
     def _extract_retry_after(err: APIError) -> float | None:
         """Attempts to parse the Retry-After header from the API response."""
-        if hasattr(err, "response") and err.response is not None:
-            retry_header = err.response.headers.get("retry-after")
+        response = getattr(err, "response", None)
+        if response is not None and hasattr(response, "headers"):
+            retry_header = response.headers.get("retry-after")
             if retry_header:
                 try:
                     return float(retry_header)

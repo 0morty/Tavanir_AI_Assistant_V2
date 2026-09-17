@@ -45,9 +45,9 @@ class ReferencedSection(ISection):
         """The Reference associated with this Section, if any."""
         return self._reference
 
-    def _resolve_reference_text(self) -> str:
+    def _resolve_reference_text(self, reference: Reference) -> str:
         try:
-            return self._reference.fluent_text()
+            return reference.fluent_text()
         except NotImplementedError:
             raise NotImplementedError(
                 "External reference generation is not yet implemented."
@@ -66,7 +66,7 @@ class ReferencedSection(ISection):
         if self._reference is None:
             return content
 
-        reference_text = self._resolve_reference_text()
+        reference_text = self._resolve_reference_text(self._reference)
         return self.compose_referenced_content(reference_text, content)
 
     def compose_referenced_content(self, reference_text: str, content: str) -> str:

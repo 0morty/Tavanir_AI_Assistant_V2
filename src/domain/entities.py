@@ -266,6 +266,14 @@ class Reference(ABC):
         )
 
 
+@dataclass(frozen=True)
+class ReferenceItem:
+    """Content of a single collection item paired with an optional Reference."""
+
+    content: str
+    reference: Reference | None = None
+
+
 # endregion
 
 @dataclass(frozen=True)
@@ -293,5 +301,6 @@ __all__ = [
     "RegulatorySearchResult",
     "ReferenceDetails",
     "Reference",
+    "ReferenceItem",
     "HistoryMessage"
 ]

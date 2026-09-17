@@ -4,10 +4,19 @@ from dependency_injector import containers, providers
 from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
 
-from src.application.interfaces.i_dense_embedder import IDenseEmbedder
-from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
-from src.application.interfaces.i_text_normalizer import ITextNormalizer
-from src.application.use_cases import IngestSuggestionUseCase
+from src.application.interfaces import (
+    IDenseEmbedder,
+    IHistoricalSuggestionExtractor,
+    IHybridEmbeddingService,
+    IQdrantAdminService,
+    ISparseEmbedder,
+    ITextNormalizer,
+)
+from src.application.services import HybridEmbeddingService
+from src.application.use_cases import (
+    ExtractAndIngestHistoricalSuggestionsUseCase,
+    IngestSuggestionUseCase,
+)
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
     ISuggestionChunker,
@@ -18,6 +27,8 @@ from src.infrastructure.configs.settings import (
     bm25_settings,
     db_settings,
     embedding_settings,
+    historical_ingestion_settings,
+    mssql_settings,
     qdrant_settings,
 )
 from src.infrastructure.db import (
@@ -28,6 +39,8 @@ from src.infrastructure.db import (
 from src.infrastructure.db.repositories import (
     QdrantRegulatoryRepository,
     QdrantSuggestionRepository,
+    SqlCheckpointRepository,
+    SqlSkippedSuggestionRepository,
     SqlSuggestionRepository,
 )
 from src.infrastructure.services.chunkers import FieldAwareSuggestionChunker
@@ -37,7 +50,9 @@ from src.infrastructure.services.embeddings.openai_dense_embedder import (
 from src.infrastructure.services.embeddings.persian_bm25_embedder import (
     PersianBm25Embedder,
 )
+from src.infrastructure.services.extractors import MssqlSuggestionExtractor
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
+from src.infrastructure.services.qdrant import QdrantAdminService
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
@@ -95,6 +110,15 @@ class Container(containers.DeclarativeContainer):
         ShekarTextNormalizer
     )
 
+    # 6. Hybrid Embedding Service (Application Service)
+    hybrid_embedding_service: providers.Provider[IHybridEmbeddingService] = (
+        providers.Factory(
+            HybridEmbeddingService,
+            dense_embedder=dense_embedder,
+            sparse_embedder=sparse_embedder,
+        )
+    )
+
     # 6. Qdrant Client (Singleton)
     qdrant_client: providers.Provider[AsyncQdrantClient] = providers.Singleton(
         AsyncQdrantClient,
@@ -112,7 +136,7 @@ class Container(containers.DeclarativeContainer):
         providers.Singleton(
             QdrantSuggestionRepository,
             client=qdrant_client,
-            collection_name=qdrant_settings.QDRANT_SUGGESTION_COLLECTION,
+            collection_name=qdrant_settings.QDRANT_SUGGESTION_ALIAS,
             dense_vector_name=qdrant_settings.QDRANT_DENSE_VECTOR_NAME,
             sparse_vector_name=qdrant_settings.QDRANT_SPARSE_VECTOR_NAME,
             default_dense_dim=embedding_settings.EMBEDDING_DIMENSION,
@@ -125,7 +149,13 @@ class Container(containers.DeclarativeContainer):
         )
     )
 
-    # 6. Regulatory Vector Repository
+    # 6. Qdrant Admin Service
+    qdrant_admin_service: providers.Provider[IQdrantAdminService] = providers.Singleton(
+        QdrantAdminService,
+        client=qdrant_client,
+    )
+
+    # 7. Regulatory Vector Repository
     regulatory_vector_repository: providers.Provider[IRegulatoryVectorRepository] = (
         providers.Singleton(
             QdrantRegulatoryRepository,
@@ -143,31 +173,54 @@ class Container(containers.DeclarativeContainer):
         )
     )
 
-    # 7. Relational Database Engine & Session Factory
+    # 8. Relational Database Engine & Session Factory
     db_engine = providers.Singleton(create_db_engine, url=db_settings.POSTGRES_URL)
     db_session_factory = providers.Singleton(create_session_factory, engine=db_engine)
 
-    # 8. Unit of Work Factory
+    # 9. Unit of Work Factory
     unit_of_work: providers.Provider[IUnitOfWork] = providers.Factory(
         SqlUnitOfWork,
         session_factory=db_session_factory,
         suggestion_repo_factory=providers.Object(SqlSuggestionRepository),
+        checkpoint_repo_factory=providers.Object(SqlCheckpointRepository),
+        skipped_repo_factory=providers.Object(SqlSkippedSuggestionRepository),
     )
 
-    # 9. Suggestion Chunker Strategy
+    # 10. Suggestion Chunker Strategy
     suggestion_chunker: providers.Provider[ISuggestionChunker] = providers.Factory(
         FieldAwareSuggestionChunker
     )
 
-    # 10. Suggestion Ingestion Use Case
+    # 11. Suggestion Ingestion Use Case
     ingest_suggestion_use_case: providers.Provider[IngestSuggestionUseCase] = (
         providers.Factory(
             IngestSuggestionUseCase,
             uow=unit_of_work,
             normalizer=text_normalizer,
             chunker=suggestion_chunker,
-            dense_embedder=dense_embedder,
-            sparse_embedder=sparse_embedder,
+            embedding_service=hybrid_embedding_service,
             vector_repo=suggestion_vector_repository,
         )
+    )
+
+    # 12. Historical Suggestion Extractor
+    historical_extractor: providers.Provider[IHistoricalSuggestionExtractor] = (
+        providers.Singleton(
+            MssqlSuggestionExtractor,
+            config=mssql_settings,
+        )
+    )
+
+    # 13. Historical Suggestion Ingestion Use Case
+    extract_and_ingest_historical_suggestions_use_case: providers.Provider[
+        ExtractAndIngestHistoricalSuggestionsUseCase
+    ] = providers.Factory(
+        ExtractAndIngestHistoricalSuggestionsUseCase,
+        uow=unit_of_work,
+        extractor=historical_extractor,
+        normalizer=text_normalizer,
+        chunker=suggestion_chunker,
+        embedding_service=hybrid_embedding_service,
+        vector_repo=suggestion_vector_repository,
+        job_name=historical_ingestion_settings.CHECKPOINT_JOB_NAME,
     )

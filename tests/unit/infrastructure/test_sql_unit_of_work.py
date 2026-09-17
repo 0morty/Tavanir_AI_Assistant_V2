@@ -30,7 +30,7 @@ class DummyRepository(BaseSqlRepository[DummyEntity, DummyModel]):
 
 # --- Tests ---
 @pytest.mark.asyncio
-async def test_uow_implicit_commit_on_clean_exit():
+async def test_uow_explicit_commit_success():
     mock_session = AsyncMock()
     mock_session_factory = MagicMock(return_value=mock_session)
 
@@ -38,6 +38,39 @@ async def test_uow_implicit_commit_on_clean_exit():
 
     async with uow:
         assert uow.session is mock_session
+        await uow.commit()
+
+    mock_session.commit.assert_awaited_once()
+    mock_session.rollback.assert_not_awaited()
+    mock_session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_uow_rolls_back_uncommitted_work_on_clean_exit():
+    mock_session = AsyncMock()
+    mock_session_factory = MagicMock(return_value=mock_session)
+
+    uow = SqlUnitOfWork(session_factory=mock_session_factory)
+
+    # Clean exit without explicit commit (e.g. read-only operation or uncommitted work)
+    async with uow:
+        assert uow.session is mock_session
+
+    mock_session.rollback.assert_awaited_once()
+    mock_session.commit.assert_not_awaited()
+    mock_session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_uow_commit_is_idempotent():
+    mock_session = AsyncMock()
+    mock_session_factory = MagicMock(return_value=mock_session)
+
+    uow = SqlUnitOfWork(session_factory=mock_session_factory)
+
+    async with uow:
+        await uow.commit()
+        await uow.commit()  # Subsequent commit should be a no-op
 
     mock_session.commit.assert_awaited_once()
     mock_session.rollback.assert_not_awaited()

@@ -256,6 +256,7 @@ async def test_uow_integration(session_factory: async_sessionmaker[AsyncSession]
     # Successful transactional commit via uow.suggestions
     async with uow:
         await uow.suggestions.save(suggestion)
+        await uow.commit()
 
     # Verify persistence in separate session
     async with session_factory() as session:

@@ -132,7 +132,9 @@ class SqlSuggestionRepository(
         if not suggestions:
             return
 
-        values_list = [self._entity_to_dict(s) for s in suggestions]
+        # Deduplicate suggestions by ID to protect PostgreSQL from CardinalityViolation in multi-row ON CONFLICT
+        unique_map = {s.id: s for s in suggestions}
+        values_list = [self._entity_to_dict(s) for s in unique_map.values()]
         stmt = pg_insert(SuggestionModel).values(values_list)
         upsert_stmt = stmt.on_conflict_do_update(
             index_elements=[SuggestionModel.id],
@@ -153,6 +155,13 @@ class SqlSuggestionRepository(
     async def delete(self, suggestion_id: str) -> None:
         """Delete a suggestion record by its identifier."""
         stmt = delete(SuggestionModel).where(SuggestionModel.id == suggestion_id)
+        await self.session.execute(stmt)
+
+    async def delete_batch(self, suggestion_ids: Sequence[str]) -> None:
+        """Batch delete suggestion records by identifiers for compensating rollbacks."""
+        if not suggestion_ids:
+            return
+        stmt = delete(SuggestionModel).where(SuggestionModel.id.in_(suggestion_ids))
         await self.session.execute(stmt)
 
 

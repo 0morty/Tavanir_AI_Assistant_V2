@@ -246,6 +246,42 @@ async def test_delete_chunks_by_parent_id(
     assert cond.match.value == "parent-xyz"
 
 
+async def test_delete_chunks_by_parent_ids(
+    suggestion_repo: QdrantSuggestionRepository, mock_qdrant_client: AsyncMock
+) -> None:
+    await suggestion_repo.delete_chunks_by_parent_ids(["parent-1", "parent-2"])
+
+    mock_qdrant_client.delete.assert_awaited_once()
+    filter_selector = mock_qdrant_client.delete.call_args.kwargs["points_selector"]
+    cond = filter_selector.filter.must[0]
+    assert cond.key == "parent_id"
+    assert cond.match.any == ["parent-1", "parent-2"]
+
+
+async def test_activate_staging_chunks_batch(
+    suggestion_repo: QdrantSuggestionRepository, mock_qdrant_client: AsyncMock
+) -> None:
+    await suggestion_repo.activate_staging_chunks_batch(["parent-1", "parent-2"])
+
+    assert mock_qdrant_client.set_payload.await_count == 2
+
+    # Step 1: Demote ACTIVE to DEPRECATED
+    first_call = mock_qdrant_client.set_payload.call_args_list[0].kwargs
+    assert first_call["payload"]["chunk_status"] == "deprecated"
+    assert first_call["points"].must[0].key == "parent_id"
+    assert first_call["points"].must[0].match.any == ["parent-1", "parent-2"]
+    assert first_call["points"].must[1].key == "chunk_status"
+    assert first_call["points"].must[1].match.value == "active"
+
+    # Step 2: Promote STAGING to ACTIVE
+    second_call = mock_qdrant_client.set_payload.call_args_list[1].kwargs
+    assert second_call["payload"]["chunk_status"] == "active"
+    assert second_call["points"].must[0].key == "parent_id"
+    assert second_call["points"].must[0].match.any == ["parent-1", "parent-2"]
+    assert second_call["points"].must[1].key == "chunk_status"
+    assert second_call["points"].must[1].match.value == "staging"
+
+
 async def test_delete_staging_chunks(
     suggestion_repo: QdrantSuggestionRepository, mock_qdrant_client: AsyncMock
 ) -> None:

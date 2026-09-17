@@ -39,8 +39,58 @@ class IngestSuggestionResponseDTO:
     status: str = "CREATED"
 
 
+@dataclass(frozen=True)
+class RawSuggestionDataDTO:
+    """Raw legacy suggestion record extracted from MSSQL with committee evaluation data."""
+
+    suggestion_id: str
+    title: str
+    problem: str | None
+    solution: str | None
+    status_id: int
+    scrutiny: str | None
+    description: str | None
+    shamsi_date: str | None
+    context_title: str | None
+
+
+@dataclass(frozen=True)
+class SkippedRecordDTO:
+    """Diagnostic audit record for an invalid legacy suggestion skipped during ETL."""
+
+    suggestion_id: str
+    reason: str
+    error_type: str
+
+
+@dataclass(frozen=True)
+class CheckpointData:
+    """ETL ingestion checkpoint state."""
+
+    last_offset: int
+    last_processed_id: str | None
+    total_processed: int
+
+
+@dataclass(frozen=True)
+class HistoricalIngestionResultDTO:
+    """Aggregated operational metrics from a cold-start batch ingestion run."""
+
+    total_extracted: int
+    total_ingested: int
+    total_chunks: int
+    total_skipped: int
+    last_offset: int
+    last_processed_id: str | None
+    execution_time_seconds: float
+
+
 __all__ = [
     "AnalyzeSuggestionResponse",
     "CreateSuggestionDTO",
     "IngestSuggestionResponseDTO",
+    "RawSuggestionDataDTO",
+    "SkippedRecordDTO",
+    "CheckpointData",
+    "HistoricalIngestionResultDTO",
 ]

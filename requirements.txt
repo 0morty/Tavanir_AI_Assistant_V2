@@ -68,3 +68,7 @@ scalar-fastapi>=1.6.0
 shekar>=1.5.3
 mmh3>=4.1.0
 langchain-text-splitters>=1.1.2
+dependency-injector>=4.49.0
+openai>=1.60.0
+pymssql>=2.4.0
+tqdm>=4.67.0

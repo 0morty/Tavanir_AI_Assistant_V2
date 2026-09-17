@@ -5,14 +5,21 @@ from types import TracebackType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from src.application.interfaces.i_checkpoint_repository import ICheckpointRepository
+    from src.application.interfaces.i_skipped_suggestion_repository import (
+        ISkippedSuggestionRepository,
+    )
     from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
 
 
 class IUnitOfWork(ABC):
     """
-    Abstract Unit of Work (UoW) port.
+    Abstract Unit of Work (UoW) port conforming to Cosmic Python & PoEAA.
     Guarantees atomic transaction demarcation across repository operations
     without coupling the domain layer to database-specific session types.
+
+    Safe-by-default: Rolls back uncommitted changes upon context exit.
+    Mutating operations must explicitly call commit() to persist state.
     """
 
     async def __aenter__(self) -> IUnitOfWork:
@@ -24,15 +31,24 @@ class IUnitOfWork(ABC):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        if exc_type is not None:
-            await self.rollback()
-        else:
-            await self.commit()
+        await self.rollback()
 
     @property
     @abstractmethod
     def suggestions(self) -> ISuggestionRepository:
         """Suggestion repository port bound to this transactional boundary."""
+        pass
+
+    @property
+    @abstractmethod
+    def checkpoints(self) -> ICheckpointRepository:
+        """Checkpoint repository port bound to this transactional boundary."""
+        pass
+
+    @property
+    @abstractmethod
+    def skipped_suggestions(self) -> ISkippedSuggestionRepository:
+        """Skipped suggestions repository port bound to this transactional boundary."""
         pass
 
     @abstractmethod

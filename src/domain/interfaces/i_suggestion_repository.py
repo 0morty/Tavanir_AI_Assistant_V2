@@ -38,5 +38,10 @@ class ISuggestionRepository(ABC):
         """Delete a suggestion record by its identifier."""
         pass
 
+    @abstractmethod
+    async def delete_batch(self, suggestion_ids: Sequence[str]) -> None:
+        """Batch delete suggestion records by identifiers for compensating rollbacks."""
+        pass
+
 
 __all__ = ["ISuggestionRepository"]

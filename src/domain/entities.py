@@ -266,20 +266,27 @@ class Reference(ABC):
         )
 
 
-@dataclass(frozen=True)
-class ReferenceItem:
-    """Content of a single collection item paired with an optional Reference."""
-
-    content: str
-    reference: Reference | None = None
-
-
 # endregion
 
 @dataclass(frozen=True)
 class HistoryMessage:
     role: HistoryRole
     content: str
+
+
+@dataclass
+class GenerationChunk:
+    """Generation-API side representation of a retrieved chunk.
+
+    Owned by the LLM / Generation scope; Retrieval keeps its own ``Chunk``.
+    Carries the content that may enter the prompt together with the optional
+    Reference used to enrich it. The ``reference`` is never a Retrieval-side
+    concern.
+    """
+
+    chunk_id: str
+    content: str
+    reference: Reference | None = None
 
 
 __all__ = [
@@ -301,6 +308,6 @@ __all__ = [
     "RegulatorySearchResult",
     "ReferenceDetails",
     "Reference",
-    "ReferenceItem",
+    "GenerationChunk",
     "HistoryMessage"
 ]

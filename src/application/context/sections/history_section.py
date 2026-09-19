@@ -1,10 +1,19 @@
+from typing import Any
+
+from src.application.context.sections.referenced_collection_section import (
+    ReferencedCollectionSection,
+)
 from src.domain.entities import HistoryMessage
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
-from src.application.interfaces import ISection
 
 
-class HistorySection(ISection):
-    """Conversation/interaction history, distinct from RAG context chunks."""
+class HistorySection(ReferencedCollectionSection):
+    """Conversation/interaction history, distinct from RAG context chunks.
+
+    A ``HistorySection`` is a collection section: the conversation turns are
+    held as the section's items. Each turn keeps its ``role`` prefix in the
+    rendered text, so a reference enrichment never strips the sender role.
+    """
 
     def __init__(
         self,
@@ -15,6 +24,7 @@ class HistorySection(ISection):
         overflow_strategies: OverflowStrategyStack | None = None,
     ) -> None:
         super().__init__(
+            items=messages,
             separator="\n\n",
             importance=importance,
             demand=demand,
@@ -22,7 +32,6 @@ class HistorySection(ISection):
             default_demand=0.4,
             overflow_strategies=overflow_strategies,
         )
-        self._messages = messages
 
     @property
     def section_type(self) -> str:
@@ -32,8 +41,6 @@ class HistorySection(ISection):
     def pre_context(self) -> str:
         return "History of previous interactions:"
 
-    def body(self) -> str:
-        rendered = [
-            f"{message.role.value}: {message.content}" for message in self._messages
-        ]
-        return self.separator.join(rendered)
+    def item_content(self, item: Any) -> str:
+        """Render a turn as ``role: content`` so the sender is preserved."""
+        return f"{item.role.value}: {item.content}"

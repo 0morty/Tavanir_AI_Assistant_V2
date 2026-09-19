@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from src.domain.entities import Chunk, HistoryMessage
+from src.domain.entities import GenerationChunk, HistoryMessage
 from src.application.interfaces import ISection
 from src.application.context.sections.chunks_section import ChunksSection
 from src.application.context.sections.history_section import HistorySection
@@ -99,7 +99,7 @@ class PromptBuilder:
     def set_history(self, messages: list[HistoryMessage]) -> None:
         self.set_section("HISTORY", HistorySection(messages))
 
-    def set_chunks(self, chunks: list[Chunk]) -> None:
+    def set_chunks(self, chunks: list[GenerationChunk]) -> None:
         self.set_section("CHUNKS", ChunksSection(chunks))
 
     def set_system_input(self, content: str) -> None:

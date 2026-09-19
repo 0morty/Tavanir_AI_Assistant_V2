@@ -1,20 +1,32 @@
-from src.domain.entities import Chunk
+from typing import Any
+
+from src.application.context.sections.referenced_collection_section import (
+    ReferencedCollectionSection,
+)
+from src.domain.entities import GenerationChunk
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
-from src.application.interfaces import ISection
 
 
-class ChunksSection(ISection):
-    """Retrieval (RAG) context chunks."""
+class ChunksSection(ReferencedCollectionSection):
+    """Retrieval (RAG) context chunks.
+
+    A ``ChunksSection`` is a collection section: the retrieved chunks are held
+    as the section's items and exposed via ``chunks``. Items are the
+    Generation-API side :class:`GenerationChunk` entities, whose ``reference``
+    enriches each chunk's content during context construction (per the
+    parent's collection behavior).
+    """
 
     def __init__(
         self,
-        chunks: list[Chunk],
+        chunks: list[GenerationChunk],
         *,
         importance: float | None = None,
         demand: float | None = None,
         overflow_strategies: OverflowStrategyStack | None = None,
     ) -> None:
         super().__init__(
+            items=chunks,
             separator="\n\n",
             importance=importance,
             demand=demand,
@@ -22,7 +34,6 @@ class ChunksSection(ISection):
             default_demand=0.5,
             overflow_strategies=overflow_strategies,
         )
-        self._chunks = chunks
 
     @property
     def section_type(self) -> str:
@@ -32,8 +43,7 @@ class ChunksSection(ISection):
     def pre_context(self) -> str:
         return "Relevant context chunks:"
 
-    def body(self) -> str:
-        rendered = [
-            f"Chunk {i}:\n{chunk.content}" for i, chunk in enumerate(self._chunks, 1)
-        ]
-        return self.separator.join(rendered)
+    def item_content(self, item: Any) -> str:
+        """Render a chunk as a numbered block: ``Chunk N:\\n<content>``."""
+        index = self.chunks.index(item) + 1
+        return f"Chunk {index}:\n{item.content}"

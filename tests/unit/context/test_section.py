@@ -11,7 +11,7 @@ from src.application.context import (
     UserInputSection,
 )
 from src.application.interfaces import ISection
-from src.domain.entities import Chunk, HistoryMessage
+from src.domain.entities import GenerationChunk, HistoryMessage
 from src.domain.enums import HistoryRole, OverflowStrategy
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 from src.application.prompt import PromptBuilder
@@ -246,7 +246,7 @@ def test_prompt_builder_behavior_remains_intact():
     builder.set_role("You are an assistant.")
     builder.set_history([HistoryMessage(role=HistoryRole.USER, content="Hello")])
     builder.set_chunks(
-        [Chunk(chunk_id="1", parent_id="p1", content="chunk content", metadata={})]
+        [GenerationChunk(chunk_id="1", content="chunk content")]
     )
     builder.set_system_input("system input")
     builder.set_output_format("Markdown")

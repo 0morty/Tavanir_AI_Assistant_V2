@@ -1,4 +1,4 @@
-from src.domain.entities import Chunk, HistoryMessage
+from src.domain.entities import GenerationChunk, HistoryMessage
 from src.domain.enums import HistoryRole
 from src.application.interfaces import ISection
 from src.application.context.sections.role_section import RoleSection
@@ -54,7 +54,7 @@ def test_typed_setters_configure_default_sections():
     builder = PromptBuilder()
     builder.set_role("You are an assistant.")
     builder.set_history([HistoryMessage(role=HistoryRole.USER, content="Hello")])
-    builder.set_chunks([Chunk(chunk_id="1", parent_id="p1", content="chunk content", metadata={})])
+    builder.set_chunks([GenerationChunk(chunk_id="1", content="chunk content")])
     builder.set_system_input("system input")
     builder.set_output_format("Markdown")
 

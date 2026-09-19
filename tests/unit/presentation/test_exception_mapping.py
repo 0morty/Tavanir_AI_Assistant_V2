@@ -11,6 +11,7 @@ from src.application.exceptions import (
 )
 from src.domain.exceptions import (
     DomainError,
+    InvalidCommitteeScrutinyError,
     InvalidShamsiDateFormatError,
     InvalidSuggestionStatusError,
 )
@@ -54,6 +55,11 @@ def test_resolve_error_spec_exact_match():
     assert spec.status_code == 422
     assert spec.code == "INVALID_SUGGESTION_STATUS"
     assert spec.default_pointer == "/data/status"
+
+    spec_com = resolve_error_spec(InvalidCommitteeScrutinyError("Invalid scrutiny"))
+    assert spec_com.status_code == 422
+    assert spec_com.code == "INVALID_COMMITTEE_SCRUTINY"
+    assert spec_com.default_pointer == "/data/committeeScrutiny"
 
 
 def test_resolve_error_spec_mro_fallback():

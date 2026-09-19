@@ -1,30 +1,32 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator, model_validator
+from src.presentation.schemas.requests import BaseRequestModel
 
 from src.application.dtos import CreateSuggestionDTO
-from src.domain.enums import SuggestionStatus
+from src.domain.enums import (
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionStatus,
+)
 from src.presentation.schemas.validators import (
     empty_str_to_none,
     normalize_digits_to_ascii,
+    parse_committee_scrutiny,
+    parse_secretariat_scrutiny,
     parse_suggestion_status,
 )
 
 
-class IngestSuggestionRequest(BaseModel):
+class IngestSuggestionRequest(BaseRequestModel):
     """
     Inbound request schema for single suggestion ingestion.
-    Accepts camelCase fields from API clients while binding to snake_case internally.
+    Accepts camelCase fields from API clients while binding to snake_case internally
+    via BaseRequestModel's alias_generator=to_camel and populate_by_name=True.
     """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-        extra="forbid",
-    )
 
     suggestion_id: str = Field(
         ...,
-        alias="suggestionId",
         min_length=1,
         description="Unique business identifier of the suggestion",
     )
@@ -47,9 +49,9 @@ class IngestSuggestionRequest(BaseModel):
         ...,
         description="Evaluation status (Persian string e.g. 'مصوب', ID int, or enum name)",
     )
-    scrutiny: str | None = Field(
+    committee_scrutiny: Any = Field(
         default=None,
-        description="Expert committee review/scrutiny notes",
+        description="Expert committee review/scrutiny (Persian title, code int, or string)",
     )
     description: str | None = Field(
         default=None,
@@ -57,14 +59,69 @@ class IngestSuggestionRequest(BaseModel):
     )
     shamsi_date: str | None = Field(
         default=None,
-        alias="shamsiDate",
         description="Submission or evaluation date in Shamsi format (YYYY/MM/DD)",
     )
     context_title: str | None = Field(
         default=None,
-        alias="contextTitle",
         description="Organizational department or domain context",
     )
+    secretariat_scrutiny: Any = Field(
+        default=None,
+        description="Secretariat primary scrutiny (Persian title, code int, or string)",
+    )
+    secretariat_comment: str | None = Field(
+        default=None,
+        description="Secretariat review rationale or commentary",
+    )
+    tributary_scrutiny: Any = Field(
+        default=None,
+        description="Legacy alias for secretariat scrutiny",
+    )
+    tributary_comment: str | None = Field(
+        default=None,
+        description="Legacy alias for secretariat commentary",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_mutually_exclusive_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        sec_scrutiny = data.get("secretariat_scrutiny")
+        if sec_scrutiny is None:
+            sec_scrutiny = data.get("secretariatScrutiny")
+
+        trib_scrutiny = data.get("tributary_scrutiny")
+        if trib_scrutiny is None:
+            trib_scrutiny = data.get("tributaryScrutiny")
+
+        if sec_scrutiny is not None and trib_scrutiny is not None:
+            raise ValueError(
+                "Cannot supply both secretariat_scrutiny and tributary_scrutiny in the same request."
+            )
+
+        sec_comment = data.get("secretariat_comment")
+        if sec_comment is None:
+            sec_comment = data.get("secretariatComment")
+
+        trib_comment = data.get("tributary_comment")
+        if trib_comment is None:
+            trib_comment = data.get("tributaryComment")
+
+        if sec_comment is not None and trib_comment is not None:
+            raise ValueError(
+                "Cannot supply both secretariat_comment and tributary_comment in the same request."
+            )
+
+        # Populate canonical field if legacy alias provided
+        if trib_scrutiny is not None and sec_scrutiny is None:
+            data["secretariat_scrutiny"] = trib_scrutiny
+
+        if trib_comment is not None and sec_comment is None:
+            data["secretariat_comment"] = trib_comment
+
+        return data
 
     @field_validator("suggestion_id")
     @classmethod
@@ -79,6 +136,16 @@ class IngestSuggestionRequest(BaseModel):
     def validate_status(cls, v: Any) -> SuggestionStatus:
         return parse_suggestion_status(v)
 
+    @field_validator("committee_scrutiny", mode="before")
+    @classmethod
+    def validate_committee_scrutiny(cls, v: Any) -> CommitteeScrutiny | None:
+        return parse_committee_scrutiny(v)
+
+    @field_validator("secretariat_scrutiny", mode="before")
+    @classmethod
+    def validate_secretariat_scrutiny(cls, v: Any) -> SecretariatScrutiny | None:
+        return parse_secretariat_scrutiny(v)
+
     @field_validator("shamsi_date", mode="before")
     @classmethod
     def validate_shamsi_date(cls, v: Any) -> str | None:
@@ -87,22 +154,44 @@ class IngestSuggestionRequest(BaseModel):
             return None
         return normalize_digits_to_ascii(str(coerced).strip())
 
-    @field_validator("scrutiny", "description", "context_title", mode="before")
+    @field_validator(
+        "description",
+        "context_title",
+        "secretariat_comment",
+        "tributary_comment",
+        mode="before",
+    )
     @classmethod
     def validate_optional_strings(cls, v: Any) -> str | None:
         return empty_str_to_none(v)
 
     def to_dto(self) -> CreateSuggestionDTO:
+        committee_id = (
+            self.committee_scrutiny.code
+            if isinstance(self.committee_scrutiny, CommitteeScrutiny)
+            else None
+        )
+        secretariat_id = (
+            self.secretariat_scrutiny.code
+            if isinstance(self.secretariat_scrutiny, SecretariatScrutiny)
+            else None
+        )
         return CreateSuggestionDTO(
             suggestion_id=self.suggestion_id,
             title=self.title.strip(),
             problem=self.problem.strip(),
             solution=self.solution.strip(),
             status=self.status,
-            scrutiny=self.scrutiny.strip() if self.scrutiny else None,
+            committee_scrutiny=self.committee_scrutiny,
             description=self.description.strip() if self.description else None,
             shamsi_date=self.shamsi_date,
             context_title=self.context_title.strip() if self.context_title else None,
+            committee_scrutiny_id=committee_id,
+            secretariat_scrutiny=self.secretariat_scrutiny,
+            secretariat_comment=self.secretariat_comment.strip()
+            if self.secretariat_comment
+            else None,
+            secretariat_scrutiny_id=secretariat_id,
         )
 
 

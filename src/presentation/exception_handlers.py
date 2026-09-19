@@ -36,6 +36,8 @@ from src.domain.exceptions import (
     ChunkingError,
     DomainError,
     EntityNotFoundError,
+    InvalidCommitteeScrutinyError,
+    InvalidSecretariatScrutinyError,
     InvalidShamsiDateFormatError,
     InvalidSparseVectorError,
     InvalidSuggestionContentError,
@@ -84,6 +86,16 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         code="INVALID_SUGGESTION_STATUS",
         default_pointer="/data/status",
+    ),
+    InvalidCommitteeScrutinyError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="INVALID_COMMITTEE_SCRUTINY",
+        default_pointer="/data/committeeScrutiny",
+    ),
+    InvalidSecretariatScrutinyError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="INVALID_SECRETARIAT_SCRUTINY",
+        default_pointer="/data/secretariatScrutiny",
     ),
     InvalidSparseVectorError: ErrorSpec(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -401,7 +413,7 @@ async def http_exception_handler(
 ) -> JSONResponse:
     """Intercepts standard HTTP exceptions (404, 405, etc.) and wraps them in JSON:API envelope."""
     if hasattr(exc, "code"):
-        code = exc.code
+        code = getattr(exc, "code")
         pointer = getattr(exc, "pointer", None)
     else:
         status_to_code = {

@@ -37,8 +37,12 @@ def test_fetch_page_sync_success(mock_mssql_settings: MssqlSettings):
         "solution": "استفاده از باتری",
         "status": "مصوب",
         "status_id": 11,
-        "committee_scrutiny": "تصویب در کارگروه",
+        "committee_scrutiny_id": 0,
+        "committee_scrutiny": "تایید",
         "committee_scrutiny_description": "مصوب گردید",
+        "tributary_scrutiny_id": 3,
+        "tributary_scrutiny": "ارجاع به کمیته",
+        "tributary_comment": "تایید اولیه در دبیرخانه",
         "date": "1402/05/10",
         "context_title": "توزیع برق",
     }
@@ -49,8 +53,12 @@ def test_fetch_page_sync_success(mock_mssql_settings: MssqlSettings):
         "solution": None,
         "status": "رد",
         "status_id": 10,
-        "committee_scrutiny": "رد شده",
+        "committee_scrutiny_id": None,
+        "committee_scrutiny": None,
         "committee_scrutiny_description": "",
+        "tributary_scrutiny_id": 0,
+        "tributary_scrutiny": "خارج از چهارچوب",
+        "tributary_comment": "خارج از حدود وظایف شرکت",
         "date": None,
         "context_title": None,
     }
@@ -70,13 +78,65 @@ def test_fetch_page_sync_success(mock_mssql_settings: MssqlSettings):
     assert results[0].status_id == 11
     assert results[0].shamsi_date == "1402/05/10"
     assert results[0].context_title == "توزیع برق"
+    assert results[0].committee_scrutiny_id == 0
+    assert results[0].committee_scrutiny == "تایید"
+    assert results[0].description == "مصوب گردید"
+    assert results[0].secretariat_scrutiny_id == 3
+    assert results[0].secretariat_scrutiny == "ارجاع به کمیته"
+    assert results[0].secretariat_comment == "تایید اولیه در دبیرخانه"
 
     assert results[1].suggestion_id == "20002//97"
     assert results[1].shamsi_date is None
     assert results[1].problem is None
+    assert results[1].committee_scrutiny_id is None
+    assert results[1].committee_scrutiny is None
+    assert results[1].secretariat_scrutiny_id == 0
+    assert results[1].secretariat_scrutiny == "خارج از چهارچوب"
+    assert results[1].secretariat_comment == "خارج از حدود وظایف شرکت"
 
     mock_cursor.execute.assert_called_once_with(EXTRACTION_QUERY, (1000, 50))
     mock_conn.close.assert_called_once()
+
+
+def test_fetch_page_maps_secretariat_and_committee_edge_cases(
+    mock_mssql_settings: MssqlSettings,
+):
+    extractor = MssqlSuggestionExtractor(config=mock_mssql_settings)
+
+    # Edge Case: Row with neither committee nor secretariat data
+    mock_row_empty = {
+        "suggestion_id": "30001//99",
+        "title": "پیشنهاد خام",
+        "current_problem": "مشکل",
+        "solution": "راهکار",
+        "status": "در دست بررسی",
+        "status_id": 1,
+        "committee_scrutiny_id": None,
+        "committee_scrutiny": None,
+        "committee_scrutiny_description": None,
+        "tributary_scrutiny_id": None,
+        "tributary_scrutiny": None,
+        "tributary_comment": None,
+        "date": "1402/01/01",
+        "context_title": "ستاد",
+    }
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = [mock_row_empty]
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+    with patch.object(extractor, "_get_connection", return_value=mock_conn):
+        results = extractor._fetch_page_sync(offset=0, batch_size=1)
+
+    assert len(results) == 1
+    dto = results[0]
+    assert dto.committee_scrutiny_id is None
+    assert dto.committee_scrutiny is None
+    assert dto.description is None
+    assert dto.secretariat_scrutiny_id is None
+    assert dto.secretariat_scrutiny is None
+    assert dto.secretariat_comment is None
 
 
 def test_fetch_page_sync_retries_on_operational_error(
@@ -128,7 +188,7 @@ async def test_stream_suggestions_batches(mock_mssql_settings: MssqlSettings):
             problem="P1",
             solution="S1",
             status_id=11,
-            scrutiny="Scrutiny 1",
+            committee_scrutiny="Scrutiny 1",
             description="Desc 1",
             shamsi_date="1402/01/01",
             context_title="Context",
@@ -139,7 +199,7 @@ async def test_stream_suggestions_batches(mock_mssql_settings: MssqlSettings):
             problem="P2",
             solution="S2",
             status_id=12,
-            scrutiny="Scrutiny 2",
+            committee_scrutiny="Scrutiny 2",
             description="Desc 2",
             shamsi_date="1402/01/02",
             context_title="Context",
@@ -152,7 +212,7 @@ async def test_stream_suggestions_batches(mock_mssql_settings: MssqlSettings):
             problem="P3",
             solution="S3",
             status_id=21,
-            scrutiny="Scrutiny 3",
+            committee_scrutiny="Scrutiny 3",
             description="Desc 3",
             shamsi_date="1402/01/03",
             context_title="Context",

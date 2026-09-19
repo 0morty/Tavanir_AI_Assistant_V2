@@ -6,7 +6,9 @@ from typing import Generic, TypeAlias, TypeVar
 from src.domain.enums import (
     AuthorityLevel,
     ChunkStatus,
+    CommitteeScrutiny,
     RegulatoryDocumentType,
+    SecretariatScrutiny,
     SuggestionChunkType,
     SuggestionStatus,
 )
@@ -95,10 +97,18 @@ class SuggestionContent:
 
 
 @dataclass(frozen=True)
+class SecretariatEvaluation:
+    scrutiny: SecretariatScrutiny | None = None
+    comment: str | None = None
+    scrutiny_id: int | None = None
+
+
+@dataclass(frozen=True)
 class CommitteeEvaluation:
     status: SuggestionStatus
-    scrutiny: str | None
-    description: str | None
+    scrutiny: CommitteeScrutiny | None = None
+    description: str | None = None
+    scrutiny_id: int | None = None
 
 
 @dataclass
@@ -106,8 +116,9 @@ class Suggestion:
     id: str
     content: SuggestionContent
     evaluation: CommitteeEvaluation
-    date: ShamsiDate | None
-    context_title: str | None
+    date: ShamsiDate | None = None
+    context_title: str | None = None
+    secretariat_evaluation: SecretariatEvaluation | None = None
 
 
 # endregion
@@ -161,6 +172,10 @@ class SuggestionChunkMetadata:
     status: SuggestionStatus | None = None
     context_title: str | None = None
     date: ShamsiDate | None = None
+    committee_scrutiny: CommitteeScrutiny | None = None
+    committee_scrutiny_id: int | None = None
+    secretariat_scrutiny: SecretariatScrutiny | None = None
+    secretariat_scrutiny_id: int | None = None
 
 
 @dataclass(frozen=True)

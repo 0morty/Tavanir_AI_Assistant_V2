@@ -10,11 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities import (
     CommitteeEvaluation,
+    SecretariatEvaluation,
     ShamsiDate,
     Suggestion,
     SuggestionContent,
 )
-from src.domain.enums import SuggestionStatus
+from src.domain.enums import (
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionStatus,
+)
 from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
 from src.infrastructure.db.repositories.sql.base_sql_repository import BaseSqlRepository
 from src.infrastructure.db.sql_models.suggestion_model import SuggestionModel
@@ -39,6 +44,34 @@ class SqlSuggestionRepository(
 
     def _to_entity(self, model: SuggestionModel) -> Suggestion:
         """Map SQLAlchemy model to rich domain entity."""
+        com_scrutiny: CommitteeScrutiny | None = None
+        if model.committee_scrutiny_id is not None:
+            com_scrutiny = CommitteeScrutiny.from_code(model.committee_scrutiny_id)
+        elif model.committee_scrutiny:
+            com_scrutiny = CommitteeScrutiny.from_string(model.committee_scrutiny)
+
+        sec_evaluation: SecretariatEvaluation | None = None
+        if (
+            model.secretariat_scrutiny is not None
+            or model.secretariat_comment is not None
+            or model.secretariat_scrutiny_id is not None
+        ):
+            sec_scrutiny: SecretariatScrutiny | None = None
+            if model.secretariat_scrutiny_id is not None:
+                sec_scrutiny = SecretariatScrutiny.from_code(
+                    model.secretariat_scrutiny_id
+                )
+            elif model.secretariat_scrutiny:
+                sec_scrutiny = SecretariatScrutiny.from_string(
+                    model.secretariat_scrutiny
+                )
+
+            sec_evaluation = SecretariatEvaluation(
+                scrutiny=sec_scrutiny,
+                comment=model.secretariat_comment,
+                scrutiny_id=model.secretariat_scrutiny_id,
+            )
+
         return Suggestion(
             id=model.id,
             content=SuggestionContent(
@@ -48,40 +81,87 @@ class SqlSuggestionRepository(
             ),
             evaluation=CommitteeEvaluation(
                 status=SuggestionStatus.from_id(model.status_id),
-                scrutiny=model.scrutiny,
+                scrutiny=com_scrutiny,
                 description=model.description,
+                scrutiny_id=model.committee_scrutiny_id,
             ),
             date=ShamsiDate(model.shamsi_date) if model.shamsi_date else None,
             context_title=model.context_title,
+            secretariat_evaluation=sec_evaluation,
         )
+
+    def _extract_evaluation_fields(
+        self, entity: Suggestion
+    ) -> tuple[str | None, int | None, str | None, str | None, int | None]:
+        """Extract (com_title, com_id, sec_title, sec_comment, sec_id) from Suggestion."""
+        com_title = (
+            entity.evaluation.scrutiny.title_fa
+            if entity.evaluation.scrutiny
+            else None
+        )
+        com_id = (
+            entity.evaluation.scrutiny.code
+            if entity.evaluation.scrutiny
+            else entity.evaluation.scrutiny_id
+        )
+
+        sec_title = None
+        sec_comment = None
+        sec_id = None
+        if entity.secretariat_evaluation:
+            sec = entity.secretariat_evaluation
+            sec_title = (
+                sec.scrutiny.title_fa
+                if sec.scrutiny
+                else None
+            )
+            sec_id = (
+                sec.scrutiny.code
+                if sec.scrutiny
+                else sec.scrutiny_id
+            )
+            sec_comment = sec.comment
+
+        return com_title, com_id, sec_title, sec_comment, sec_id
 
     def _to_model(self, entity: Suggestion) -> SuggestionModel:
         """Map domain entity to SQLAlchemy model."""
+        com_title, com_id, sec_title, sec_comment, sec_id = self._extract_evaluation_fields(entity)
         return SuggestionModel(
             id=entity.id,
             title=entity.content.title,
             problem=entity.content.problem,
             solution=entity.content.solution,
             status_id=entity.evaluation.status.status_id,
-            scrutiny=entity.evaluation.scrutiny,
+            committee_scrutiny=com_title,
             description=entity.evaluation.description,
+            committee_scrutiny_id=com_id,
+            secretariat_scrutiny_id=sec_id,
+            secretariat_scrutiny=sec_title,
+            secretariat_comment=sec_comment,
             shamsi_date=str(entity.date) if entity.date else None,
             context_title=entity.context_title,
         )
 
     def _entity_to_dict(self, entity: Suggestion) -> dict[str, Any]:
         """Flatten domain entity to dictionary for PostgreSQL upsert values."""
+        com_title, com_id, sec_title, sec_comment, sec_id = self._extract_evaluation_fields(entity)
         return {
             "id": entity.id,
             "title": entity.content.title,
             "problem": entity.content.problem,
             "solution": entity.content.solution,
             "status_id": entity.evaluation.status.status_id,
-            "scrutiny": entity.evaluation.scrutiny,
+            "committee_scrutiny": com_title,
             "description": entity.evaluation.description,
+            "committee_scrutiny_id": com_id,
+            "secretariat_scrutiny_id": sec_id,
+            "secretariat_scrutiny": sec_title,
+            "secretariat_comment": sec_comment,
             "shamsi_date": str(entity.date) if entity.date else None,
             "context_title": entity.context_title,
         }
+
 
     async def get_by_id(self, suggestion_id: str) -> Suggestion | None:
         """Fetch a single suggestion by its primary key identifier."""
@@ -118,8 +198,12 @@ class SqlSuggestionRepository(
                 "problem": stmt.excluded.problem,
                 "solution": stmt.excluded.solution,
                 "status_id": stmt.excluded.status_id,
-                "scrutiny": stmt.excluded.scrutiny,
+                "committee_scrutiny": stmt.excluded.committee_scrutiny,
                 "description": stmt.excluded.description,
+                "committee_scrutiny_id": stmt.excluded.committee_scrutiny_id,
+                "secretariat_scrutiny_id": stmt.excluded.secretariat_scrutiny_id,
+                "secretariat_scrutiny": stmt.excluded.secretariat_scrutiny,
+                "secretariat_comment": stmt.excluded.secretariat_comment,
                 "shamsi_date": stmt.excluded.shamsi_date,
                 "context_title": stmt.excluded.context_title,
                 "updated_at": func.now(),
@@ -143,8 +227,12 @@ class SqlSuggestionRepository(
                 "problem": stmt.excluded.problem,
                 "solution": stmt.excluded.solution,
                 "status_id": stmt.excluded.status_id,
-                "scrutiny": stmt.excluded.scrutiny,
+                "committee_scrutiny": stmt.excluded.committee_scrutiny,
                 "description": stmt.excluded.description,
+                "committee_scrutiny_id": stmt.excluded.committee_scrutiny_id,
+                "secretariat_scrutiny_id": stmt.excluded.secretariat_scrutiny_id,
+                "secretariat_scrutiny": stmt.excluded.secretariat_scrutiny,
+                "secretariat_comment": stmt.excluded.secretariat_comment,
                 "shamsi_date": stmt.excluded.shamsi_date,
                 "context_title": stmt.excluded.context_title,
                 "updated_at": func.now(),

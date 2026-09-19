@@ -42,6 +42,18 @@ class InvalidSuggestionStatusError(DomainError):
     pass
 
 
+class InvalidSecretariatScrutinyError(DomainError):
+    """Raised when an unrecognized secretariat scrutiny value or code is encountered."""
+
+    pass
+
+
+class InvalidCommitteeScrutinyError(DomainError):
+    """Raised when an unrecognized committee scrutiny value or code is encountered."""
+
+    pass
+
+
 class InvalidSparseVectorError(DomainError):
     pass
 

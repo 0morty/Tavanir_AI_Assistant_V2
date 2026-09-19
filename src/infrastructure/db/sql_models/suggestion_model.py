@@ -26,8 +26,16 @@ class SuggestionModel(Base, TimestampMixin):
     problem: Mapped[str] = mapped_column(Text, nullable=False)
     solution: Mapped[str] = mapped_column(Text, nullable=False)
     status_id: Mapped[int] = mapped_column(SmallInteger, nullable=False, index=True)
-    scrutiny: Mapped[str | None] = mapped_column(Text, nullable=True)
+    committee_scrutiny: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    committee_scrutiny_id: Mapped[int | None] = mapped_column(
+        SmallInteger, nullable=True, index=True
+    )
+    secretariat_scrutiny_id: Mapped[int | None] = mapped_column(
+        SmallInteger, nullable=True, index=True
+    )
+    secretariat_scrutiny: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secretariat_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     shamsi_date: Mapped[str | None] = mapped_column(
         String(10), nullable=True, index=True
     )

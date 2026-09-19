@@ -19,7 +19,13 @@ from src.domain.entities import (
     SuggestionChunkMetadata,
     SuggestionContent,
 )
-from src.domain.enums import ChunkStatus, SuggestionChunkType, SuggestionStatus
+from src.domain.enums import (
+    ChunkStatus,
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionChunkType,
+    SuggestionStatus,
+)
 from src.domain.exceptions import (
     InvalidSuggestionContentError,
     SuggestionAlreadyExistsError,
@@ -216,10 +222,11 @@ def valid_dto() -> CreateSuggestionDTO:
         problem="شرح مشکل سازمانی با جزییات کامل و کافی",
         solution="ارائه راهکار عملیاتی با کیفیت و استاندارد",
         status=SuggestionStatus.APPROVED,
-        scrutiny="بررسی شده در جلسه کارگروه تخصصی",
+        committee_scrutiny=CommitteeScrutiny.APPROVED,
         description="مصوب جهت پیاده‌سازی آزمایشی",
         shamsi_date="1402/08/15",
         context_title="توزیع نیروی برق",
+        committee_scrutiny_id=0,
     )
 
 
@@ -271,6 +278,57 @@ async def test_successful_ingestion_flow(valid_dto):
 
     # Verify atomic staging activation
     vector_repo.activate_staging_chunks.assert_awaited_once_with("sugg-101")
+
+
+@pytest.mark.asyncio
+async def test_ingestion_flow_with_secretariat_and_committee_evaluations():
+    uow = FakeUoW()
+    normalizer = FakeNormalizer()
+    chunker = FakeChunker()
+    dense = FakeDenseEmbedder()
+    sparse = FakeSparseEmbedder()
+    embedding_service = HybridEmbeddingService(dense, sparse)
+    vector_repo = FakeVectorRepo()
+
+    dto = CreateSuggestionDTO(
+        suggestion_id="sugg-sec-01",
+        title="عنوان تست با دبیرخانه",
+        problem="شرح مشکل سازمانی معتبر و استاندارد",
+        solution="ارائه راهکار اجرایی معتبر و استاندارد",
+        status=SuggestionStatus.APPROVED,
+        committee_scrutiny=CommitteeScrutiny.APPROVED,
+        description="مصوب جلسه کمیته فنی",
+        committee_scrutiny_id=0,
+        secretariat_scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
+        secretariat_comment="تایید اولیه دبیرخانه و ارجاع",
+        secretariat_scrutiny_id=3,
+        shamsi_date="1402/10/01",
+        context_title="معاونت منابع انسانی",
+    )
+
+    use_case = IngestSuggestionUseCase(
+        uow=uow,
+        normalizer=normalizer,
+        chunker=chunker,
+        embedding_service=embedding_service,
+        vector_repo=vector_repo,
+    )
+
+    result = await use_case.execute(dto)
+    assert result.suggestion_id == "sugg-sec-01"
+    assert result.status == "CREATED"
+
+    saved_entity: Suggestion = uow.suggestions.save.call_args[0][0]
+    assert saved_entity.evaluation.scrutiny == CommitteeScrutiny.APPROVED
+    assert saved_entity.evaluation.scrutiny_id == 0
+    assert saved_entity.evaluation.description == "مصوب جلسه کمیته فنی"
+    assert saved_entity.secretariat_evaluation is not None
+    assert (
+        saved_entity.secretariat_evaluation.scrutiny
+        == SecretariatScrutiny.REFER_TO_COMMITTEE
+    )
+    assert saved_entity.secretariat_evaluation.scrutiny_id == 3
+    assert saved_entity.secretariat_evaluation.comment == "تایید اولیه دبیرخانه و ارجاع"
 
 
 @pytest.mark.asyncio

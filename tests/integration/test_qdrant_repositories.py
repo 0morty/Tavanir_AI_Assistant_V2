@@ -153,9 +153,11 @@ async def test_suggestion_repository_live_crud_and_hybrid_search(
         assert len(matching) == 1
         hit = matching[0]
         assert hit.parent_id == parent_id
-        assert hit.chunk.metadata.chunk_type == SuggestionChunkType.SOLUTION
-        assert hit.chunk.metadata.status == SuggestionStatus.APPROVED
-        assert str(hit.chunk.metadata.date) == "1404/02/10"
+        meta = hit.chunk.metadata
+        assert isinstance(meta, SuggestionChunkMetadata)
+        assert meta.chunk_type == SuggestionChunkType.SOLUTION
+        assert meta.status == SuggestionStatus.APPROVED
+        assert str(meta.date) == "1404/02/10"
         assert hit.score > 0.0
 
         # 3. Clean up by parent_id
@@ -381,7 +383,9 @@ async def test_regulatory_repository_live_crud_filters_and_exclusion(
         hit = binding_matches[0]
         assert hit.chunk.chunk_id == chunk1_id
         assert hit.chunk.parent_content == table_markdown
-        assert hit.chunk.metadata.document_type == RegulatoryDocumentType.STATUTE
+        reg_meta = hit.chunk.metadata
+        assert isinstance(reg_meta, RegulatoryChunkMetadata)
+        assert reg_meta.document_type == RegulatoryDocumentType.STATUTE
 
         # 2. Hop-1 exclusion test: exclude chunk1_id
         excluded_results = await regulatory_repo.search_regulatory_documents(

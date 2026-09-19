@@ -16,11 +16,16 @@ from src.infrastructure.db.unit_of_work import SqlUnitOfWork
 
 from src.domain.entities import (
     CommitteeEvaluation,
+    SecretariatEvaluation,
     ShamsiDate,
     Suggestion,
     SuggestionContent,
 )
-from src.domain.enums import SuggestionStatus
+from src.domain.enums import (
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionStatus,
+)
 
 
 @pytest.fixture
@@ -43,6 +48,7 @@ async def clean_db_session(session_factory: async_sessionmaker[AsyncSession]):
         try:
             yield session
         finally:
+            await session.rollback()
             await session.execute(text("DELETE FROM suggestions;"))
             await session.commit()
 
@@ -62,8 +68,9 @@ def _create_sample_suggestion(
         ),
         evaluation=CommitteeEvaluation(
             status=status,
-            scrutiny="بررسی فنی توسط کمیته تخصصی انتقال تایید گردید",
+            scrutiny=CommitteeScrutiny.APPROVED,
             description="مصوبه شماره ۲۳۸ مورخ ۱۴۰۲/۰۸/۱۰",
+            scrutiny_id=0,
         ),
         date=ShamsiDate(shamsi_date) if shamsi_date else None,
         context_title="معاونت انتقال و تجارت خارجی",
@@ -84,7 +91,7 @@ def test_mapper_roundtrip():
     assert model.problem == original.content.problem
     assert model.solution == original.content.solution
     assert model.status_id == original.evaluation.status.status_id
-    assert model.scrutiny == original.evaluation.scrutiny
+    assert model.committee_scrutiny == "تایید"
     assert model.description == original.evaluation.description
     assert model.shamsi_date == str(original.date)
     assert model.context_title == original.context_title
@@ -95,6 +102,52 @@ def test_mapper_roundtrip():
     assert hydrated.evaluation == original.evaluation
     assert hydrated.date == original.date
     assert hydrated.context_title == original.context_title
+
+
+def test_mapper_roundtrip_with_secretariat_and_committee_scrutiny():
+    mock_session = MagicMock()
+    repo = SqlSuggestionRepository(session=mock_session)
+
+    sugg = Suggestion(
+        id="SUG-ENRICHED-01",
+        content=SuggestionContent(
+            title="طرح جامع اصلاح سیستم سرمایش",
+            problem="افزایش دمای ترانس‌های فوق توزیع",
+            solution="نصب فن‌های هوشمند و رادیاتورهای کمکی",
+        ),
+        evaluation=CommitteeEvaluation(
+            status=SuggestionStatus.APPROVED,
+            scrutiny=CommitteeScrutiny.APPROVED,
+            description="مصوب جلسه شماره ۱۲ کارگروه بهینه‌سازی.",
+            scrutiny_id=0,
+        ),
+        secretariat_evaluation=SecretariatEvaluation(
+            scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
+            comment="پس از تایید اولیه، جهت ارزیابی نهایی به کارگروه ارسال شد.",
+            scrutiny_id=3,
+        ),
+        date=ShamsiDate("1402/09/20"),
+        context_title="معاونت بهره‌برداری",
+    )
+
+    model = repo._to_model(sugg)
+    assert model.committee_scrutiny_id == 0
+    assert model.committee_scrutiny == "تایید"
+    assert model.description == "مصوب جلسه شماره ۱۲ کارگروه بهینه‌سازی."
+    assert model.secretariat_scrutiny_id == 3
+    assert model.secretariat_scrutiny == "ارجاع به کمیته"
+    assert model.secretariat_comment == "پس از تایید اولیه، جهت ارزیابی نهایی به کارگروه ارسال شد."
+
+    hydrated = repo._to_entity(model)
+    assert hydrated.id == sugg.id
+    assert hydrated.evaluation.status == SuggestionStatus.APPROVED
+    assert hydrated.evaluation.scrutiny == CommitteeScrutiny.APPROVED
+    assert hydrated.evaluation.scrutiny_id == 0
+    assert hydrated.evaluation.description == "مصوب جلسه شماره ۱۲ کارگروه بهینه‌سازی."
+    assert hydrated.secretariat_evaluation is not None
+    assert hydrated.secretariat_evaluation.scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+    assert hydrated.secretariat_evaluation.scrutiny_id == 3
+    assert hydrated.secretariat_evaluation.comment == "پس از تایید اولیه، جهت ارزیابی نهایی به کارگروه ارسال شد."
 
 
 def test_mapper_with_nullable_fields():
@@ -119,7 +172,7 @@ def test_mapper_with_nullable_fields():
     model = repo._to_model(minimal_suggestion)
     assert model.problem == "شرح مشکل معتبر است"
     assert model.solution == "ارائه راهکار معتبر است"
-    assert model.scrutiny is None
+    assert model.committee_scrutiny is None
     assert model.description is None
     assert model.shamsi_date is None
     assert model.context_title is None
@@ -183,8 +236,9 @@ async def test_save_upsert_existing(session_factory: async_sessionmaker[AsyncSes
             ),
             evaluation=CommitteeEvaluation(
                 status=SuggestionStatus.EXECUTED,
-                scrutiny="تایید نهایی پس از تست میدانی",
+                scrutiny=CommitteeScrutiny.ACCEPTED_AS_EXECUTED_SUGGESTION,
                 description="مصوبه اجرایی",
+                scrutiny_id=4,
             ),
             date=ShamsiDate("1403/01/10"),
             context_title="امور دیسپاچینگ ملی",
@@ -274,3 +328,112 @@ async def test_uow_integration(session_factory: async_sessionmaker[AsyncSession]
     async with session_factory() as session:
         repo = SqlSuggestionRepository(session=session)
         assert await repo.get_by_id("UOW-ROLLBACK") is None
+
+
+@pytest.mark.asyncio
+async def test_save_and_retrieve_with_scrutiny_and_secretariat_columns(
+    session_factory: async_sessionmaker[AsyncSession],
+):
+    async with clean_db_session(session_factory) as db_session:
+        repo = SqlSuggestionRepository(session=db_session)
+
+        sugg = Suggestion(
+            id="SUG-DB-SCRUTINY-01",
+            content=SuggestionContent(
+                title="طرح ارتقای سطح ایمنی پست‌ها",
+                problem="خطرات ناشی از خطای اپراتوری در مانورها",
+                solution="استقرار سیستم قفل‌های اینترلاک هوشمند الکترومکانیکی",
+            ),
+            evaluation=CommitteeEvaluation(
+                status=SuggestionStatus.APPROVED,
+                scrutiny=CommitteeScrutiny.APPROVED,
+                description="مصوب جلسه شماره ۸۸ با تامین اعتبار اولیه.",
+                scrutiny_id=0,
+            ),
+            secretariat_evaluation=SecretariatEvaluation(
+                scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
+                comment="پرونده تکمیل و به کمیته ارجاع شد.",
+                scrutiny_id=3,
+            ),
+            date=ShamsiDate("1402/10/01"),
+            context_title="ایمنی و بهداشت",
+        )
+
+        await repo.save(sugg)
+        await db_session.commit()
+
+        retrieved = await repo.get_by_id("SUG-DB-SCRUTINY-01")
+        assert retrieved is not None
+        assert retrieved.id == "SUG-DB-SCRUTINY-01"
+        assert retrieved.evaluation.scrutiny == CommitteeScrutiny.APPROVED
+        assert retrieved.evaluation.scrutiny_id == 0
+        assert retrieved.evaluation.description == "مصوب جلسه شماره ۸۸ با تامین اعتبار اولیه."
+        assert retrieved.secretariat_evaluation is not None
+        assert retrieved.secretariat_evaluation.scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+        assert retrieved.secretariat_evaluation.scrutiny_id == 3
+        assert retrieved.secretariat_evaluation.comment == "پرونده تکمیل و به کمیته ارجاع شد."
+
+
+@pytest.mark.asyncio
+async def test_upsert_updates_scrutiny_columns(
+    session_factory: async_sessionmaker[AsyncSession],
+):
+    async with clean_db_session(session_factory) as db_session:
+        repo = SqlSuggestionRepository(session=db_session)
+
+        initial = Suggestion(
+            id="SUG-DB-UPSERT-02",
+            content=SuggestionContent(
+                title="طرح اولیه",
+                problem="مشکل اولیه",
+                solution="راهکار اولیه",
+            ),
+            evaluation=CommitteeEvaluation(
+                status=SuggestionStatus.PENDING,
+                scrutiny=None,
+                description=None,
+                scrutiny_id=None,
+            ),
+            secretariat_evaluation=None,
+            date=ShamsiDate("1402/01/01"),
+            context_title="حوزه ستادی",
+        )
+        await repo.save(initial)
+        await db_session.commit()
+
+        # Upsert with committee decision and secretariat comment
+        updated = Suggestion(
+            id="SUG-DB-UPSERT-02",
+            content=SuggestionContent(
+                title="طرح اولیه ویرایش شده",
+                problem="مشکل اولیه",
+                solution="راهکار اولیه",
+            ),
+            evaluation=CommitteeEvaluation(
+                status=SuggestionStatus.REJECTED,
+                scrutiny=CommitteeScrutiny.REJECTED,
+                description="فاقد اولویت اجرایی در سال جاری.",
+                scrutiny_id=1,
+            ),
+            secretariat_evaluation=SecretariatEvaluation(
+                scrutiny=SecretariatScrutiny.OUT_OF_FRAMEWORK,
+                comment="موضوع در حیطه اختیارات شرکت نیست.",
+                scrutiny_id=0,
+            ),
+            date=ShamsiDate("1402/01/01"),
+            context_title="حوزه ستادی",
+        )
+        await repo.save(updated)
+        await db_session.commit()
+
+        retrieved = await repo.get_by_id("SUG-DB-UPSERT-02")
+        assert retrieved is not None
+        assert retrieved.evaluation.status == SuggestionStatus.REJECTED
+        assert retrieved.evaluation.scrutiny == CommitteeScrutiny.REJECTED
+        assert retrieved.evaluation.scrutiny_id == 1
+        assert retrieved.evaluation.description == "فاقد اولویت اجرایی در سال جاری."
+        assert retrieved.secretariat_evaluation is not None
+        assert retrieved.secretariat_evaluation.scrutiny == SecretariatScrutiny.OUT_OF_FRAMEWORK
+        assert retrieved.secretariat_evaluation.scrutiny_id == 0
+        assert retrieved.secretariat_evaluation.comment == "موضوع در حیطه اختیارات شرکت نیست."
+

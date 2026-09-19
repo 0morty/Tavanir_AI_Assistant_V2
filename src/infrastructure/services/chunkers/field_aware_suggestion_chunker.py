@@ -11,7 +11,12 @@ from src.domain.entities import (
     SuggestionChunk,
     SuggestionChunkMetadata,
 )
-from src.domain.enums import ChunkStatus, SuggestionChunkType
+from src.domain.enums import (
+    ChunkStatus,
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionChunkType,
+)
 from src.domain.exceptions import SuggestionChunkingError
 from src.domain.interfaces.i_chunking_strategy import (
     IChunkingStrategy,
@@ -71,6 +76,17 @@ class FieldAwareSuggestionChunker(
             return False
         return cleaned not in self._noise_placeholders
 
+    def _is_substantive_commentary(
+        self, text: str | None, min_len: int = 15
+    ) -> TypeGuard[str]:
+        """Determines if an evaluation comment contains substantive human reasoning worth embedding."""
+        if not text:
+            return False
+        cleaned = text.strip()
+        if len(cleaned) < min_len:
+            return False
+        return cleaned not in self._noise_placeholders
+
     def _split_text(self, text: str) -> list[str]:
         """
         Recursively splits long Persian text along hierarchical boundaries
@@ -116,6 +132,28 @@ class FieldAwareSuggestionChunker(
 
         chunks: list[SuggestionChunk] = []
 
+        # Extract parent suggestion scrutiny metadata for chunk-level filter inheritance
+        committee_scrutiny = document.evaluation.scrutiny
+        committee_scrutiny_id = (
+            committee_scrutiny.code
+            if committee_scrutiny
+            else document.evaluation.scrutiny_id
+        )
+        secretariat_scrutiny = (
+            document.secretariat_evaluation.scrutiny
+            if document.secretariat_evaluation
+            else None
+        )
+        secretariat_scrutiny_id = (
+            secretariat_scrutiny.code
+            if secretariat_scrutiny
+            else (
+                document.secretariat_evaluation.scrutiny_id
+                if document.secretariat_evaluation
+                else None
+            )
+        )
+
         # 1. TITLE Chunk (Domain Anchoring: context_title + title)
         context_title = document.context_title
         if self._is_valid_content(context_title):
@@ -134,6 +172,10 @@ class FieldAwareSuggestionChunker(
                     status=document.evaluation.status,
                     context_title=document.context_title,
                     date=document.date,
+                    committee_scrutiny=committee_scrutiny,
+                    committee_scrutiny_id=committee_scrutiny_id,
+                    secretariat_scrutiny=secretariat_scrutiny,
+                    secretariat_scrutiny_id=secretariat_scrutiny_id,
                 ),
                 parent_content=None,
                 chunk_status=ChunkStatus.ACTIVE,
@@ -155,6 +197,10 @@ class FieldAwareSuggestionChunker(
                         status=document.evaluation.status,
                         context_title=document.context_title,
                         date=document.date,
+                        committee_scrutiny=committee_scrutiny,
+                        committee_scrutiny_id=committee_scrutiny_id,
+                        secretariat_scrutiny=secretariat_scrutiny,
+                        secretariat_scrutiny_id=secretariat_scrutiny_id,
                     ),
                     parent_content=None,
                     chunk_status=ChunkStatus.ACTIVE,
@@ -176,41 +222,71 @@ class FieldAwareSuggestionChunker(
                         status=document.evaluation.status,
                         context_title=document.context_title,
                         date=document.date,
+                        committee_scrutiny=committee_scrutiny,
+                        committee_scrutiny_id=committee_scrutiny_id,
+                        secretariat_scrutiny=secretariat_scrutiny,
+                        secretariat_scrutiny_id=secretariat_scrutiny_id,
                     ),
                     parent_content=None,
                     chunk_status=ChunkStatus.ACTIVE,
                 )
             )
 
-        # 4. EVALUATION Chunk (Consolidation without empty lines)
-        scrutiny = document.evaluation.scrutiny
-        description = document.evaluation.description
-        eval_parts: list[str] = []
-
-        if self._is_valid_content(scrutiny):
-            eval_parts.append(f"بررسی کمیته: {scrutiny.strip()}")
-
-        if self._is_valid_content(description):
-            eval_parts.append(f"توضیحات مصوبه: {description.strip()}")
-
-        if eval_parts:
-            eval_content = "\n".join(eval_parts)
-            chunks.append(
-                Chunk[SuggestionChunkMetadata](
-                    chunk_id=str(uuid.uuid4()),
-                    parent_id=document.id,
-                    content=eval_content,
-                    metadata=SuggestionChunkMetadata(
-                        chunk_type=SuggestionChunkType.EVALUATION,
-                        sub_index=0,
-                        status=document.evaluation.status,
-                        context_title=document.context_title,
-                        date=document.date,
-                    ),
-                    parent_content=None,
-                    chunk_status=ChunkStatus.ACTIVE,
-                )
+        # 4. EVALUATION Chunk (Substantive Commentary Guard)
+        # An EVALUATION chunk is ONLY emitted if either Committee description or
+        # Secretariat comment contains substantive human commentary (>= 15 chars, not in noise placeholders).
+        has_substantive_description = self._is_substantive_commentary(
+            document.evaluation.description, min_len=15
+        )
+        has_substantive_sec_comment = False
+        if document.secretariat_evaluation and document.secretariat_evaluation.comment:
+            has_substantive_sec_comment = self._is_substantive_commentary(
+                document.secretariat_evaluation.comment, min_len=15
             )
+
+        if has_substantive_description or has_substantive_sec_comment:
+            eval_parts: list[str] = []
+
+            # 4a. Secretariat evaluation block (if substantive comment exists)
+            if has_substantive_sec_comment and document.secretariat_evaluation:
+                sec = document.secretariat_evaluation
+                sec_title = sec.scrutiny.title_fa if sec.scrutiny else ""
+                if self._is_valid_content(sec_title):
+                    eval_parts.append(f"ارزیابی دبیرخانه: {sec_title}")
+                if self._is_valid_content(sec.comment):
+                    eval_parts.append(f"نظر دبیرخانه: {sec.comment.strip()}")
+
+            # 4b. Committee evaluation block (if substantive description exists)
+            if has_substantive_description:
+                com = document.evaluation
+                com_title = com.scrutiny.title_fa if com.scrutiny else ""
+                if self._is_valid_content(com_title):
+                    eval_parts.append(f"بررسی کمیته: {com_title}")
+                if self._is_valid_content(com.description):
+                    eval_parts.append(f"توضیحات مصوبه: {com.description.strip()}")
+
+            if eval_parts:
+                eval_content = "\n".join(eval_parts)
+                chunks.append(
+                    Chunk[SuggestionChunkMetadata](
+                        chunk_id=str(uuid.uuid4()),
+                        parent_id=document.id,
+                        content=eval_content,
+                        metadata=SuggestionChunkMetadata(
+                            chunk_type=SuggestionChunkType.EVALUATION,
+                            sub_index=0,
+                            status=document.evaluation.status,
+                            context_title=document.context_title,
+                            date=document.date,
+                            committee_scrutiny=committee_scrutiny,
+                            committee_scrutiny_id=committee_scrutiny_id,
+                            secretariat_scrutiny=secretariat_scrutiny,
+                            secretariat_scrutiny_id=secretariat_scrutiny_id,
+                        ),
+                        parent_content=None,
+                        chunk_status=ChunkStatus.ACTIVE,
+                    )
+                )
 
         return chunks
 

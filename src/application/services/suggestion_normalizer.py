@@ -1,5 +1,10 @@
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
-from src.domain.entities import CommitteeEvaluation, Suggestion, SuggestionContent
+from src.domain.entities import (
+    CommitteeEvaluation,
+    SecretariatEvaluation,
+    Suggestion,
+    SuggestionContent,
+)
 
 
 def normalize_suggestion(
@@ -22,11 +27,6 @@ def normalize_suggestion(
     )
 
     # 2. Normalize CommitteeEvaluation
-    normalized_scrutiny = (
-        normalizer.normalize(suggestion.evaluation.scrutiny)
-        if suggestion.evaluation.scrutiny is not None
-        else None
-    )
     normalized_description = (
         normalizer.normalize(suggestion.evaluation.description)
         if suggestion.evaluation.description is not None
@@ -34,11 +34,27 @@ def normalize_suggestion(
     )
     normalized_evaluation = CommitteeEvaluation(
         status=suggestion.evaluation.status,
-        scrutiny=normalized_scrutiny,
+        scrutiny=suggestion.evaluation.scrutiny,
         description=normalized_description,
+        scrutiny_id=suggestion.evaluation.scrutiny_id,
     )
 
-    # 3. Normalize context_title
+    # 3. Normalize SecretariatEvaluation
+    normalized_sec_evaluation: SecretariatEvaluation | None = None
+    if suggestion.secretariat_evaluation is not None:
+        sec = suggestion.secretariat_evaluation
+        norm_sec_comment = (
+            normalizer.normalize(sec.comment)
+            if sec.comment is not None
+            else None
+        )
+        normalized_sec_evaluation = SecretariatEvaluation(
+            scrutiny=sec.scrutiny,
+            comment=norm_sec_comment,
+            scrutiny_id=sec.scrutiny_id,
+        )
+
+    # 4. Normalize context_title
     normalized_context_title = (
         normalizer.normalize(suggestion.context_title)
         if suggestion.context_title is not None
@@ -51,7 +67,9 @@ def normalize_suggestion(
         evaluation=normalized_evaluation,
         date=suggestion.date,
         context_title=normalized_context_title,
+        secretariat_evaluation=normalized_sec_evaluation,
     )
 
 
 __all__ = ["normalize_suggestion"]
+

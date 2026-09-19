@@ -36,6 +36,9 @@ SELECT
     s.CurrentProblem AS current_problem,
     s.Solution AS solution,
     sc.Name AS context_title,
+    dbr.Arzy AS tributary_scrutiny_id,
+    sps.Name AS tributary_scrutiny,
+    dbr.nzr_km AS tributary_comment,
     CASE
         WHEN si.LastSuggestionStatusID IN (10, 56) THEN N'رد'
         WHEN si.LastSuggestionStatusID IN (2, 15) THEN N'عدم پذیرش'
@@ -50,10 +53,13 @@ SELECT
         WHEN si.LastSuggestionStatusID IN (21, 27, 48) THEN 4
         ELSE 5
     END AS status_id,
+    lcr.ComitteeScrutinyId AS committee_scrutiny_id,
     cs.Name AS committee_scrutiny,
     ISNULL(lcr.Description, '') AS committee_scrutiny_description
 FROM SuggestionInfo si WITH (NOLOCK)
 INNER JOIN suggestion s WITH (NOLOCK) ON s.SuggestionId = si.SuggestionInfoId
+LEFT JOIN dbr WITH (NOLOCK) ON dbr.Code = s.SuggestionId
+LEFT JOIN SecretariatPrimaryScrutiny sps WITH (NOLOCK) ON sps.SecretariatPrimaryScrutinyId = dbr.Arzy
 LEFT JOIN LatestCommitteeResult lcr WITH (NOLOCK) ON lcr.SuggestionCode = s.SuggestionId AND lcr.rn = 1
 LEFT JOIN ComitteeScrutiny cs WITH (NOLOCK) ON cs.ComitteeScrutinyId = lcr.ComitteeScrutinyId
 LEFT JOIN SuggestContext sc WITH (NOLOCK) ON sc.SuggestContextId = s.SuggestContextId
@@ -106,6 +112,16 @@ class MssqlSuggestionExtractor(IHistoricalSuggestionExtractor):
 
                 dtos: list[RawSuggestionDataDTO] = []
                 for row in rows:
+                    com_id = (
+                        int(row["committee_scrutiny_id"])
+                        if row.get("committee_scrutiny_id") is not None
+                        else None
+                    )
+                    sec_id = (
+                        int(row["tributary_scrutiny_id"])
+                        if row.get("tributary_scrutiny_id") is not None
+                        else None
+                    )
                     dtos.append(
                         RawSuggestionDataDTO(
                             suggestion_id=str(row["suggestion_id"]),
@@ -113,12 +129,16 @@ class MssqlSuggestionExtractor(IHistoricalSuggestionExtractor):
                             problem=row.get("current_problem"),
                             solution=row.get("solution"),
                             status_id=int(row["status_id"]),
-                            scrutiny=row.get("committee_scrutiny"),
+                            committee_scrutiny=row.get("committee_scrutiny"),
                             description=row.get("committee_scrutiny_description"),
                             shamsi_date=str(row["date"]).strip()
                             if row.get("date")
                             else None,
                             context_title=row.get("context_title"),
+                            committee_scrutiny_id=com_id,
+                            secretariat_scrutiny_id=sec_id,
+                            secretariat_scrutiny=row.get("tributary_scrutiny"),
+                            secretariat_comment=row.get("tributary_comment"),
                         )
                     )
                 return dtos

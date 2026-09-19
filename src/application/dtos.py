@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 
-from src.domain.enums import SuggestionStatus
+from src.domain.enums import (
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionStatus,
+)
 
 
 @dataclass
@@ -26,10 +30,14 @@ class CreateSuggestionDTO:
     problem: str
     solution: str
     status: SuggestionStatus
-    scrutiny: str | None = None
+    committee_scrutiny: CommitteeScrutiny | None = None
     description: str | None = None
     shamsi_date: str | None = None
     context_title: str | None = None
+    committee_scrutiny_id: int | None = None
+    secretariat_scrutiny: SecretariatScrutiny | None = None
+    secretariat_comment: str | None = None
+    secretariat_scrutiny_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -48,10 +56,14 @@ class RawSuggestionDataDTO:
     problem: str | None
     solution: str | None
     status_id: int
-    scrutiny: str | None
+    committee_scrutiny: str | None
     description: str | None
     shamsi_date: str | None
     context_title: str | None
+    committee_scrutiny_id: int | None = None
+    secretariat_scrutiny_id: int | None = None
+    secretariat_scrutiny: str | None = None
+    secretariat_comment: str | None = None
 
 
 @dataclass(frozen=True)

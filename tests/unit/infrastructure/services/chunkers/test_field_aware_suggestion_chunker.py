@@ -4,11 +4,18 @@ import pytest
 
 from src.domain.entities import (
     CommitteeEvaluation,
+    SecretariatEvaluation,
     ShamsiDate,
     Suggestion,
     SuggestionContent,
 )
-from src.domain.enums import ChunkStatus, SuggestionChunkType, SuggestionStatus
+from src.domain.enums import (
+    ChunkStatus,
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionChunkType,
+    SuggestionStatus,
+)
 from src.domain.exceptions import SuggestionChunkingError
 from src.infrastructure.services.chunkers import FieldAwareSuggestionChunker
 
@@ -33,11 +40,17 @@ def full_suggestion() -> Suggestion:
         ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.APPROVED,
-            scrutiny="طرح پیشنهادی در کارگروه تخصصی انتقال بررسی و توجیه فنی و اقتصادی آن تأیید شد.",
+            scrutiny=CommitteeScrutiny.APPROVED,
             description="مصوب جلسه شماره ۴۵ کارگروه نظام پیشنهادات شرکت توانیر.",
+            scrutiny_id=0,
         ),
         date=ShamsiDate("1402/10/12"),
         context_title="معاونت انتقال و تجارت خارجی",
+        secretariat_evaluation=SecretariatEvaluation(
+            scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
+            comment="تایید مدارک و ارجاع به کمیته انتقال.",
+            scrutiny_id=3,
+        ),
     )
 
 
@@ -67,6 +80,10 @@ async def test_full_suggestion_produces_4_chunks(
         assert c.metadata.context_title == "معاونت انتقال و تجارت خارجی"
         assert str(c.metadata.date) == "1402/10/12"
         assert c.metadata.sub_index == 0
+        assert c.metadata.committee_scrutiny == CommitteeScrutiny.APPROVED
+        assert c.metadata.committee_scrutiny_id == 0
+        assert c.metadata.secretariat_scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+        assert c.metadata.secretariat_scrutiny_id == 3
         # Valid UUIDv4 and unique
         parsed_uuid = uuid.UUID(c.chunk_id, version=4)
         assert parsed_uuid is not None
@@ -155,7 +172,7 @@ async def test_noise_and_placeholder_filtering(
         ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.NOT_ACCEPTED,
-            scrutiny="ندارد",  # Noise placeholder
+            scrutiny=None,
             description="...",  # Too short (< 5 chars)
         ),
         date=None,
@@ -178,7 +195,7 @@ async def test_noise_and_placeholder_filtering(
 async def test_evaluation_partial_formatting(
     chunker: FieldAwareSuggestionChunker,
 ):
-    # Case A: Only Scrutiny
+    # Case A: Only Secretariat Substantive Comment
     sugg_a = Suggestion(
         id="SUG-5001",
         content=SuggestionContent(
@@ -188,8 +205,12 @@ async def test_evaluation_partial_formatting(
         ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.REJECTED,
-            scrutiny="فاقد توجیه اقتصادی و خارج از اولویت‌های شرکت.",
+            scrutiny=CommitteeScrutiny.REJECTED,
             description=None,
+        ),
+        secretariat_evaluation=SecretariatEvaluation(
+            scrutiny=SecretariatScrutiny.AUTO_REJECTED_EXPERT,
+            comment="رد خودکار به دلیل عدم ارائه مدارک تکمیلی در مهلت مقرر کارشناسی.",
         ),
         date=None,
         context_title=None,
@@ -198,10 +219,12 @@ async def test_evaluation_partial_formatting(
     eval_a = next(
         c for c in chunks_a if c.metadata.chunk_type == SuggestionChunkType.EVALUATION
     )
-    assert eval_a.content == "بررسی کمیته: فاقد توجیه اقتصادی و خارج از اولویت‌های شرکت."
+    assert "ارزیابی دبیرخانه: رد خودکار به دلیل کارشناسی" in eval_a.content
+    assert "نظر دبیرخانه: رد خودکار به دلیل عدم ارائه مدارک تکمیلی در مهلت مقرر کارشناسی." in eval_a.content
+    assert "بررسی کمیته:" not in eval_a.content
     assert "توضیحات مصوبه:" not in eval_a.content
 
-    # Case B: Only Description
+    # Case B: Only Committee Substantive Description
     sugg_b = Suggestion(
         id="SUG-5002",
         content=SuggestionContent(
@@ -211,7 +234,7 @@ async def test_evaluation_partial_formatting(
         ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.EXECUTED,
-            scrutiny=None,
+            scrutiny=CommitteeScrutiny.ACCEPTED_AS_EXECUTED_SUGGESTION,
             description="پروژه در پست شهید رجایی با موفقیت اجرا شد.",
         ),
         date=None,
@@ -221,8 +244,116 @@ async def test_evaluation_partial_formatting(
     eval_b = next(
         c for c in chunks_b if c.metadata.chunk_type == SuggestionChunkType.EVALUATION
     )
-    assert eval_b.content == "توضیحات مصوبه: پروژه در پست شهید رجایی با موفقیت اجرا شد."
-    assert "بررسی کمیته:" not in eval_b.content
+    assert eval_b.content == (
+        "بررسی کمیته: پذیرفته شده به عنوان پیشنهاد اجراشده\n"
+        "توضیحات مصوبه: پروژه در پست شهید رجایی با موفقیت اجرا شد."
+    )
+    assert "ارزیابی دبیرخانه:" not in eval_b.content
+
+
+@pytest.mark.asyncio
+async def test_substantive_commentary_guard_edge_cases(
+    chunker: FieldAwareSuggestionChunker,
+):
+    # 1. Enums present, but both comments empty -> 0 evaluation chunks
+    sugg_no_comments = Suggestion(
+        id="SUG-GUARD-1",
+        content=SuggestionContent(
+            title="طرح بدون توضیحات تکمیلی",
+            problem="شرح مشکل معتبر سیستم برق",
+            solution="راهکار اجرایی معتبر مهندسی",
+        ),
+        evaluation=CommitteeEvaluation(
+            status=SuggestionStatus.APPROVED,
+            scrutiny=CommitteeScrutiny.APPROVED,
+            description=None,
+        ),
+        secretariat_evaluation=SecretariatEvaluation(
+            scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
+            comment=None,
+        ),
+        date=None,
+        context_title=None,
+    )
+    chunks = await chunker.chunk(sugg_no_comments)
+    eval_chunks = [c for c in chunks if c.metadata.chunk_type == SuggestionChunkType.EVALUATION]
+    assert len(eval_chunks) == 0
+    assert len(chunks) == 3
+
+    # 2. Short comments under 15 chars -> 0 evaluation chunks
+    sugg_short = Suggestion(
+        id="SUG-GUARD-2",
+        content=SuggestionContent(
+            title="طرح با نظر خیلی کوتاه",
+            problem="شرح مشکل معتبر سیستم برق",
+            solution="راهکار اجرایی معتبر مهندسی",
+        ),
+        evaluation=CommitteeEvaluation(
+            status=SuggestionStatus.REJECTED,
+            scrutiny=CommitteeScrutiny.REJECTED,
+            description="رد شد",  # < 15 chars
+        ),
+        secretariat_evaluation=SecretariatEvaluation(
+            scrutiny=SecretariatScrutiny.OUT_OF_FRAMEWORK,
+            comment="بررسی شد",  # < 15 chars
+        ),
+        date=None,
+        context_title=None,
+    )
+    chunks_short = await chunker.chunk(sugg_short)
+    eval_short = [c for c in chunks_short if c.metadata.chunk_type == SuggestionChunkType.EVALUATION]
+    assert len(eval_short) == 0
+
+    # 3. Both comments substantive -> 1 consolidated evaluation chunk
+    sugg_both = Suggestion(
+        id="SUG-GUARD-3",
+        content=SuggestionContent(
+            title="طرح با دو نظر تفصیلی",
+            problem="شرح مشکل معتبر سیستم برق",
+            solution="راهکار اجرایی معتبر مهندسی",
+        ),
+        evaluation=CommitteeEvaluation(
+            status=SuggestionStatus.APPROVED,
+            scrutiny=CommitteeScrutiny.APPROVED,
+            description="مصوب جلسه کارگروه با اکثریت آرا و تخصیص منابع مالی لازم.",
+        ),
+        secretariat_evaluation=SecretariatEvaluation(
+            scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
+            comment="مدارک اولیه بررسی و جهت تصمیم‌گیری نهایی به کمیته ارجاع گردید.",
+        ),
+        date=None,
+        context_title=None,
+    )
+    chunks_both = await chunker.chunk(sugg_both)
+    eval_both = [c for c in chunks_both if c.metadata.chunk_type == SuggestionChunkType.EVALUATION]
+    assert len(eval_both) == 1
+    content = eval_both[0].content
+    assert "ارزیابی دبیرخانه: ارجاع به کمیته" in content
+    assert "نظر دبیرخانه: مدارک اولیه بررسی و جهت تصمیم‌گیری نهایی به کمیته ارجاع گردید." in content
+    assert "بررسی کمیته: تایید" in content
+    assert "توضیحات مصوبه: مصوب جلسه کارگروه با اکثریت آرا و تخصیص منابع مالی لازم." in content
+
+    # 4. Substantive comment with unmapped/None scrutiny -> Emits comment cleanly
+    sugg_none_scrutiny = Suggestion(
+        id="SUG-GUARD-4",
+        content=SuggestionContent(
+            title="طرح بدون عنوان وضعیت",
+            problem="شرح مشکل معتبر سیستم برق",
+            solution="راهکار اجرایی معتبر مهندسی",
+        ),
+        evaluation=CommitteeEvaluation(
+            status=SuggestionStatus.PENDING,
+            scrutiny=None,
+            description="توضیحات کارشناسی کامل پیرامون ابعاد مختلف این پیشنهاد ثبت شده است.",
+        ),
+        secretariat_evaluation=None,
+        date=None,
+        context_title=None,
+    )
+    chunks_none = await chunker.chunk(sugg_none_scrutiny)
+    eval_none = next(c for c in chunks_none if c.metadata.chunk_type == SuggestionChunkType.EVALUATION)
+    assert eval_none.content == "توضیحات مصوبه: توضیحات کارشناسی کامل پیرامون ابعاد مختلف این پیشنهاد ثبت شده است."
+    assert "بررسی کمیته:" not in eval_none.content
 
 
 @pytest.mark.asyncio

@@ -51,6 +51,7 @@ async def clean_db_session(session_factory: async_sessionmaker[AsyncSession]):
         try:
             yield session
         finally:
+            await session.rollback()
             await session.execute(text("DELETE FROM ingestion_checkpoints;"))
             await session.execute(text("DELETE FROM skipped_suggestions;"))
             await session.execute(text("DELETE FROM suggestions;"))

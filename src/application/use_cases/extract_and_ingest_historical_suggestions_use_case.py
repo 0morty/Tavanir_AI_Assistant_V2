@@ -20,13 +20,22 @@ from src.application.services.suggestion_normalizer import normalize_suggestion
 from src.domain.entities import (
     Chunk,
     CommitteeEvaluation,
+    SecretariatEvaluation,
     ShamsiDate,
     Suggestion,
     SuggestionChunkMetadata,
     SuggestionContent,
 )
-from src.domain.enums import ChunkStatus, SuggestionStatus
-from src.domain.exceptions import DomainError, InvalidSuggestionStatusError
+from src.domain.enums import (
+    ChunkStatus,
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionStatus,
+)
+from src.domain.exceptions import (
+    DomainError,
+    InvalidSuggestionStatusError,
+)
 from src.domain.interfaces import (
     ISuggestionChunker,
     ISuggestionVectorRepository,
@@ -49,7 +58,6 @@ _LEGACY_STATUS_MAP: dict[int, SuggestionStatus] = {
     3: SuggestionStatus.APPROVED,
     4: SuggestionStatus.PENDING,
     5: SuggestionStatus.EXECUTED,
-
     # Raw legacy MSSQL LastSuggestionStatusIDs (fallback if un-normalized IDs are passed)
     10: SuggestionStatus.REJECTED,
     56: SuggestionStatus.REJECTED,
@@ -98,6 +106,32 @@ def _normalize_legacy_shamsi_date(raw_date: str | None) -> ShamsiDate | None:
         except (ValueError, DomainError):
             return None
     return None
+
+
+def _resolve_committee_scrutiny(
+    scrutiny_id: int | None, raw_scrutiny: str | None
+) -> tuple[CommitteeScrutiny | None, int | None]:
+    """Resolve committee scrutiny strictly, raising InvalidCommitteeScrutinyError on unmapped codes or titles."""
+    if scrutiny_id is not None:
+        enum_val = CommitteeScrutiny.from_code(scrutiny_id)
+        return enum_val, scrutiny_id
+    if raw_scrutiny is not None and raw_scrutiny.strip():
+        enum_val = CommitteeScrutiny.from_string(raw_scrutiny.strip())
+        return enum_val, enum_val.code
+    return None, None
+
+
+def _resolve_secretariat_scrutiny(
+    scrutiny_id: int | None, raw_scrutiny: str | None
+) -> tuple[SecretariatScrutiny | None, int | None]:
+    """Resolve secretariat scrutiny strictly, raising InvalidSecretariatScrutinyError on unmapped codes or titles."""
+    if scrutiny_id is not None:
+        enum_val = SecretariatScrutiny.from_code(scrutiny_id)
+        return enum_val, scrutiny_id
+    if raw_scrutiny is not None and raw_scrutiny.strip():
+        enum_val = SecretariatScrutiny.from_string(raw_scrutiny.strip())
+        return enum_val, enum_val.code
+    return None, None
 
 
 class ExtractAndIngestHistoricalSuggestionsUseCase:
@@ -192,11 +226,32 @@ class ExtractAndIngestHistoricalSuggestionsUseCase:
                         problem=raw.problem or "",
                         solution=raw.solution or "",
                     )
+                    com_scrutiny, com_id = _resolve_committee_scrutiny(
+                        raw.committee_scrutiny_id, raw.committee_scrutiny
+                    )
+                    sec_scrutiny, sec_id = _resolve_secretariat_scrutiny(
+                        raw.secretariat_scrutiny_id, raw.secretariat_scrutiny
+                    )
+
                     evaluation = CommitteeEvaluation(
                         status=_resolve_suggestion_status(raw.status_id),
-                        scrutiny=raw.scrutiny,
+                        scrutiny=com_scrutiny,
                         description=raw.description,
+                        scrutiny_id=com_id,
                     )
+
+                    secretariat_evaluation: SecretariatEvaluation | None = None
+                    if (
+                        sec_scrutiny is not None
+                        or raw.secretariat_comment is not None
+                        or sec_id is not None
+                    ):
+                        secretariat_evaluation = SecretariatEvaluation(
+                            scrutiny=sec_scrutiny,
+                            comment=raw.secretariat_comment,
+                            scrutiny_id=sec_id,
+                        )
+
                     date = _normalize_legacy_shamsi_date(raw.shamsi_date)
 
                     raw_suggestion = Suggestion(
@@ -205,6 +260,7 @@ class ExtractAndIngestHistoricalSuggestionsUseCase:
                         evaluation=evaluation,
                         date=date,
                         context_title=raw.context_title,
+                        secretariat_evaluation=secretariat_evaluation,
                     )
 
                     # Text normalization
@@ -273,7 +329,9 @@ class ExtractAndIngestHistoricalSuggestionsUseCase:
 
                     # 1. Best-effort Qdrant cleanup (guarded against network drops to ensure SQL rollback runs)
                     try:
-                        await self._vector_repo.delete_chunks_by_parent_ids(ids_to_delete)
+                        await self._vector_repo.delete_chunks_by_parent_ids(
+                            ids_to_delete
+                        )
                         await logger.ainfo(
                             "compensating_qdrant_rollback_completed",
                             rolled_back_count=len(ids_to_delete),

@@ -16,6 +16,8 @@ from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.application.services.hybrid_embedding_service import HybridEmbeddingService
 from src.application.use_cases.extract_and_ingest_historical_suggestions_use_case import (
     ExtractAndIngestHistoricalSuggestionsUseCase,
+    _resolve_committee_scrutiny,
+    _resolve_secretariat_scrutiny,
     _resolve_suggestion_status,
 )
 
@@ -30,8 +32,15 @@ from src.domain.entities import (
     Suggestion,
     SuggestionChunkMetadata,
 )
-from src.domain.enums import SuggestionChunkType, SuggestionStatus
+from src.domain.enums import (
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionChunkType,
+    SuggestionStatus,
+)
 from src.domain.exceptions import (
+    InvalidCommitteeScrutinyError,
+    InvalidSecretariatScrutinyError,
     InvalidSuggestionStatusError,
     VectorStorageError,
 )
@@ -300,7 +309,8 @@ async def test_successful_clean_batch_ingestion(fake_env):
             problem="افت ولتاژ در ساعات اوج بار در پست انتقال",
             solution="نصب خازن موازی در باس اصلی شبکه",
             status_id=11,  # APPROVED
-            scrutiny="بررسی تخصصی",
+            committee_scrutiny="تایید",
+            committee_scrutiny_id=0,
             description="مورد تایید است",
             shamsi_date="1402/08/15",
             context_title="توزیع نیرو",
@@ -311,7 +321,8 @@ async def test_successful_clean_batch_ingestion(fake_env):
             problem="نبود سنسورهای مانیتورینگ حرارتی آنلاین",
             solution="نصب سنسورهای فیبر نوری بر روی ترانس",
             status_id=21,  # PENDING / EXECUTED
-            scrutiny="تایید فنی",
+            committee_scrutiny="رد",
+            committee_scrutiny_id=1,
             description="در فاز آزمایشی",
             shamsi_date="1402/09/01",
             context_title="انتقال نیرو",
@@ -367,7 +378,7 @@ async def test_corrupted_records_skipped_and_audited(fake_env):
             problem="مشکل افت فشار در خط انتقال گاز توربین",
             solution="تعویض رگولاتور اصلی ایستگاه تقلیل فشار",
             status_id=11,
-            scrutiny=None,
+            committee_scrutiny=None,
             description=None,
             shamsi_date="1401/01/01",
             context_title=None,
@@ -378,7 +389,7 @@ async def test_corrupted_records_skipped_and_audited(fake_env):
             problem="مشکل فنی",
             solution="راه حل فنی",
             status_id=11,
-            scrutiny=None,
+            committee_scrutiny=None,
             description=None,
             shamsi_date="1401/01/01",
             context_title=None,
@@ -389,7 +400,7 @@ async def test_corrupted_records_skipped_and_audited(fake_env):
             problem="مشکل شبکه",
             solution="راه حل شبکه",
             status_id=99999,  # Invalid status ID
-            scrutiny=None,
+            committee_scrutiny=None,
             description=None,
             shamsi_date=None,
             context_title=None,
@@ -431,7 +442,7 @@ async def test_qdrant_failure_triggers_compensating_sql_rollback(fake_env):
             problem="مشکل اساسی در پایداری ولتاژ شبکه",
             solution="نصب استابلایزر و فیلتر هارمونیک",
             status_id=11,
-            scrutiny=None,
+            committee_scrutiny=None,
             description=None,
             shamsi_date="1402/01/01",
             context_title=None,
@@ -498,7 +509,7 @@ async def test_graceful_stop_signal(fake_env):
             problem="مشکل افت ولتاژ در باسبار اصلی",
             solution="نصب سیستم تنظیم خودکار تپ ترانس",
             status_id=11,
-            scrutiny=None,
+            committee_scrutiny=None,
             description=None,
             shamsi_date="1402/01/01",
             context_title=None,
@@ -511,7 +522,7 @@ async def test_graceful_stop_signal(fake_env):
             problem="مشکل عدم هماهنگی رله‌های حفاظتی",
             solution="تنظیم مجدد منحنی جریان زمان رله",
             status_id=11,
-            scrutiny=None,
+            committee_scrutiny=None,
             description=None,
             shamsi_date="1402/01/02",
             context_title=None,
@@ -563,3 +574,146 @@ def test_resolve_suggestion_status_mapping():
         InvalidSuggestionStatusError, match="Unknown suggestion status ID: 999"
     ):
         _resolve_suggestion_status(999)
+
+
+def test_resolve_scrutinies_strict_validation():
+    # Committee Scrutiny resolution - valid
+    assert _resolve_committee_scrutiny(0, None) == (CommitteeScrutiny.APPROVED, 0)
+    assert _resolve_committee_scrutiny(-10, None) == (CommitteeScrutiny.SELECT_CONSULTANT_RETURN_FOR_CORRECTION, -10)
+    assert _resolve_committee_scrutiny(None, "رد") == (CommitteeScrutiny.REJECTED, 1)
+    assert _resolve_committee_scrutiny(None, None) == (None, None)
+    assert _resolve_committee_scrutiny(None, "   ") == (None, None)
+
+    # Committee Scrutiny resolution - errors on unmapped code/title
+    with pytest.raises(InvalidCommitteeScrutinyError):
+        _resolve_committee_scrutiny(999, None)
+    with pytest.raises(InvalidCommitteeScrutinyError):
+        _resolve_committee_scrutiny(None, "عنوان غیر استاندارد")
+
+    # Secretariat Scrutiny resolution - valid
+    assert _resolve_secretariat_scrutiny(0, None) == (SecretariatScrutiny.OUT_OF_FRAMEWORK, 0)
+    assert _resolve_secretariat_scrutiny(-2, None) == (SecretariatScrutiny.SEND_TO_APPROVER, -2)
+    assert _resolve_secretariat_scrutiny(None, "ارجاع به کمیته") == (SecretariatScrutiny.REFER_TO_COMMITTEE, 3)
+    assert _resolve_secretariat_scrutiny(None, None) == (None, None)
+    assert _resolve_secretariat_scrutiny(None, "   ") == (None, None)
+
+    # Secretariat Scrutiny resolution - errors on unmapped code/title
+    with pytest.raises(InvalidSecretariatScrutinyError):
+        _resolve_secretariat_scrutiny(999, None)
+    with pytest.raises(InvalidSecretariatScrutinyError):
+        _resolve_secretariat_scrutiny(None, "عنوان غیر استاندارد دبیرخانه")
+
+
+@pytest.mark.asyncio
+async def test_historical_ingestion_skips_invalid_scrutiny_records(fake_env):
+    batch = [
+        RawSuggestionDataDTO(
+            suggestion_id="valid-01",
+            title="پیشنهاد معتبر",
+            problem="مشکل معتبر در تاسیسات",
+            solution="راهکار معتبر اجرایی",
+            status_id=11,  # APPROVED
+            committee_scrutiny_id=0,
+            committee_scrutiny="تایید",
+            description="توضیحات معتبر",
+            shamsi_date="1402/01/01",
+            context_title="ستاد",
+        ),
+        RawSuggestionDataDTO(
+            suggestion_id="invalid-com-01",
+            title="پیشنهاد با بررسی نامعتبر کمیته",
+            problem="مشکل شبکه",
+            solution="راه حل شبکه",
+            status_id=11,
+            committee_scrutiny_id=999,  # Unmapped committee scrutiny code
+            committee_scrutiny=None,
+            description=None,
+            shamsi_date=None,
+            context_title=None,
+        ),
+        RawSuggestionDataDTO(
+            suggestion_id="invalid-sec-01",
+            title="پیشنهاد با بررسی نامعتبر دبیرخانه",
+            problem="مشکل شبکه",
+            solution="راه حل شبکه",
+            status_id=11,
+            committee_scrutiny_id=None,
+            committee_scrutiny=None,
+            description=None,
+            shamsi_date=None,
+            context_title=None,
+            secretariat_scrutiny="عنوان ناشناخته دبیرخانه",  # Unmapped secretariat scrutiny title
+        ),
+    ]
+    extractor = FakeExtractor([batch])
+    use_case = ExtractAndIngestHistoricalSuggestionsUseCase(
+        extractor=extractor,
+        uow=fake_env["uow"],
+        normalizer=fake_env["normalizer"],
+        chunker=fake_env["chunker"],
+        embedding_service=fake_env["embedding_service"],
+        vector_repo=fake_env["vector_repo"],
+    )
+
+    result = await use_case.execute(batch_size=10)
+    assert result.total_extracted == 3
+    assert result.total_ingested == 1
+    assert result.total_skipped == 2
+
+    # Verify only the valid suggestion was saved
+    assert len(fake_env["sugg_repo"].saved_suggestions) == 1
+    assert fake_env["sugg_repo"].saved_suggestions[0].id == "valid-01"
+
+    # Verify skipped suggestions were stored in skipped_repo
+    skipped = fake_env["skip_repo"].saved_records
+    assert len(skipped) == 2
+    skipped_ids = {s.suggestion_id for s in skipped}
+    assert "invalid-com-01" in skipped_ids
+    assert "invalid-sec-01" in skipped_ids
+
+
+@pytest.mark.asyncio
+async def test_historical_ingestion_with_scrutiny_and_secretariat_fields(fake_env):
+    batch = [
+        RawSuggestionDataDTO(
+            suggestion_id="20050//98",
+            title="بهینه‌سازی سیستم‌های هوشمند دیسپاچینگ",
+            problem="کمبود ابزارهای مانیتورینگ آنلاین شبکه",
+            solution="استقرار پلتفرم جامع SCADA نوین",
+            status_id=3,  # APPROVED
+            committee_scrutiny_id=0,
+            committee_scrutiny="تایید",
+            description="مصوب جلسه کارگروه با تخصیص بودجه",
+            secretariat_scrutiny_id=3,
+            secretariat_scrutiny="ارجاع به کمیته",
+            secretariat_comment="تایید مدارک و ارسال به کمیته مربوطه",
+            shamsi_date="1402/10/10",
+            context_title="دیسپاچینگ",
+        )
+    ]
+    extractor = FakeExtractor([batch])
+    use_case = ExtractAndIngestHistoricalSuggestionsUseCase(
+        extractor=extractor,
+        uow=fake_env["uow"],
+        normalizer=fake_env["normalizer"],
+        chunker=fake_env["chunker"],
+        embedding_service=fake_env["embedding_service"],
+        vector_repo=fake_env["vector_repo"],
+    )
+
+    result = await use_case.execute(batch_size=10)
+    assert result.total_extracted == 1
+    assert result.total_ingested == 1
+
+    saved = fake_env["sugg_repo"].saved_suggestions
+    assert len(saved) == 1
+    entity = saved[0]
+    assert entity.id == "20050//98"
+    assert entity.evaluation.scrutiny == CommitteeScrutiny.APPROVED
+    assert entity.evaluation.scrutiny_id == 0
+    assert entity.evaluation.description == "مصوب جلسه کارگروه با تخصیص بودجه"
+    assert entity.secretariat_evaluation is not None
+    assert entity.secretariat_evaluation.scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+    assert entity.secretariat_evaluation.scrutiny_id == 3
+    assert entity.secretariat_evaluation.comment == "تایید مدارک و ارسال به کمیته مربوطه"
+

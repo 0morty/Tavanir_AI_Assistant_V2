@@ -8,6 +8,7 @@ from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.application.services.suggestion_normalizer import normalize_suggestion
 from src.domain.entities import (
     CommitteeEvaluation,
+    SecretariatEvaluation,
     ShamsiDate,
     Suggestion,
     SuggestionContent,
@@ -81,9 +82,22 @@ class IngestSuggestionUseCase:
         )
         evaluation = CommitteeEvaluation(
             status=dto.status,
-            scrutiny=dto.scrutiny,
+            scrutiny=dto.committee_scrutiny,
             description=dto.description,
+            scrutiny_id=dto.committee_scrutiny_id,
         )
+        secretariat_evaluation: SecretariatEvaluation | None = None
+        if (
+            dto.secretariat_scrutiny is not None
+            or dto.secretariat_comment is not None
+            or dto.secretariat_scrutiny_id is not None
+        ):
+            secretariat_evaluation = SecretariatEvaluation(
+                scrutiny=dto.secretariat_scrutiny,
+                comment=dto.secretariat_comment,
+                scrutiny_id=dto.secretariat_scrutiny_id,
+            )
+
         date = ShamsiDate(dto.shamsi_date) if dto.shamsi_date else None
 
         raw_suggestion = Suggestion(
@@ -92,6 +106,7 @@ class IngestSuggestionUseCase:
             evaluation=evaluation,
             date=date,
             context_title=dto.context_title,
+            secretariat_evaluation=secretariat_evaluation,
         )
 
         # Step 3: Normalize Persian text

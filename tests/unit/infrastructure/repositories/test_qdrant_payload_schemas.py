@@ -8,7 +8,13 @@ from src.domain.entities import (
     SuggestionChunk,
     SuggestionChunkMetadata,
 )
-from src.domain.enums import ChunkStatus, SuggestionChunkType, SuggestionStatus
+from src.domain.enums import (
+    ChunkStatus,
+    CommitteeScrutiny,
+    SecretariatScrutiny,
+    SuggestionChunkType,
+    SuggestionStatus,
+)
 
 
 def test_suggestion_payload_dto_roundtrip_with_sub_index():
@@ -18,6 +24,10 @@ def test_suggestion_payload_dto_roundtrip_with_sub_index():
         status=SuggestionStatus.APPROVED,
         context_title="معاونت انتقال",
         date=ShamsiDate("1402/05/20"),
+        committee_scrutiny=CommitteeScrutiny.APPROVED,
+        committee_scrutiny_id=0,
+        secretariat_scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
+        secretariat_scrutiny_id=3,
     )
     chunk: SuggestionChunk = Chunk(
         chunk_id="chk-12345",
@@ -38,17 +48,27 @@ def test_suggestion_payload_dto_roundtrip_with_sub_index():
     assert dto.status == "مصوب"
     assert dto.context_title == "معاونت انتقال"
     assert dto.date == "1402/05/20"
+    assert dto.committee_scrutiny == "تایید"
+    assert dto.committee_scrutiny_id == 0
+    assert dto.secretariat_scrutiny == "ارجاع به کمیته"
+    assert dto.secretariat_scrutiny_id == 3
 
     # 2. Payload DTO -> Domain Search Result
     result = dto.to_domain(score=0.92)
     assert result.score == 0.92
     assert result.chunk.chunk_id == "chk-12345"
     assert result.chunk.parent_id == "SUG-999"
-    assert result.chunk.metadata.chunk_type == SuggestionChunkType.SOLUTION
-    assert result.chunk.metadata.sub_index == 3
-    assert result.chunk.metadata.status == SuggestionStatus.APPROVED
-    assert result.chunk.metadata.context_title == "معاونت انتقال"
-    assert str(result.chunk.metadata.date) == "1402/05/20"
+    meta = result.chunk.metadata
+    assert isinstance(meta, SuggestionChunkMetadata)
+    assert meta.chunk_type == SuggestionChunkType.SOLUTION
+    assert meta.sub_index == 3
+    assert meta.status == SuggestionStatus.APPROVED
+    assert meta.context_title == "معاونت انتقال"
+    assert str(meta.date) == "1402/05/20"
+    assert meta.committee_scrutiny == CommitteeScrutiny.APPROVED
+    assert meta.committee_scrutiny_id == 0
+    assert meta.secretariat_scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+    assert meta.secretariat_scrutiny_id == 3
 
 
 def test_suggestion_payload_dto_default_sub_index():
@@ -66,4 +86,6 @@ def test_suggestion_payload_dto_default_sub_index():
     assert dto.sub_index == 0
 
     result = dto.to_domain()
-    assert result.chunk.metadata.sub_index == 0
+    meta = result.chunk.metadata
+    assert isinstance(meta, SuggestionChunkMetadata)
+    assert meta.sub_index == 0

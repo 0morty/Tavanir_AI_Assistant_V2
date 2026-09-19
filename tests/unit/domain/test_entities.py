@@ -10,6 +10,7 @@ from src.domain.entities import (
     RegulatoryDocument,
     RegulatorySearchResult,
     SearchResultChunk,
+    SecretariatEvaluation,
     ShamsiDate,
     SparseVector,
     Suggestion,
@@ -21,7 +22,9 @@ from src.domain.entities import (
 from src.domain.enums import (
     AuthorityLevel,
     ChunkStatus,
+    CommitteeScrutiny,
     RegulatoryDocumentType,
+    SecretariatScrutiny,
     SuggestionChunkType,
     SuggestionStatus,
 )
@@ -78,8 +81,9 @@ def test_suggestion_entity():
     )
     evaluation = CommitteeEvaluation(
         status=SuggestionStatus.APPROVED,
-        scrutiny="طرح مورد تأیید کارگروه فنی قرار گرفت.",
+        scrutiny=CommitteeScrutiny.APPROVED,
         description="مصوبه شماره ۲۳",
+        scrutiny_id=0,
     )
     suggestion = Suggestion(
         id="SUG-101",
@@ -91,6 +95,49 @@ def test_suggestion_entity():
     assert suggestion.id == "SUG-101"
     assert suggestion.content.title == "نصب سنسور حرارتی"
     assert suggestion.evaluation.status == SuggestionStatus.APPROVED
+    assert suggestion.secretariat_evaluation is None
+
+
+def test_secretariat_and_committee_evaluation_entities():
+    sec_eval = SecretariatEvaluation(
+        scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
+        comment="بررسی اولیه انجام و به کمیته ارجاع شد.",
+        scrutiny_id=3,
+    )
+    assert sec_eval.scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+    assert sec_eval.comment == "بررسی اولیه انجام و به کمیته ارجاع شد."
+    assert sec_eval.scrutiny_id == 3
+
+    com_eval = CommitteeEvaluation(
+        status=SuggestionStatus.APPROVED,
+        scrutiny=CommitteeScrutiny.APPROVED,
+        description="مصوب جلسه کارگروه با حداکثر آرا.",
+        scrutiny_id=0,
+    )
+    assert com_eval.status == SuggestionStatus.APPROVED
+    assert com_eval.scrutiny == CommitteeScrutiny.APPROVED
+    assert com_eval.description == "مصوب جلسه کارگروه با حداکثر آرا."
+    assert com_eval.scrutiny_id == 0
+
+    content = SuggestionContent(
+        title="تست عنوان",
+        problem="تست شرح مشکل",
+        solution="تست راهکار پیشنهادی",
+    )
+    suggestion = Suggestion(
+        id="SUG-SEC-COM-1",
+        content=content,
+        evaluation=com_eval,
+        secretariat_evaluation=sec_eval,
+        date=ShamsiDate("1402/11/15"),
+        context_title="حوزه ستادی",
+    )
+    assert suggestion.secretariat_evaluation is not None
+    assert (
+        suggestion.secretariat_evaluation.scrutiny
+        == SecretariatScrutiny.REFER_TO_COMMITTEE
+    )
+    assert suggestion.evaluation.scrutiny_id == 0
 
 
 def test_suggestion_content_invariants():
@@ -104,11 +151,15 @@ def test_suggestion_content_invariants():
 
     # Empty or short fields
     with pytest.raises(InvalidSuggestionContentError) as exc_info:
-        SuggestionContent(title="", problem="مشکل معتبر است", solution="راهکار معتبر است")
+        SuggestionContent(
+            title="", problem="مشکل معتبر است", solution="راهکار معتبر است"
+        )
     assert exc_info.value.pointer == "/data/title"
 
     with pytest.raises(InvalidSuggestionContentError) as exc_info:
-        SuggestionContent(title="عنوان معتبر", problem="  ", solution="راهکار معتبر است")
+        SuggestionContent(
+            title="عنوان معتبر", problem="  ", solution="راهکار معتبر است"
+        )
     assert exc_info.value.pointer == "/data/problem"
 
     with pytest.raises(InvalidSuggestionContentError) as exc_info:
@@ -117,11 +168,15 @@ def test_suggestion_content_invariants():
 
     # Noise placeholders
     with pytest.raises(InvalidSuggestionContentError) as exc_info:
-        SuggestionContent(title="عنوان معتبر", problem="ندارد", solution="راهکار معتبر است")
+        SuggestionContent(
+            title="عنوان معتبر", problem="ندارد", solution="راهکار معتبر است"
+        )
     assert exc_info.value.pointer == "/data/problem"
 
     with pytest.raises(InvalidSuggestionContentError) as exc_info:
-        SuggestionContent(title="عنوان معتبر", problem="مشکل معتبر است", solution="بدون شرح")
+        SuggestionContent(
+            title="عنوان معتبر", problem="مشکل معتبر است", solution="بدون شرح"
+        )
     assert exc_info.value.pointer == "/data/solution"
 
 

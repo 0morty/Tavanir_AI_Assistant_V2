@@ -1,14 +1,15 @@
 from src.domain.entities import GenerationChunk, HistoryMessage
 from src.domain.enums import HistoryRole
-from src.application.interfaces import ISection
+from src.application.context.sections import PromptSection
 from src.application.context.sections.role_section import RoleSection
 from src.application.prompt.prompt_builder import PromptBuilder
 
 
-class RegulationSection(ISection):
+class RegulationSection(PromptSection):
     """A custom section introduced without touching any central enum."""
 
     def __init__(self, content: str = "Relevant regulations.") -> None:
+        super().__init__()
         self._content = content
 
     @property
@@ -19,10 +20,11 @@ class RegulationSection(ISection):
         return self._content
 
 
-class InstructionsSection(ISection):
+class InstructionsSection(PromptSection):
     """Another developer-designed custom section."""
 
     def __init__(self, content: str) -> None:
+        super().__init__()
         self._content = content
 
     @property

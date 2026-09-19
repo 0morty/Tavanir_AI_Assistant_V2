@@ -15,7 +15,7 @@ class ReferencedCollectionSection(ReferencedSection):
 
     Concrete collection sections such as :class:`ChunksSection` and
     :class:`HistorySection` inherit from this class. The held collection is
-    exposed through ``chunks``; each item carries its own content and, when
+    exposed as ``items``; each item carries its own content and, when
     available, an optional Reference. Items are processed independently, so an
     item without a Reference, or with empty content, passes through unchanged.
 
@@ -24,7 +24,8 @@ class ReferencedCollectionSection(ReferencedSection):
     composes it with the item's content through the inherited
     ``compose_referenced_content()`` hook. ``item_content()`` isolates the
     per-item text so subclasses own their item formatting while the reference
-    machinery stays here.
+    machinery stays here. Items are joined with ``item_separator``, which is
+    independent of the section's framing ``separator``.
     """
 
     def __init__(
@@ -34,6 +35,7 @@ class ReferencedCollectionSection(ReferencedSection):
         *,
         reference_generator: IReferenceGenerator | None = None,
         separator: str = "\n\n",
+        item_separator: str = "\n\n",
         importance: float | None = None,
         demand: float | None = None,
         default_importance: float = 0.5,
@@ -52,10 +54,11 @@ class ReferencedCollectionSection(ReferencedSection):
             overflow_strategies=overflow_strategies,
             default_overflow_strategies=default_overflow_strategies,
         )
+        self.item_separator = item_separator
         self._items = list(items)
 
     @property
-    def chunks(self) -> Sequence[Any]:
+    def items(self) -> Sequence[Any]:
         """The collection of reference-bearing items held by this Section."""
         return self._items
 
@@ -88,7 +91,7 @@ class ReferencedCollectionSection(ReferencedSection):
             rendered.append(
                 self.compose_referenced_content(reference_text, content)
             )
-        return self.separator.join(rendered)
+        return self.item_separator.join(rendered)
 
     def fit_to_capacity(
         self,
@@ -111,7 +114,7 @@ class ReferencedCollectionSection(ReferencedSection):
         if not chunks or capacity_tokens <= 0:
             return ""
         texts = [self.item_content(chunk) for chunk in chunks]
-        content = self.separator.join(texts)
+        content = self.item_separator.join(texts)
         if not content.strip():
             return ""
         if self._fits_within(content, capacity_tokens, tokenizer):
@@ -156,7 +159,7 @@ class ReferencedCollectionSection(ReferencedSection):
         """Keep items in order while they fit; drop the items that would overflow."""
         included: list[str] = []
         total_tokens = 0
-        separator_tokens = tokenizer.count_tokens(self.separator)
+        separator_tokens = tokenizer.count_tokens(self.item_separator)
         for text in texts:
             item_tokens = tokenizer.count_tokens(text)
             separator_cost = separator_tokens if included else 0
@@ -164,7 +167,7 @@ class ReferencedCollectionSection(ReferencedSection):
                 break
             included.append(text)
             total_tokens += separator_cost + item_tokens
-        return self.separator.join(included)
+        return self.item_separator.join(included)
 
     def body(self) -> str:
         """Build the Section content as the collection of enriched items."""

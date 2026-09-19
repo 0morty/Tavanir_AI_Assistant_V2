@@ -36,7 +36,7 @@ build-out, the design decisions that were corrected along the way, and the preci
 |---|---|
 | `docs/documentation/reference_architecture.md` | Design spec. **Moved & renamed** from `how_referencing_works.md` (was at repo root). User rejected "enrichment" in the name. |
 | `src/domain/entities.py` | ADDED (additive only): `Reference` (ABC), `ReferenceDetails` (frozen dataclass), `ReferenceItem` (frozen dataclass). |
-| `src/application/context/sections/referenced_section.py` | `ReferencedSection(ISection)` — reference-aware section base. |
+| `src/application/context/sections/referenced_section.py` | `ReferencedSection(PromptSection)` — reference-aware section base. |
 | `src/application/context/sections/referenced_collection_section.py` | `ReferencedCollectionSection(ReferencedSection)` — collection of reference-bearing items. |
 | `src/application/interfaces/i_reference_generator.py` | `IReferenceGenerator` port — `generate(reference) -> str`. |
 | `src/application/reference/deterministic_reference_generator.py` | `DeterministicReferenceGenerator` — deterministic (no LLM) generator. |
@@ -54,9 +54,10 @@ Design doc: `docs/documentation/reference_architecture.md` (numbered sections 1�
 
 Hierarchy so far:
 ```
-ISection (Section)
-   └── ReferencedSection
-          └── ReferencedCollectionSection
+IPromptSection (port / contract only)
+   └── PromptSection (skeleton: contract + defaults)
+          └── ReferencedSection
+                 └── ReferencedCollectionSection
 ```
 
 Resolution flow (doc §18):
@@ -99,7 +100,7 @@ Reference.fluent_text()
 
 ### ContextBuilder (added in the continuation session)
 - `src/application/context/context_builder.py` — **`ContextBuilder`** (the Context Manager /
-  allocator of `dynamic_section_capacity_allocation.md`). Renders `ISection`s, assigns **initial
+  allocator of `dynamic_section_capacity_allocation.md`). Renders `PromptSection`s, assigns **initial
   capacity by `demand`**, fits over-capacity sections via their **overflow strategy chain**, and
   **redistributes free capacity iteratively by `importance`** (capped at actual need, re-normalized).
   Separator (`\n\n`) token cost is reserved out of the budget; output never exceeds the budget.
@@ -121,10 +122,10 @@ Reference.fluent_text()
 These were explicit user corrections. Follow them.
 
 1. **`append_reference()` takes NO `content` parameter.** Content comes from `self.body()`
-   (the existing `ISection` body method). The user rejected passing content as an argument.
+   (the existing `PromptSection` body method). The user rejected passing content as an argument.
 
-2. **`reference` property belongs ONLY on `ReferencedSection`, NOT on `ISection`.**
-   `ISection` (`src/application/interfaces/i_section.py`) was NOT modified and has no reference awareness.
+2. **`reference` property belongs ONLY on `ReferencedSection`, NOT on `PromptSection`.**
+   `PromptSection` (`src/application/context/sections/prompt_section.py`) was NOT modified and has no reference awareness.
 
 3. **`ReferenceGenerator.generate()` MUST return CONCRETE natural-language text with actual
    values** — never a placeholder template. This is the contract on `IReferenceGenerator`.
@@ -213,7 +214,7 @@ Order matters. The user explicitly stated the LLM-based generator needs **Contex
 ## 9. What NOT to do
 
 - Do not re-expose placeholder templates through `IReferenceGenerator.generate()`.
-- Do not add `content` params to `append_reference()` or move `reference` onto `ISection`.
+- Do not add `content` params to `append_reference()` or move `reference` onto `PromptSection`.
 - Do not reinstall pytest against the system python.
 - Do not rename/move `reference_architecture.md`.
 - Do not modify out-of-scope code per `AGENTS.md` (retrieval, embeddings, vector DB, frontend, .NET system, …).

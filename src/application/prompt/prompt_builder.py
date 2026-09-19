@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 
 from src.domain.entities import GenerationChunk, HistoryMessage
-from src.application.interfaces import ISection
+from src.application.interfaces import IPromptSection
 from src.application.context.sections.chunks_section import ChunksSection
 from src.application.context.sections.history_section import HistorySection
 from src.application.context.sections.output_format_section import OutputFormatSection
@@ -19,32 +19,34 @@ def _canonical_name(name: str) -> str:
 
 
 class PromptBuilder:
-    """Composes :class:`ISection` instances into an ordered prompt.
+    """Composes :class:`IPromptSection` instances into an ordered prompt.
 
-    The builder relies on the :class:`~src.application.interfaces.i_section.ISection`
-    contract rather than on any fixed set of section types. Section identity
-    is the string returned by ``ISection.section_type``, so new sections
-    (REGULATION, METADATA, INSTRUCTIONS, ...) can be introduced without
-    modifying central code -- by subclassing ``ISection``.
+    The builder relies on the
+    :class:`~src.application.interfaces.i_prompt_section.IPromptSection`
+    port rather than on any fixed set of section types. Section identity
+    is the string returned by ``IPromptSection.section_type``, so new
+    sections (REGULATION, METADATA, INSTRUCTIONS, ...) can be introduced
+    without modifying central code -- by implementing the port, typically
+    through the ``PromptSection`` skeleton.
 
     The default builder ships with the canonical sections:
 
         ROLE, HISTORY, CHUNKS, SYSTEM-INPUT, USER-INPUT, OUTPUT-FORMAT
 
     They are configured through the dedicated ``set_*`` methods. Custom
-    sections are registered with an instance of a developer-designed
-    ``ISection`` subclass through :meth:`set_section`, which appends a new
-    slot after the defaults (or replaces an already registered one,
+    sections are registered as ``IPromptSection`` instances (usually
+    ``PromptSection`` subclasses) through :meth:`set_section`, which appends a
+    new slot after the defaults (or replaces an already registered one,
     keeping its position).
     """
 
     def __init__(
         self,
-        sections: Iterable[ISection] | None = None,
+        sections: Iterable[IPromptSection] | None = None,
         *,
         seed_defaults: bool = True,
     ) -> None:
-        self._sections: dict[str, ISection] = {}
+        self._sections: dict[str, IPromptSection] = {}
         if seed_defaults:
             self.set_role("")
             self.set_history([])
@@ -55,17 +57,17 @@ class PromptBuilder:
         for section in sections or []:
             self.set_section(section.section_type, section)
 
-    def set_section(self, name: str, value: ISection) -> None:
+    def set_section(self, name: str, value: IPromptSection) -> None:
         """Register a section under ``name``.
 
-        ``value`` must be an ``ISection`` instance whose own
+        ``value`` must be an ``IPromptSection`` instance whose own
         ``section_type`` matches ``name``. An existing name is replaced
         in place; a new name appends the section to the end.
         """
         canonical = _canonical_name(name)
-        if not isinstance(value, ISection):
+        if not isinstance(value, IPromptSection):
             raise TypeError(
-                f"value must be a Section instance, got {type(value).__name__}."
+                f"value must be an IPromptSection instance, got {type(value).__name__}."
             )
         if _canonical_name(value.section_type) != canonical:
             raise ValueError(
@@ -74,7 +76,7 @@ class PromptBuilder:
             )
         self._sections[canonical] = value
 
-    def add_section(self, section: ISection) -> None:
+    def add_section(self, section: IPromptSection) -> None:
         """Append a section keyed by its own ``section_type``.
 
         Raises ``ValueError`` if that name is already registered; use
@@ -85,7 +87,7 @@ class PromptBuilder:
             raise ValueError(f"A section named {canonical!r} is already registered.")
         self._sections[canonical] = section
 
-    def get_section(self, name: str) -> ISection | None:
+    def get_section(self, name: str) -> IPromptSection | None:
         """Return the section registered under ``name``, or ``None``."""
         return self._sections.get(_canonical_name(name))
 
@@ -112,7 +114,7 @@ class PromptBuilder:
         self.set_section("OUTPUT-FORMAT", OutputFormatSection(content))
 
     @property
-    def sections(self) -> list[ISection]:
+    def sections(self) -> list[IPromptSection]:
         return list(self._sections.values())
 
     def render(self) -> str:

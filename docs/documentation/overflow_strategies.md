@@ -153,8 +153,9 @@ Validation:
 
 ## On a section
 
-The `ISection` interface (`src/application/interfaces/i_section.py`) exposes
-`overflow_strategies` (an `OverflowStrategyStack`). The base constructor accepts:
+The port `IPromptSection` (`src/application/interfaces/i_prompt_section.py`) declares
+`overflow_strategies` (an `OverflowStrategyStack`); the `PromptSection` skeleton
+(`src/application/context/sections/prompt_section.py`) implements it. The base constructor accepts:
 
 - `overflow_strategies` — the explicit stack for this section.
 - `default_overflow_strategies` — the default stack used when no explicit stack
@@ -162,6 +163,12 @@ The `ISection` interface (`src/application/interfaces/i_section.py`) exposes
 
 When neither is provided, the section falls back to `OverflowStrategyStack()`,
 i.e. `(TRUNCATE, IGNORE)` with no restart.
+
+The skeleton also ships the **default execution** of the policy:
+`PromptSection.fit_to_capacity(content, capacity_tokens, *, tokenizer, summarizer=None)`
+walks the stack in priority order (honouring the restart policy) and returns the first
+result that fits. Subclasses inherit it as-is or override it — `ReferencedCollectionSection`
+overrides it for a collection of items, where `IGNORE` means "drop items in order".
 
 ```python
 from src.domain.enums import OverflowStrategy
@@ -215,6 +222,6 @@ logic are not implemented yet.
 ## Related documents
 
 - [Section Properties: `importance` and `demand`](section_properties.md) — the two Section weights.
-- [Section Mechanism](section_mechanism.md) — the `ISection` contract and how new sections are added.
+- [Section Mechanism](section_mechanism.md) — the `IPromptSection` port, the `PromptSection` skeleton, and how new sections are added.
 - [Prompt-Builder Architecture](prompt_builder_entities.md) — `PromptBuilder`, canonical sections, and rendering.
 - [Dynamic Section Capacity Allocation](../../dynamic_section_capacity_allocation.md) — the Context Manager's capacity-allocation model.

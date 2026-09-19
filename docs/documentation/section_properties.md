@@ -1,6 +1,6 @@
 # Section Properties: `importance` and `demand`
 
-This document defines the two properties every `ISection` carries: **`importance`** and **`demand`**.
+This document defines the two properties every `PromptSection` carries: **`importance`** and **`demand`**.
 It is an architectural/domain reference for how these two concepts are meant to be understood and
 used. It does **not** describe any token-allocation algorithm.
 
@@ -8,7 +8,7 @@ Both properties are relative weights in the range `[0.0, 1.0]`:
 
 - Valid range: `[0.0, 1.0]`
 - Values do **not** need to sum to `1.0` across Sections
-- An `ISection` never normalizes them
+- An `PromptSection` never normalizes them
 - Neither property is a percentage of the context window
 
 ---
@@ -90,4 +90,4 @@ two properties are independent and must be set independently on every Section.
 | Output Format | relatively low — structural, not content | very low — small constant text |
 
 > The values above are **conceptual** reference points. Actual per-Section defaults are defined by
-> each concrete `ISection` subclass.
+> each concrete `PromptSection` subclass.

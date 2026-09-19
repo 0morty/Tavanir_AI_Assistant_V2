@@ -4,7 +4,7 @@ This document describes **how prompt/context sections are designed and registere
 
 ## The core rule: every section is designed by a developer
 
-> **A new section must be an explicit `ISection` subclass designed by the developer. There is no generic section and no raw-text escape hatch.**
+> **A new section must be an explicit `PromptSection` subclass designed by the developer. There is no generic section and no raw-text escape hatch.**
 
 Every logical part of a prompt is a dedicated, named, developer-owned class:
 
@@ -24,13 +24,13 @@ Earlier iterations shipped two convenience classes that violated this rule and w
 
 `StringSection` was the real anti-pattern: it let `set_section("INSTRUCTIONS", "Be concise.")` create a section without any dedicated class, so section types multiplied without design intent, and `section_type` stopped being reliable identity. With it gone:
 
-- `PromptBuilder.set_section(name, value)` accepts **only** `ISection` instances.
-- A non-`ISection` value raises `TypeError` immediately.
-- Every section in the prompt is traceable to a real `ISection` subclass.
+- `PromptBuilder.set_section(name, value)` accepts **only** `IPromptSection` instances (in practice `PromptSection` subclasses).
+- A non-`IPromptSection` value raises `TypeError` immediately.
+- Every section in the prompt is traceable to a real `PromptSection` subclass.
 
-## The `ISection` contract
+## The prompt-section contract
 
-An `ISection` subclass decides what the section is; `importance`, `demand`, and `overflow_strategies` are instance properties **owned by the base class**, not class-level contracts redeclared in each subclass:
+The contract itself is declared on the pure port `IPromptSection` (`src/application/interfaces/i_prompt_section.py`); the `PromptSection` skeleton (`src/application/context/sections/prompt_section.py`) implements that port and ships the default behavior on top of the contract. Each section is an explicit `PromptSection` subclass, so it inherits both the contract (via the port) and the defaults (via the skeleton). A `PromptSection` subclass decides what the section is; `importance`, `demand`, and `overflow_strategies` are instance properties **owned by the base class**, not class-level contracts redeclared in each subclass. They are part of the *prompt-section* abstraction itself — every prompt section carries its capacity weights and overflow policy — not generic properties of every possible section:
 
 | Member | Role |
 |---|---|
@@ -38,19 +38,21 @@ An `ISection` subclass decides what the section is; `importance`, `demand`, and 
 | `body()` (abstract method) | The section's main content |
 | `importance` (base-owned property) | Intrinsic semantic importance in `[0.0, 1.0]`, used as a weight when redistributing unused token capacity. **Not** a token percentage |
 | `demand` (base-owned property) | Relative context-capacity demand in `[0.0, 1.0]`, used to calculate the section's initial proportional token capacity |
-| `overflow_strategies` (base-owned property) | The section's `OverflowStrategyStack`: ordered overflow strategies (lower index = higher priority) plus the restart policy; pure configuration — no execution |
+| `overflow_strategies` (base-owned property) | The section's `OverflowStrategyStack`: ordered overflow strategies (lower index = higher priority) plus the restart policy. The base ships the **default interpretation** of the policy via `fit_to_capacity`; subclasses inherit it or override it |
+| `fit_to_capacity(content, capacity_tokens, *, tokenizer, summarizer=None)` (base default) | **Default overflow execution**: fits a single plain-text value by walking the strategy stack in priority order (honouring the restart policy) and returning the first result that fits. `ReferencedCollectionSection` overrides it to operate at item level, where `IGNORE` means "drop items in order" |
+| `render()` (base default) | Joins `pre_context`, `body()`, and `post_context` (skipping empty parts) into a single string |
 | `default_importance` (base-constructor parameter, default `0.5`) | Default importance used when no explicit `importance` is passed; each subclass passes its own via `super().__init__(..., default_importance=...)` |
 | `default_demand` (base-constructor parameter, default `0.5`) | Default demand used when no explicit `demand` is passed; each subclass passes its own via `super().__init__(..., default_demand=...)` |
 | `default_overflow_strategies` (base-constructor parameter) | Default overflow stack used when no explicit `overflow_strategies` is passed; falls back to `OverflowStrategyStack()` (`(TRUNCATE, IGNORE)`, no restart) |
 | `pre_context` / `post_context` (properties) | Optional framing around the body (default empty) |
 
-Neither `importance` nor `demand` is a token percentage, neither needs to sum to `1.0` across sections, and `ISection` never normalizes them or allocates capacity itself.
+Neither `importance` nor `demand` is a token percentage, neither needs to sum to `1.0` across sections, and `PromptSection` never normalizes them or allocates capacity itself.
 
-`ISection.render()` joins `pre_context`, `body()`, and `post_context` (skipping empty parts) into a single string.
+On a **collection section** (`ReferencedCollectionSection`), the held collection is exposed as `items` and its entries are joined with `item_separator` — independent of the framing `separator` used by `render()`.
 
 ## Adding a new section
 
-1. Create an `ISection` subclass in `src/application/context/sections/` (the abstract contract lives in `src/application/interfaces/i_section.py`).
+1. Create an `PromptSection` subclass in `src/application/context/sections/` (the port contract lives in `src/application/interfaces/i_prompt_section.py`; the `PromptSection` skeleton that implements it lives in `src/application/context/sections/prompt_section.py`).
 2. Give it a stable `section_type` and a `body()`.
 3. Choose a default importance and a default demand, each in `[0.0, 1.0]`, and pass them to the base constructor (both default to `0.5` when omitted). Configure `overflow_strategies` only when the section needs a non-default overflow stack.
 4. Export it from `src/application/context/sections/__init__.py` (and `src/application/context/__init__.py` if it should be part of the public `context` API).
@@ -59,10 +61,10 @@ Neither `importance` nor `demand` is a token percentage, neither needs to sum to
 Example — a regulation section designed for the job:
 
 ```python
-from src.application.interfaces import ISection
+from src.application.context.sections import PromptSection
 
 
-class RegulationSection(ISection):
+class RegulationSection(PromptSection):
 
     def __init__(
         self,
@@ -95,7 +97,7 @@ builder.set_section("REGULATION", RegulationSection("Law 137 ..."))
 
 ## Registration constraints
 
-- `set_section(name, value)` requires `isinstance(value, ISection)`; otherwise it raises `TypeError`.
+- `set_section(name, value)` requires `isinstance(value, IPromptSection)`; otherwise it raises `TypeError`.
 - `name` must match the section's `section_type` after normalization (`strip().upper()`); a mismatch raises `ValueError`.
 - A blank name raises `ValueError`.
 - `add_section(section)` appends a section keyed by its own `section_type` and rejects duplicates with `ValueError`.
@@ -104,10 +106,15 @@ builder.set_section("REGULATION", RegulationSection("Law 137 ..."))
 ## Where custom sections come from
 
 ```text
-                    ISection (abstract base / app port)
-                            │
-           ┌────────────────┼──────────────────────┐
-           │                │                      │
+                    IPromptSection (port)
+                   contract only, no behavior
+                             │
+                             ▼
+                    PromptSection (skeleton)
+                 contract + default behavior
+                             │
+           ┌─────────────────┼──────────────────────┐
+           │                 │                      │
    Canonical (default)   Developer-designed    -- no generic --
    Role / History /      RegulationSection        StringSection
    Chunks / SystemInput  InstructionsSection           ✗

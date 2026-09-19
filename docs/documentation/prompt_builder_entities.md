@@ -4,7 +4,7 @@ This document describes the prompt-builder feature: a generic, extensible set of
 
 ## Design Goals
 
-- **Open/closed for real**: section identity is a plain string, not a closed enum. `ISection` subclasses own their identity, so new section types (`REGULATION`, `METADATA`, `INSTRUCTIONS`, ...) are added by subclassing — no central enum, no builder changes.
+- **Open/closed for real**: section identity is a plain string, not a closed enum. `PromptSection` subclasses own their identity, so new section types (`REGULATION`, `METADATA`, `INSTRUCTIONS`, ...) are added by subclassing — no central enum, no builder changes.
 - **Name-keyed registry**: `PromptBuilder` addresses sections by canonical name (e.g. `REGULATION`), supports idempotent replacement, deterministic ordering, and unknown-name lookup.
 - **Explicit structure**: every section is framed as `pre-context → body → post-context`.
 - **Domain-agnostic**: the architecture does not know about suggestions, statutes, RAG, or any specific business domain; content is normalized into these building blocks first.
@@ -12,7 +12,7 @@ This document describes the prompt-builder feature: a generic, extensible set of
 
 ## Location
 
-The architecture is split across layers: the data entities (`Chunk`, `HistoryMessage`) live in the Domain layer alongside the other domain entities. The `ISection` concept is **general-purpose**: it represents a logical part of a context (not necessarily a prompt). Its abstract contract (the port) lives in the Application `interfaces/` package, and the developer-designed sections that implement it live in `src/application/context/sections/`. `PromptBuilder` — the prompt-specific consumer — lives under `prompt/` and composes `ISection` instances into an ordered prompt:
+The architecture is split across layers: the data entities (`Chunk`, `HistoryMessage`) live in the Domain layer alongside the other domain entities. The `PromptSection` concept is **prompt-scoped**: it represents a logical part of a prompt (not a generic section of anything else). Its abstract base class lives in `src/application/context/sections/`, alongside the developer-designed sections that implement it. `PromptBuilder` — the prompt consumer — lives under `prompt/` and composes `IPromptSection` instances into an ordered prompt:
 
 ```
 src/domain/entities.py                  # Chunk, HistoryMessage (entities)
@@ -21,12 +21,14 @@ src/domain/overflow_strategy_stack.py   # OverflowStrategyStack (config value ob
 
 src/application/interfaces/
 ├── __init__.py
-└── i_section.py                        # ISection (abstract base class / port)
+├── i_prompt_section.py     # IPromptSection (pure interface / port, contract only)
+└── ... (other pure ports: IDenseEmbedder, IReferenceGenerator, ISparseEmbedder, ITokenizer, ...)
 
 src/application/context/
 ├── __init__.py
 └── sections/
     ├── __init__.py
+    ├── prompt_section.py      # PromptSection (skeleton: IPromptSection + default behavior)
     ├── role_section.py         # RoleSection
     ├── history_section.py      # HistorySection
     ├── chunks_section.py       # ChunksSection (RAG context)
@@ -39,7 +41,7 @@ src/application/prompt/
 └── prompt_builder.py           # PromptBuilder (name-keyed registry)
 ```
 
-The Application layer depends inward on the Domain: sections consume `Chunk`/`HistoryMessage` and render them for the LLM, and the `ISection` contract is typed against domain config (`OverflowStrategyStack`). The packages stay pure stdlib. A future context/token-allocation component consumes the same `ISection` concept (via its `importance`, `demand`, and `overflow_strategies` values) without touching the prompt layer.
+The Application layer depends inward on the Domain: sections consume `Chunk`/`HistoryMessage` and render them for the LLM, and the `PromptSection` contract is typed against domain config (`OverflowStrategyStack`). The packages stay pure stdlib. A future context/token-allocation component consumes the same concept (via its `importance`, `demand`, and `overflow_strategies` values) without touching the prompt layer.
 
 ## Entities
 
@@ -73,11 +75,17 @@ Sender-role vocabulary for history messages, stored alongside the OpenAI role st
 
 ### Overflow strategy models (`src/domain/enums.py`, `src/domain/overflow_strategy_stack.py`)
 
-`OverflowStrategy` (`TRUNCATE`, `SUMMARIZE`, `IGNORE`) and its companion value object `OverflowStrategyStack` (ordered, prioritized strategy list plus a restart policy) model how a section's content is handled when it exceeds its context capacity. The interface exposes the stack via `ISection.overflow_strategies`. See [Overflow Strategies](overflow_strategies.md) for the full data-model definition.
+`OverflowStrategy` (`TRUNCATE`, `SUMMARIZE`, `IGNORE`) and its companion value object `OverflowStrategyStack` (ordered, prioritized strategy list plus a restart policy) model how a section's content is handled when it exceeds its context capacity. The port exposes the stack via `IPromptSection.overflow_strategies` (implemented by `PromptSection`). See [Overflow Strategies](overflow_strategies.md) for the full data-model definition.
 
-### `ISection` (abstract base class / port, `src/application/interfaces/i_section.py`)
+The prompt-section abstraction is split into two tiers: the pure port `IPromptSection` (`src/application/interfaces/i_prompt_section.py`) declares the contract only -- no state, no behavior. The `PromptSection` skeleton (`src/application/context/sections/prompt_section.py`) implements that port and ships the default behavior on top of it. New sections subclass the skeleton to inherit the defaults; consumer code (e.g. `PromptBuilder`) can depend on the port alone.
 
-Defines the **contract** and the **general rendering algorithm** for every section. It is a general-purpose logical section of a context, not a prompt-specific concept: `PromptBuilder` is just one consumer, and a future context/token-allocation component can use the same concept (especially the `importance`, `demand`, and `overflow_strategies` values) without touching the prompt layer.
+### `IPromptSection` (port, `src/application/interfaces/i_prompt_section.py`)
+
+Declares the prompt-section contract: `section_type`, `importance`, `demand`, `overflow_strategies`, `pre_context`/`post_context`, `body()`, `fit_to_capacity()`, and `render()`. Every section must satisfy this contract; the port itself carries no implementation.
+
+### `PromptSection` (skeleton, `src/application/context/sections/prompt_section.py`)
+
+Implements `IPromptSection` and ships the **general rendering algorithm** plus the **default interpretation** of the overflow policy. It is the prompt-section abstraction, not a generic section of anything else: a section participates in prompt construction, so its `importance`, `demand`, and `overflow_strategies` are part of what a prompt section *is*. `PromptBuilder` is one consumer; a future context/token-allocation component operates on the same abstraction (via those values) without touching the prompt layer.
 
 ```
 +--------------+
@@ -98,13 +106,16 @@ Defines the **contract** and the **general rendering algorithm** for every secti
 | `default_overflow_strategies` | constructor parameter (`OverflowStrategyStack | None`) | Default overflow stack applied when no explicit `overflow_strategies` is given; falls back to `OverflowStrategyStack()` (`(TRUNCATE, IGNORE)`, no restart) |
 | `importance` | property (`float`) | Intrinsic semantic importance in `[0.0, 1.0]`, used as a weight when redistributing unused token capacity. **Not** a token percentage; validated per-section, never normalized, no sum-to-`1.0` rule |
 | `demand` | property (`float`) | Relative context-capacity demand in `[0.0, 1.0]`, used to calculate the section's initial proportional token capacity. Validated per-section, never normalized, no sum-to-`1.0` rule |
-| `overflow_strategies` | property (`OverflowStrategyStack`) | Ordered overflow strategies (lower index = higher priority) plus the restart policy; pure configuration — no execution |
+| `overflow_strategies` | property (`OverflowStrategyStack`) | Ordered overflow strategies (lower index = higher priority) plus the restart policy; the base ships the default execution via `fit_to_capacity` |
+| `fit_to_capacity(content, capacity_tokens, *, tokenizer, summarizer=None)` | default method | **Default overflow execution**: fits a single plain-text value by walking the strategy stack in priority order (honouring the restart policy) and returning the first result that fits; subclasses inherit it or override it |
 | `pre_context` | property (default `""`) | Framing before the body |
 | `post_context` | property (default `""`) | Framing after the body |
 | `body()` | abstract method | Constructs the section's main content — behaves conceptually like a property |
 | `render()` | method | Joins `pre_context` + `body()` + `post_context` into one string; returns `""` when the body is empty |
 
-The base class holds **no** section-specific implementation; subclasses override `section_type` and `body()` (and framing where needed) and pass their default `importance`, `demand`, and overflow strategies to the base constructor. There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` and `demand` are instance properties owned by the base class; their values for several sections are independent and never normalized: the base class validates each value against `[0.0, 1.0]` but never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
+The base class holds **no** domain/business-specific implementation; it ships the generic default behavior of a prompt section — framing (`pre_context`/`post_context`/`separator`/`render()`), capacity weights (`importance`/`demand`), the overflow policy (`overflow_strategies`) and its default execution (`fit_to_capacity`). Subclasses override `section_type` and `body()` (and any hook they vary) and pass their default `importance`, `demand`, and overflow strategies to the base constructor. There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` and `demand` are instance properties owned by the base class; their values for several sections are independent and never normalized: the base class validates each value against `[0.0, 1.0]` but never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
+
+**Collection sections** (`ReferencedCollectionSection` subclasses) expose their held collection as `items` and join entries with `item_separator` — independent of the framing `separator` used by `render()`.
 
 ### Concrete sections
 
@@ -119,10 +130,10 @@ One concrete section per canonical section type, each owning its `body()`, defau
 
 ### Adding a custom section
 
-Every section is **designed by a developer**. There is no generic "string" section and no raw-text escape hatch: a new section must be an explicit `ISection` subclass that owns its identity (`section_type`), content (`body()`), default importance, and default demand. Adding one requires **no central enum or framework code changes**:
+Every section is **designed by a developer**. There is no generic "string" section and no raw-text escape hatch: a new section must be an explicit `PromptSection` subclass that owns its identity (`section_type`), content (`body()`), default importance, and default demand. Adding one requires **no central enum or framework code changes**:
 
 ```python
-class RegulationSection(ISection):
+class RegulationSection(PromptSection):
 
     @property
     def section_type(self) -> str:
@@ -136,12 +147,12 @@ See [Section Mechanism](section_mechanism.md) for the full design rules.
 
 ### `PromptBuilder` (`src/application/prompt/prompt_builder.py`)
 
-A **name-keyed ordered registry** of `ISection` instances. It ships the canonical sections and renders them in order:
+A **name-keyed ordered registry** of `PromptSection` instances. It ships the canonical sections and renders them in order:
 
 | Member | Kind | Responsibility |
 |---|---|---|
 | `__init__(sections=None, *, seed_defaults=True)` | constructor | Seeds the canonical sections (empty) unless `seed_defaults=False`; merges any provided sections |
-| `set_section(name, value)` | method | Register a section under `name`. `value` must be an `ISection` instance whose `section_type` matches `name` (anything else raises `TypeError`). New names append; existing names replace in place |
+| `set_section(name, value)` | method | Register a section under `name`. `value` must be an `IPromptSection` instance whose `section_type` matches `name` (anything else raises `TypeError`). New names append; existing names replace in place |
 | `add_section(section)` | method | Append a section keyed by its own `section_type`; raises `ValueError` on a duplicate name |
 | `get_section(name)` | method | Return the registered section or `None` |
 | `has_section(name)` | method | Whether a section is registered |
@@ -156,7 +167,7 @@ A **name-keyed ordered registry** of `ISection` instances. It ships the canonica
 
 **Canonical section order** (defaults): `ROLE, HISTORY, CHUNKS, SYSTEM-INPUT, USER-INPUT, OUTPUT-FORMAT`. Names are normalized with `strip().upper()`, so `"regulation"`, `"REGULATION"`, and `" Regulation "` address the same slot. Setting an existing name replaces it **in place**; a new name appends after the defaults.
 
-Custom sections (developer-designed `ISection` subclasses) coexist with the defaults:
+Custom sections (developer-designed `PromptSection` subclasses) coexist with the defaults:
 
 ```python
 builder = PromptBuilder()
@@ -167,6 +178,6 @@ builder.set_section("INSTRUCTIONS", InstructionsSection("Be concise."))
 
 ## Rendering Logic
 
-1. Each `ISection.render()` joins its `pre_context`, `body()`, and `post_context` with `\n\n`, skipping empty parts. A section whose body is empty renders as `""`, so unconfigured default slots never leak framing or separators.
+1. Each `PromptSection.render()` joins its `pre_context`, `body()`, and `post_context` with `\n\n`, skipping empty parts. A section whose body is empty renders as `""`, so unconfigured default slots never leak framing or separators.
 2. `PromptBuilder.render()` renders every registered section and joins the non-empty results with `\n\n`.
 3. The final result is a single assembled prompt string (not a multi-turn conversation).

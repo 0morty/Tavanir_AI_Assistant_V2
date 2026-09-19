@@ -11,7 +11,7 @@ class ChunksSection(ReferencedCollectionSection):
     """Retrieval (RAG) context chunks.
 
     A ``ChunksSection`` is a collection section: the retrieved chunks are held
-    as the section's items and exposed via ``chunks``. Items are the
+    as the section's items and exposed via ``items``. Items are the
     Generation-API side :class:`GenerationChunk` entities, whose ``reference``
     enriches each chunk's content during context construction (per the
     parent's collection behavior).
@@ -45,5 +45,5 @@ class ChunksSection(ReferencedCollectionSection):
 
     def item_content(self, item: Any) -> str:
         """Render a chunk as a numbered block: ``Chunk N:\\n<content>``."""
-        index = self.chunks.index(item) + 1
+        index = self.items.index(item) + 1
         return f"Chunk {index}:\n{item.content}"

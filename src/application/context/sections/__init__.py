@@ -1,6 +1,7 @@
 from src.application.context.sections.chunks_section import ChunksSection
 from src.application.context.sections.history_section import HistorySection
 from src.application.context.sections.output_format_section import OutputFormatSection
+from src.application.context.sections.prompt_section import PromptSection
 from src.application.context.sections.referenced_collection_section import (
     ReferencedCollectionSection,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "ChunksSection",
     "HistorySection",
     "OutputFormatSection",
+    "PromptSection",
     "ReferencedCollectionSection",
     "ReferencedSection",
     "RoleSection",

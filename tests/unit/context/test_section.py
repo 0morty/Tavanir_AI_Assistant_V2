@@ -10,7 +10,8 @@ from src.application.context import (
     SystemInputSection,
     UserInputSection,
 )
-from src.application.interfaces import ISection
+from src.application.context.sections import PromptSection
+from src.application.interfaces import IPromptSection
 from src.domain.entities import GenerationChunk, HistoryMessage
 from src.domain.enums import HistoryRole, OverflowStrategy
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
@@ -18,10 +19,23 @@ from src.application.prompt import PromptBuilder
 
 
 def test_section_interface_is_available_from_interfaces():
-    from src.application.interfaces.i_section import ISection as ModuleISection
+    from src.application.interfaces import IPromptSection
+    from src.application.interfaces.i_prompt_section import (
+        IPromptSection as ModuleIPromptSection,
+    )
 
-    assert ModuleISection is ISection
-    assert issubclass(ChunksSection, ISection)
+    assert ModuleIPromptSection is IPromptSection
+    assert issubclass(ChunksSection, IPromptSection)
+
+
+def test_section_skeleton_implements_interface():
+    from src.application.context.sections.prompt_section import (
+        PromptSection as ModulePromptSection,
+    )
+
+    assert ModulePromptSection is PromptSection
+    assert issubclass(PromptSection, IPromptSection)
+    assert issubclass(ChunksSection, PromptSection)
 
 
 def test_context_no_longer_owns_section_interface():
@@ -220,7 +234,7 @@ def test_overflow_strategies_rejects_non_stack():
 
 
 def test_section_default_overflow_strategies_can_be_overridden_by_subclass():
-    class CustomSection(ISection):
+    class CustomSection(PromptSection):
         def __init__(self) -> None:
             super().__init__(
                 default_overflow_strategies=OverflowStrategyStack(

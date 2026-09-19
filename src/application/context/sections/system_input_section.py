@@ -1,19 +1,25 @@
+from src.application.context.sections.referenced_section import ReferencedSection
+from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.domain.entities import Reference
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
-from src.application.interfaces import ISection
 
 
-class SystemInputSection(ISection):
+class SystemInputSection(ReferencedSection):
     """System-level input passed to the model."""
 
     def __init__(
         self,
         content: str,
+        reference: Reference | None = None,
+        reference_generator: IReferenceGenerator | None = None,
         *,
         importance: float | None = None,
         demand: float | None = None,
         overflow_strategies: OverflowStrategyStack | None = None,
     ) -> None:
         super().__init__(
+            reference=reference,
+            reference_generator=reference_generator,
             importance=importance,
             demand=demand,
             default_importance=0.5,

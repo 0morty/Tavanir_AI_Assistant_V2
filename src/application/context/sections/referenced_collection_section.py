@@ -3,7 +3,10 @@ from typing import Any
 
 from src.application.context.sections.referenced_section import ReferencedSection
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.domain.context.summarizer import Summarizer
+from src.domain.context.tokenizer import Tokenizer
 from src.domain.entities import Reference
+from src.domain.enums import OverflowStrategy
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 
@@ -86,6 +89,82 @@ class ReferencedCollectionSection(ReferencedSection):
                 self.compose_referenced_content(reference_text, content)
             )
         return self.separator.join(rendered)
+
+    def fit_to_capacity(
+        self,
+        chunks: Sequence[Any],
+        capacity_tokens: int,
+        *,
+        tokenizer: Tokenizer,
+        summarizer: Summarizer | None = None,
+    ) -> str:
+        """Fit a collection of items into ``capacity_tokens``.
+
+        Collection-level overflow handling for the same ``OverflowStrategyStack``
+        concept: when the joined collection already fits it is returned
+        unchanged. Otherwise the stack is walked in priority order exactly like
+        the parent, except that ``IGNORE`` operates at the item level -- it
+        keeps items in order while they fit within the capacity and drops the
+        rest. ``TRUNCATE`` and ``SUMMARIZE`` apply to the joined collection text
+        through the parent's implementation.
+        """
+        if not chunks or capacity_tokens <= 0:
+            return ""
+        texts = [self.item_content(chunk) for chunk in chunks]
+        content = self.separator.join(texts)
+        if not content.strip():
+            return ""
+        if self._fits_within(content, capacity_tokens, tokenizer):
+            return content
+        return self._resolve_collection_overflow(
+            texts, content, capacity_tokens, tokenizer, summarizer
+        )
+
+    def _resolve_collection_overflow(
+        self,
+        texts: Sequence[str],
+        content: str,
+        capacity_tokens: int,
+        tokenizer: Tokenizer,
+        summarizer: Summarizer | None,
+    ) -> str:
+        def apply(
+            strategy: OverflowStrategy,
+            _content: str,
+            _capacity_tokens: int,
+            _tokenizer: Tokenizer,
+            _summarizer: Summarizer | None,
+        ) -> str | None:
+            if strategy is OverflowStrategy.IGNORE:
+                return self._include_fitting_items(
+                    texts, capacity_tokens, tokenizer
+                )
+            return self._apply_strategy(
+                strategy, content, capacity_tokens, tokenizer, summarizer
+            )
+
+        return self._resolve_overflow(
+            content, capacity_tokens, tokenizer, summarizer, applier=apply
+        )
+
+    def _include_fitting_items(
+        self,
+        texts: Sequence[str],
+        capacity_tokens: int,
+        tokenizer: Tokenizer,
+    ) -> str:
+        """Keep items in order while they fit; drop the items that would overflow."""
+        included: list[str] = []
+        total_tokens = 0
+        separator_tokens = tokenizer.count_tokens(self.separator)
+        for text in texts:
+            item_tokens = tokenizer.count_tokens(text)
+            separator_cost = separator_tokens if included else 0
+            if total_tokens + separator_cost + item_tokens > capacity_tokens:
+                break
+            included.append(text)
+            total_tokens += separator_cost + item_tokens
+        return self.separator.join(included)
 
     def body(self) -> str:
         """Build the Section content as the collection of enriched items."""

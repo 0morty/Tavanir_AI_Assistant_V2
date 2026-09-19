@@ -44,8 +44,10 @@ class ISection(ABC):
 
     ``overflow_strategies`` is an :class:`OverflowStrategyStack`: the ordered
     list of overflow strategies (lower index means higher priority) plus the
-    restart policy for this section. It is pure configuration/state; the
-    section never executes a strategy or runs any fallback/retry logic.
+    restart policy for this section. It is pure configuration/state. Overflow
+    handling itself is implemented by the reference-aware subclasses:
+    ``ReferencedSection`` fits a single plain-text value, while
+    ``ReferencedCollectionSection`` overrides the behavior for its collection.
     """
 
     def __init__(

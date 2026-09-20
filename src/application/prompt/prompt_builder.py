@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from src.domain.entities import GenerationChunk, HistoryMessage
 from src.application.interfaces import IPromptSection
@@ -21,6 +21,12 @@ def _canonical_name(name: str) -> str:
 class PromptBuilder:
     """Composes :class:`IPromptSection` instances into an ordered prompt.
 
+    The builder owns exactly two concerns: the **order** of the sections and
+    the **concatenation** of their already-rendered content (``assemble``).
+    It does not decide how much capacity a section gets (that belongs to
+    ``ContextBuilder``) and it does not render or reduce content itself (that
+    belongs to the sections).
+
     The builder relies on the
     :class:`~src.application.interfaces.i_prompt_section.IPromptSection`
     port rather than on any fixed set of section types. Section identity
@@ -39,6 +45,8 @@ class PromptBuilder:
     new slot after the defaults (or replaces an already registered one,
     keeping its position).
     """
+
+    SECTION_SEPARATOR = "\n\n"
 
     def __init__(
         self,
@@ -117,10 +125,32 @@ class PromptBuilder:
     def sections(self) -> list[IPromptSection]:
         return list(self._sections.values())
 
-    def render(self) -> str:
+    def assemble(self, rendered: Mapping[str, str]) -> str:
+        """Concatenate already-rendered section content into the final prompt.
+
+        Iterates the registered sections **in their registration order** and
+        joins each section's content from ``rendered`` (keyed by
+        ``section_type``) with :attr:`SECTION_SEPARATOR`. Missing or empty
+        entries are skipped, so callers may pass content for a subset of the
+        registered sections.
+        """
         parts = []
-        for section in self._sections.values():
-            rendered = section.render()
-            if rendered:
-                parts.append(rendered)
-        return "\n\n".join(parts)
+        for section_type in self._sections:
+            content = rendered.get(section_type)
+            if content:
+                parts.append(content)
+        return self.SECTION_SEPARATOR.join(parts)
+
+    def render(self) -> str:
+        """Render every section and assemble the result in registration order.
+
+        Each section renders its own content (including reference handling);
+        this method only invokes them and delegates the concatenation to
+        :meth:`assemble`.
+        """
+        return self.assemble(
+            {
+                section.section_type: section.render()
+                for section in self._sections.values()
+            }
+        )

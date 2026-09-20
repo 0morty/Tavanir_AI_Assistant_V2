@@ -116,7 +116,8 @@ Semantic points:
   Chunks.
 - The **Section-specific logic** determines which items are considered and in what
   order.
-- The **Context Manager/Allocator** is responsible for capacity allocation;
+- The **Context Manager/Allocator** (`ContextBuilder` orchestrated by
+  `CapacityAllocator`) is responsible for capacity allocation;
   `IGNORE` does **not** perform global capacity allocation.
 
 ### Strategy Semantics Summary
@@ -189,7 +190,7 @@ An overflow strategy must preserve the separation between capacity allocation,
 content fitting, and overflow handling:
 
 ```text
-Context Manager
+Context Manager (`ContextBuilder` + `CapacityAllocator`)
     │
     └── allocates capacity to Sections
 
@@ -212,12 +213,20 @@ for the full allocation model.
 
 ## Implementation status (for now)
 
-The `TRUNCATE`, `SUMMARIZE`, and `IGNORE` semantics above are the contract that
-future overflow handling and the Context Manager will implement and consume.
-The model does **not** execute a strategy, run LLM compression, or perform
-capacity allocation. The tokenizer abstraction (`ITokenizer`) exists as a port;
-concrete tokenizer implementations, the strategy algorithms, and the allocation
-logic are not implemented yet.
+The `TRUNCATE`, `SUMMARIZE`, and `IGNORE` semantics above are implemented and
+consumed by the context pipeline:
+
+- Strategy execution lives in `src/domain/context/overflow/` (`TruncateStrategy`,
+  `SummarizeStrategy`, `IgnoreStrategy`) and is driven by the default
+  `PromptSection.fit_to_capacity` walk over the section's `OverflowStrategyStack`.
+- The tokenizer port is the domain `Tokenizer` (`src/domain/context/tokenizer.py`);
+  `SUMMARIZE` additionally requires an injected `Summarizer` (otherwise it is
+  skipped as unavailable).
+- Capacity allocation (`dynamic_section_capacity_allocation.md`) is implemented
+  by `ContextBuilder` (`src/application/context/context_builder.py`), which
+  orchestrates the `CapacityAllocator` policy and applies each section's overflow
+  chain when its rendered content exceeds its allocated capacity. A final
+  truncation safety net guarantees the fitted content never exceeds the budget.
 
 ## Related documents
 

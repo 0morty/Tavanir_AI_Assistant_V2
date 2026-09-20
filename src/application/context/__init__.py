@@ -1,3 +1,8 @@
+from src.application.context.context_builder import (
+    ContextBuilder,
+    ContextBuilderResult,
+    SectionOutput,
+)
 from src.application.context.sections.chunks_section import ChunksSection
 from src.application.context.sections.history_section import HistorySection
 from src.application.context.sections.output_format_section import OutputFormatSection
@@ -7,9 +12,12 @@ from src.application.context.sections.user_input_section import UserInputSection
 
 __all__ = [
     "ChunksSection",
+    "ContextBuilder",
+    "ContextBuilderResult",
     "HistorySection",
     "OutputFormatSection",
     "RoleSection",
+    "SectionOutput",
     "SystemInputSection",
     "UserInputSection",
 ]

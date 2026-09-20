@@ -1,5 +1,29 @@
 # Dynamic Section Capacity Allocation
 
+## Implementation status
+
+This model is implemented by the context pipeline in `src/application/context/`:
+
+- **`ContextBuilder`** (`context_builder.py`) — the Context Manager / orchestrator.
+  It renders the `PromptBuilder`'s sections (reference resolution happens inside
+  each section's `render()`), builds `CapacityRequest` values, delegates the
+  allocation to `CapacityAllocator`, fits over-capacity sections through their
+  overflow strategy chain, and hands the fitted content to
+  `PromptBuilder.assemble()` for the final join. The separator token cost is
+  reserved out of the budget, so the resulting prompt never exceeds the limit.
+- **`CapacityAllocator`** (`allocation/capacity_allocator.py`) — the allocation
+  policy, a plain value-operating algorithm. It splits the budget into initial
+  capacities **proportional to each section's `demand`** (`DemandAllocator`),
+  returns the unused share of under-filled sections to the free pool, then
+  satisfies the over-filled sections' expansion requests by iterative weighted
+  redistribution **by `importance`** (`RedistributionAllocator` +
+  `ExpansionRequest`), capped at each section's actual need.
+- `CapacityRequest(key, demand, importance, needed_tokens)` maps the General
+  Model below: `demand` = initial-share weight, `importance` = redistribution
+  weight (this model's "weight" concept), `needed_tokens` = the section's content
+  size. `demand` and `importance` are independent values in `[0.0, 1.0]` that do
+  **not** need to sum to one.
+
 ## Overview
 
 The Context Manager is responsible for allocating the available token capacity among prompt sections.

@@ -15,18 +15,20 @@ build-out, the design decisions that were corrected along the way, and the preci
 ## 1. TL;DR status
 
 - Branch: **`feat/context-builder`** (remote `origin` = `ssh://Administrator@git.jadoosoft.ir:2222/JaddoSoft/Tavanir_AI_Assistant_V2.git`)
-- Local is **3 commits ahead** of `origin/feat/context-builder` — **need a push**:
-  - `af94ac2 feat(context): add ReferencedCollectionSection`
-  - `85ee582 feat(reference): add deterministic ReferenceGenerator fallback`
+- Local is **in sync** with `origin/feat/context-builder` (all commits up to `91b938a` are pushed).
+- Committed session history (newest first):
+  - `91b938a refactor(context): extract IPromptSection port from PromptSection skeleton`
+  - `c5c6340 feat(context): move overflow handling into section hierarchy`
+  - `ee6b503 feat(context): make non-collection sections reference-aware`
+  - `1ecc534 feat(context): add chunk allocation engine and GenerationChunk`
+  - `280e228 docs: update session context for TemplateValidator`
   - `8e983e5 feat(reference): add TemplateValidator`
-- Committed session history:
-  - `3b0b826 feat(domain): add Reference entity and ReferenceDetails`
-  - `91fc3e9 feat(context): add ReferencedSection base`
+  - `85ee582 feat(reference): add deterministic ReferenceGenerator fallback`
+  - `af94ac2 feat(context): add ReferencedCollectionSection`
   - `07beb28 docs: add reference architecture design document`
-  - `af94ac2 feat(context): add ReferencedCollectionSection`
-  - `85ee582 feat(reference): add deterministic ReferenceGenerator fallback`
-  - `8e983e5 feat(reference): add TemplateValidator`
-- Untracked (NOT committed): `SESSION_CONTEXT.md`, `src/application/context/context_builder.py`, `tests/unit/context/test_context_builder.py`.
+  - `91fc3e9 feat(context): add ReferencedSection base`
+  - `3b0b826 feat(domain): add Reference entity and ReferenceDetails`
+- Untracked / uncommitted (IN PROGRESS): `ContextBuilder` pipeline + `CapacityAllocator` policy + `PromptBuilder.assemble` (see §3 and §8): `src/application/context/context_builder.py`, `src/application/context/allocation/capacity_allocator.py`, `tests/unit/context/test_context_builder.py`, `tests/unit/context/test_capacity_allocator.py`, plus edits to `src/application/context/__init__.py`, `src/application/context/allocation/__init__.py`, `src/application/prompt/prompt_builder.py`, `tests/unit/prompt/test_prompt_builder.py`.
 
 ---
 
@@ -42,9 +44,15 @@ build-out, the design decisions that were corrected along the way, and the preci
 | `src/application/reference/deterministic_reference_generator.py` | `DeterministicReferenceGenerator` — deterministic (no LLM) generator. |
 | `src/application/reference/template_validator.py` | `TemplateValidator`, `TemplateValidationResult`, `extract_placeholders` — template validation (see §3). |
 | `src/application/reference/__init__.py` | Exports `DeterministicReferenceGenerator`, `TemplateValidator`, `TemplateValidationResult`, `extract_placeholders`. |
-| `src/application/interfaces/__init__.py` | Exports `IReferenceGenerator`. |
+| `src/application/interfaces/__init__.py` | Exports `IReferenceGenerator`, `IPromptSection`. |
 | `src/application/context/sections/__init__.py` | Exports `ReferencedSection`, `ReferencedCollectionSection`. |
+| `src/application/context/context_builder.py` | `ContextBuilder`, `SectionOutput`, `ContextBuilderResult` — the Context Manager pipeline (uncommitted). |
+| `src/application/context/allocation/capacity_allocator.py` | `CapacityAllocator`, `CapacityRequest`, `CapacityAllocation` — allocation policy (uncommitted). |
+| `src/application/prompt/prompt_builder.py` | `PromptBuilder.assemble` + `SECTION_SEPARATOR`; `render()` delegates to `assemble` (modified, uncommitted). |
 | `tests/unit/reference/test_template_validator.py` | 8 unit tests (see §6). |
+| `tests/unit/context/test_context_builder.py` | 12 unit tests (uncommitted). |
+| `tests/unit/context/test_capacity_allocator.py` | 12 unit tests (uncommitted). |
+| `tests/unit/prompt/test_prompt_builder.py` | +4 `assemble` tests (modified, uncommitted). |
 
 ---
 
@@ -98,22 +106,43 @@ Reference.fluent_text()
   `RegulationReference`, `WebReference`, `DocumentReference` (§6/§25 examples). Do not add them
   unless the user asks.
 
-### ContextBuilder (added in the continuation session)
-- `src/application/context/context_builder.py` — **`ContextBuilder`** (the Context Manager /
-  allocator of `dynamic_section_capacity_allocation.md`). Renders `PromptSection`s, assigns **initial
-  capacity by `demand`**, fits over-capacity sections via their **overflow strategy chain**, and
-  **redistributes free capacity iteratively by `importance`** (capped at actual need, re-normalized).
-  Separator (`\n\n`) token cost is reserved out of the budget; output never exceeds the budget.
-  Overflow execution: enum→executor map (`TruncateStrategy` on the injected domain `Tokenizer`,
-  `SummarizeStrategy` on an injected `Summarizer`, `IgnoreStrategy`); unavailable strategies are
-  skipped; a Section nothing can fit is excluded. Exported from `src/application/context/__init__.py`.
-  Tests: `tests/unit/context/test_context_builder.py` (12 passing, manual runner).
+### ContextBuilder (added in the continuation session — IN PROGRESS, uncommitted)
+- `src/application/context/context_builder.py` — **`ContextBuilder`** (the Context
+  Manager / orchestrator of `dynamic_section_capacity_allocation.md`). The pipeline
+  (user-devised): **append sections → calculate each section budget → handle
+  reference → token-scarcity (summarize/truncate/ignore) → output**.
+  - It renders every section (reference resolution happens inside each section's
+    `render()`, so **resolved reference text counts toward the section's tokens**),
+    builds `CapacityRequest`s, delegates the allocation to `CapacityAllocator`,
+    fits over-capacity sections through their own overflow `OverflowStrategyStack`,
+    and delegates the final join to `PromptBuilder.assemble()`. The separator
+    token cost is reserved out of the budget, so `total_tokens <= max_tokens`.
+  - `ContextBuilderResult(prompt, sections, budget_tokens, total_tokens)` and
+    per-section `SectionOutput(section_type, content, requested_tokens,
+    capacity_tokens, fitted_tokens, overflowed)`.
+  - Exported from `src/application/context/__init__.py`.
+- `src/application/context/allocation/capacity_allocator.py` — **`CapacityAllocator`**
+  (the section-level allocation policy, one concrete algorithm — **no interface /
+  strategy registry, YAGNI**). Works only on plain values:
+  `CapacityRequest(key, demand, importance, needed_tokens)` →
+  `CapacityAllocation(capacities, unused_tokens)`. Splits the budget into initial
+  capacities proportional to `demand` (`DemandAllocator`), returns the unused share
+  of under-filled sections to the free pool, then satisfies the over-filled
+  sections' expansion requests by iterative weighted redistribution by `importance`
+  (`RedistributionAllocator` + `ExpansionRequest`), capped at each section's need.
+  `demand` and `importance` are **independent** values in `[0.0, 1.0]` that need not
+  sum to one. Overflow handling is deliberately **out of scope** (ContextBuilder owns it).
+- `src/application/prompt/prompt_builder.py` — `PromptBuilder` owns **exactly two
+  concerns**: section **order** (registry) and **concatenation** of already-rendered
+  content (`assemble(rendered: Mapping[str, str])` + `SECTION_SEPARATOR = "\n\n"`;
+  `render()` delegates to `assemble`). It does **not** budget capacity (that is
+  `ContextBuilder`'s job) and does not render/reduce content (that is the sections').
+- Tests: `tests/unit/context/test_context_builder.py` (12) +
+  `tests/unit/context/test_capacity_allocator.py` (12) + 4 new `assemble` tests in
+  `tests/unit/prompt/test_prompt_builder.py` — all pass (manual runner, 13 modules, 0 failures).
 - NOTE: two tokenizer abstractions exist — the domain `Tokenizer` (`src/domain/context/tokenizer.py`,
   offset-paired `encode`, used by `TruncateStrategy`) vs `src/application/interfaces/i_tokenizer.py`
   (`ITokenizer`, `tokenize`/`count_tokens`/`decode`). ContextBuilder uses the **domain** one.
-- This was built to unblock the LLM-based ReferenceGenerator (§14), which will use it to assemble
-  its prompt. Whether the LLM generator should take a `ContextBuilder`-built prompt or a simpler
-  string is an open design decision for the next session.
 
 ---
 
@@ -197,15 +226,20 @@ Reference entities were ADDED there at the user's direction (purely additive, ex
 
 ## 8. Next steps
 
-Order matters. The user explicitly stated the LLM-based generator needs **ContextBuilder completed first**.
+Order matters. `ContextBuilder` is now implemented and **no longer blocks §14**.
 
-1. **Push the 3 unpushed commits** (or wait for user request).
+1. **Finish + commit the current in-progress scope** (see §3): the `ContextBuilder`
+   pipeline, the `CapacityAllocator` policy, and `PromptBuilder.assemble` —
+   synchronize the docs (`dynamic_section_capacity_allocation.md`,
+   `overflow_strategies.md`, `prompt_builder_entities.md`, `AGENTS.md`,
+   `docs/index.md`) and commit (suggested: `refactor(context): delegate allocation
+   and assembly out of ContextBuilder`).
 2. Implement the ENTIRE reference_architecture.md (the session purpose). Gap state:
    - `TemplateValidator` (§16) — done (new spec; see §3). Generator wiring of the validator
      not yet needed: `DeterministicReferenceGenerator` does not produce templates.
    - **LLM-based `ReferenceGenerator` (§14) + `ReferenceCache` (§17) + placeholder substitution (§15)
-     + the §18 MISS→LLM branch — BLOCKED on ContextBuilder completion
-     (`src/application/context/context_builder.py` is implemented but untracked).**
+     + the §18 MISS→LLM branch — unblocked now.** Whether the LLM generator builds its
+     prompt via `ContextBuilder` or a simpler string is still an open design decision.
    - Concrete `Reference` subtypes (§6/§25) — optional/illustrative, do not add unless asked.
 3. Keep the corrected design decisions in §4.
 

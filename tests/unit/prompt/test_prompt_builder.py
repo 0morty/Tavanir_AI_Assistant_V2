@@ -172,3 +172,40 @@ def test_constructor_sections_are_merged():
     builder = PromptBuilder(sections=[RegulationSection()])
     assert builder.has_section("ROLE")
     assert builder.has_section("REGULATION")
+
+
+def test_assemble_joins_rendered_content_in_registration_order():
+    builder = PromptBuilder(seed_defaults=False)
+    builder.add_section(RegulationSection())
+    builder.add_section(InstructionsSection("Be concise."))
+
+    prompt = builder.assemble({"REGULATION": "[regulation]", "INSTRUCTIONS": "[instructions]"})
+    assert prompt == "[regulation]\n\n[instructions]"
+
+
+def test_assemble_ignores_mapping_ordering():
+    builder = PromptBuilder(seed_defaults=False)
+    builder.add_section(RegulationSection())
+    builder.add_section(InstructionsSection("Be concise."))
+
+    prompt = builder.assemble({"INSTRUCTIONS": "[instructions]", "REGULATION": "[regulation]"})
+    assert prompt == "[regulation]\n\n[instructions]"
+
+
+def test_assemble_skips_missing_and_empty_keys():
+    builder = PromptBuilder(seed_defaults=False)
+    builder.add_section(RegulationSection())
+    builder.add_section(InstructionsSection("Be concise."))
+
+    prompt = builder.assemble({"REGULATION": ""})
+    assert prompt == ""
+
+
+def test_render_delegates_to_assemble():
+    builder = PromptBuilder(seed_defaults=False)
+    builder.add_section(RegulationSection())
+    builder.add_section(InstructionsSection("Be concise."))
+
+    assert builder.render() == builder.assemble(
+        {s.section_type: s.render() for s in builder.sections}
+    )

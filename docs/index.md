@@ -99,7 +99,7 @@ docs/
 ### 8. `docs/documentation/` (Feature-Specific Technical Documentation)
 * **Purpose**: Deep technical documentation for individual implemented features, components, or algorithms.
 * **What is stored here**:
-  * **Prompt-Builder Architecture (`prompt_builder_entities.md`)**: `PromptBuilder`, canonical sections, and rendering.
+  * **Prompt-Builder Architecture (`prompt_builder_entities.md`)**: `PromptBuilder`, canonical sections, section ordering + concatenation (`assemble`), and rendering.
   * **Section Mechanism (`section_mechanism.md`)**: The `IPromptSection` port, the `PromptSection` skeleton, and how new sections are added.
   * **Section Properties (`section_properties.md`)**: The Section weights `importance` and `demand`.
   * **Overflow Strategies (`overflow_strategies.md`)**: `OverflowStrategy` enum and `OverflowStrategyStack` semantics.

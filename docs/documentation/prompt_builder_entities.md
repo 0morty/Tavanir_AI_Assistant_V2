@@ -147,7 +147,7 @@ See [Section Mechanism](section_mechanism.md) for the full design rules.
 
 ### `PromptBuilder` (`src/application/prompt/prompt_builder.py`)
 
-A **name-keyed ordered registry** of `PromptSection` instances. It ships the canonical sections and renders them in order:
+A **name-keyed ordered registry** of `IPromptSection` instances. It owns exactly two concerns: the **order** of the sections (the registry) and the **concatenation** of their already-rendered content (`assemble`). It does **not** decide how much capacity a section gets (that belongs to `ContextBuilder`) and it does **not** render or reduce content itself (that belongs to the sections). It ships the canonical sections and renders them in order:
 
 | Member | Kind | Responsibility |
 |---|---|---|
@@ -163,7 +163,9 @@ A **name-keyed ordered registry** of `PromptSection` instances. It ships the can
 | `set_user_input(content)` | method | Configure the `USER-INPUT` default section |
 | `set_output_format(content)` | method | Configure the `OUTPUT-FORMAT` default section |
 | `sections` | property | Ordered list of composed sections |
-| `render()` | method | Render all non-empty sections in order, joined by `\n\n` |
+| `SECTION_SEPARATOR` | class attr | Separator used to join section content (`"\n\n"`) |
+| `assemble(rendered)` | method | Concatenate already-rendered content keyed by `section_type`, in registration order, joined by `SECTION_SEPARATOR`. Missing/empty entries are skipped, so a subset may be passed |
+| `render()` | method | Render every non-empty section in order and delegate the concatenation to `assemble()` |
 
 **Canonical section order** (defaults): `ROLE, HISTORY, CHUNKS, SYSTEM-INPUT, USER-INPUT, OUTPUT-FORMAT`. Names are normalized with `strip().upper()`, so `"regulation"`, `"REGULATION"`, and `" Regulation "` address the same slot. Setting an existing name replaces it **in place**; a new name appends after the defaults.
 
@@ -179,5 +181,7 @@ builder.set_section("INSTRUCTIONS", InstructionsSection("Be concise."))
 ## Rendering Logic
 
 1. Each `PromptSection.render()` joins its `pre_context`, `body()`, and `post_context` with `\n\n`, skipping empty parts. A section whose body is empty renders as `""`, so unconfigured default slots never leak framing or separators.
-2. `PromptBuilder.render()` renders every registered section and joins the non-empty results with `\n\n`.
+2. `PromptBuilder.render()` renders every registered section and delegates the concatenation to `assemble()`, which joins the results with the `SECTION_SEPARATOR` in registration order.
 3. The final result is a single assembled prompt string (not a multi-turn conversation).
+
+Capacity budgeting (how many tokens each section may use) is **out of scope** for `PromptBuilder`. The `ContextBuilder` orchestration pipeline (`src/application/context/context_builder.py`) renders the sections, allocates capacity via `CapacityAllocator`, fits over-budget sections through their overflow chain, and then hands the fitted content to `PromptBuilder.assemble()` for the final join. See [Dynamic Section Capacity Allocation](../../dynamic_section_capacity_allocation.md).

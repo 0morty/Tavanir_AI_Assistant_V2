@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-
 from src.application.context.allocation.capacity_allocator import (
     CapacityAllocator,
     CapacityRequest,
@@ -7,33 +5,12 @@ from src.application.context.allocation.capacity_allocator import (
 from src.application.context.overflow_strategy_dispatcher import (
     OverflowStrategyDispatcher,
 )
+from src.application.dtos import ContextBuilderResult, SectionOutput
 from src.application.interfaces.i_compressible_section import CompressibleSection
 from src.application.prompt.prompt_builder import PromptBuilder
 from src.domain.context.overflow.truncate import TruncateStrategy
 from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
-
-
-@dataclass(frozen=True)
-class SectionOutput:
-    """Per-section result after budgeting, reference handling, and overflow fitting."""
-
-    section_type: str
-    content: str
-    requested_tokens: int
-    capacity_tokens: int
-    fitted_tokens: int
-    overflowed: bool
-
-
-@dataclass(frozen=True)
-class ContextBuilderResult:
-    """Final rendered prompt plus per-section accounting."""
-
-    prompt: str
-    sections: tuple[SectionOutput, ...]
-    budget_tokens: int
-    total_tokens: int
 
 
 class ContextBuilder:

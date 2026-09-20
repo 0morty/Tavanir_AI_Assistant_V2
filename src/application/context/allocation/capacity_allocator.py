@@ -1,54 +1,11 @@
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 
 from src.application.context.allocation.demand_allocator import DemandAllocator
 from src.application.context.allocation.expansion_request import ExpansionRequest
 from src.application.context.allocation.redistribution_allocator import (
     RedistributionAllocator,
 )
-
-
-@dataclass(frozen=True)
-class CapacityRequest:
-    """Per-section allocation information consumed by :class:`CapacityAllocator`.
-
-    ``demand`` is the Section's relative request for initial capacity, and
-    ``importance`` is its weight when the free capacity is redistributed --
-    two independent values in ``[0.0, 1.0]`` that do not need to sum to one.
-    ``needed_tokens`` is the amount of capacity the Section can actually use
-    (its already-rendered content size).
-    """
-
-    key: str
-    demand: float
-    importance: float
-    needed_tokens: int
-
-    def __post_init__(self) -> None:
-        if not self.key:
-            raise ValueError("CapacityRequest key must be a non-empty string")
-        if not 0.0 <= self.demand <= 1.0:
-            raise ValueError(
-                f"CapacityRequest demand must be in [0.0, 1.0], got {self.demand!r}"
-            )
-        if not 0.0 <= self.importance <= 1.0:
-            raise ValueError(
-                f"CapacityRequest importance must be in [0.0, 1.0], "
-                f"got {self.importance!r}"
-            )
-        if self.needed_tokens < 0:
-            raise ValueError(
-                f"CapacityRequest needed_tokens must be non-negative, "
-                f"got {self.needed_tokens!r}"
-            )
-
-
-@dataclass(frozen=True)
-class CapacityAllocation:
-    """The outcome of :meth:`CapacityAllocator.allocate`."""
-
-    capacities: Mapping[str, int]
-    unused_tokens: int
+from src.application.dtos import CapacityAllocation, CapacityRequest
 
 
 class CapacityAllocator:

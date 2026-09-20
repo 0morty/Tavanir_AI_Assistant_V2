@@ -1,15 +1,8 @@
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 from src.application.context.allocation.expansion_request import ExpansionRequest
-
-
-@dataclass(frozen=True)
-class RedistributionResult:
-    """The outcome of a redistribution pass over expansion requests."""
-
-    allocations: tuple[ExpansionRequest, ...]
-    unused_capacity: int
+from src.application.dtos import RedistributionResult
 
 
 class RedistributionAllocator:

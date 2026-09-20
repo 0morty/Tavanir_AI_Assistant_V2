@@ -81,11 +81,11 @@ The prompt-section abstraction is split into two tiers: the pure port `IPromptSe
 
 ### `IPromptSection` (port, `src/application/interfaces/i_prompt_section.py`)
 
-Declares the prompt-section contract: `section_type`, `importance`, `demand`, `overflow_strategies`, `pre_context`/`post_context`, `body()`, `fit_to_capacity()`, and `render()`. Every section must satisfy this contract; the port itself carries no implementation.
+Declares the prompt-section contract: `section_type`, `importance`, `demand`, `overflow_strategies`, `pre_context`/`post_context`, `body()`, and `render()`. Every section must satisfy this contract; the port itself carries no implementation. Overflow *handling capacity* is a separate capability (`CompressibleSection`), not part of this port.
 
 ### `PromptSection` (skeleton, `src/application/context/sections/prompt_section.py`)
 
-Implements `IPromptSection` and ships the **general rendering algorithm** plus the **default interpretation** of the overflow policy. It is the prompt-section abstraction, not a generic section of anything else: a section participates in prompt construction, so its `importance`, `demand`, and `overflow_strategies` are part of what a prompt section *is*. `PromptBuilder` is one consumer; a future context/token-allocation component operates on the same abstraction (via those values) without touching the prompt layer.
+Implements `IPromptSection` and ships the **general rendering algorithm** plus the **default (`CompressibleSection`) interpretation** of the overflow policy. It is the prompt-section abstraction, not a generic section of anything else: a section participates in prompt construction, so its `importance`, `demand`, and `overflow_strategies` are part of what a prompt section *is*. `PromptBuilder` is one consumer; a future context/token-allocation component operates on the same abstraction (via those values) without touching the prompt layer.
 
 ```
 +--------------+
@@ -106,14 +106,16 @@ Implements `IPromptSection` and ships the **general rendering algorithm** plus t
 | `default_overflow_strategies` | constructor parameter (`OverflowStrategyStack | None`) | Default overflow stack applied when no explicit `overflow_strategies` is given; falls back to `OverflowStrategyStack()` (`(TRUNCATE, IGNORE)`, no restart) |
 | `importance` | property (`float`) | Intrinsic semantic importance in `[0.0, 1.0]`, used as a weight when redistributing unused token capacity. **Not** a token percentage; validated per-section, never normalized, no sum-to-`1.0` rule |
 | `demand` | property (`float`) | Relative context-capacity demand in `[0.0, 1.0]`, used to calculate the section's initial proportional token capacity. Validated per-section, never normalized, no sum-to-`1.0` rule |
-| `overflow_strategies` | property (`OverflowStrategyStack`) | Ordered overflow strategies (lower index = higher priority) plus the restart policy; the base ships the default execution via `fit_to_capacity` |
-| `fit_to_capacity(content, capacity_tokens, *, tokenizer, summarizer=None)` | default method | **Default overflow execution**: fits a single plain-text value by walking the strategy stack in priority order (honouring the restart policy) and returning the first result that fits; subclasses inherit it or override it |
+| `overflow_strategies` | property (`OverflowStrategyStack`) | Ordered overflow strategies (lower index = higher priority) plus the restart policy |
+| `truncate(content, capacity_tokens, *, tokenizer)` | method (from `CompressibleSection`) | Plain-text default: applies the universal `TruncateStrategy` to the text |
+| `summarize(content, capacity_tokens, *, summarizer)` | method (from `CompressibleSection`) | Plain-text default: compresses the text through the injected `Summarizer` |
+| `ignore(content, capacity_tokens, *, tokenizer)` | method (from `CompressibleSection`) | Plain-text default: not applicable, returns `None` so the caller falls through to the next strategy |
 | `pre_context` | property (default `""`) | Framing before the body |
 | `post_context` | property (default `""`) | Framing after the body |
 | `body()` | abstract method | Constructs the section's main content — behaves conceptually like a property |
 | `render()` | method | Joins `pre_context` + `body()` + `post_context` into one string; returns `""` when the body is empty |
 
-The base class holds **no** domain/business-specific implementation; it ships the generic default behavior of a prompt section — framing (`pre_context`/`post_context`/`separator`/`render()`), capacity weights (`importance`/`demand`), the overflow policy (`overflow_strategies`) and its default execution (`fit_to_capacity`). Subclasses override `section_type` and `body()` (and any hook they vary) and pass their default `importance`, `demand`, and overflow strategies to the base constructor. There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` and `demand` are instance properties owned by the base class; their values for several sections are independent and never normalized: the base class validates each value against `[0.0, 1.0]` but never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
+The base class holds **no** domain/business-specific implementation; it ships the generic default behavior of a prompt section — framing (`pre_context`/`post_context`/`separator`/`render()`), capacity weights (`importance`/`demand`), the overflow policy (`overflow_strategies`) and its default `CompressibleSection` execution (`truncate`/`summarize`/`ignore`). Subclasses override `section_type` and `body()` (and any hook they vary) and pass their default `importance`, `demand`, and overflow strategies to the base constructor. There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` and `demand` are instance properties owned by the base class; their values for several sections are independent and never normalized: the base class validates each value against `[0.0, 1.0]` but never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
 
 **Collection sections** (`ReferencedCollectionSection` subclasses) expose their held collection as `items` and join entries with `item_separator` — independent of the framing `separator` used by `render()`.
 

@@ -1,3 +1,4 @@
+from src.application.interfaces.i_compressible_section import CompressibleSection
 from src.application.context.sections.prompt_section import PromptSection
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.application.reference.deterministic_reference_generator import (
@@ -7,7 +8,7 @@ from src.domain.entities import Reference
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 
-class ReferencedSection(PromptSection):
+class ReferencedSection(PromptSection, CompressibleSection):
     """Base class for Sections that can associate a Reference with their content.
 
     A ``ReferencedSection`` holds a :class:`Reference` and applies its
@@ -19,6 +20,14 @@ class ReferencedSection(PromptSection):
     the Template Method pattern: ``compose_referenced_content()`` is the
     overridable composition hook, and the reference-resolution mechanics
     stay internal to this class.
+
+    As the owner of the :class:`CompressibleSection` contract for the
+    reference-aware branch, a ``ReferencedSection`` handles overflow through
+    the inherited plain-text defaults: its content is a single text, so
+    ``truncate``/``summarize`` apply the universal algorithms as-is and
+    ``ignore`` is not applicable (``None``). The shared default lives here
+    (inherited from ``PromptSection``); collection-based subclasses override
+    the three operations for their own item-aware representation.
     """
 
     def __init__(

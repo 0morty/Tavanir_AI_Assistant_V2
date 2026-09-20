@@ -165,11 +165,23 @@ The port `IPromptSection` (`src/application/interfaces/i_prompt_section.py`) dec
 When neither is provided, the section falls back to `OverflowStrategyStack()`,
 i.e. `(TRUNCATE, IGNORE)` with no restart.
 
-The skeleton also ships the **default execution** of the policy:
-`PromptSection.fit_to_capacity(content, capacity_tokens, *, tokenizer, summarizer=None)`
-walks the stack in priority order (honouring the restart policy) and returns the first
-result that fits. Subclasses inherit it as-is or override it — `ReferencedCollectionSection`
-overrides it for a collection of items, where `IGNORE` means "drop items in order".
+The skeleton also ships the **default execution** of the policy as a
+:class:`CompressibleSection`
+(`src/application/interfaces/i_compressible_section.py`) Section: `PromptSection`
+implements `truncate` (universal `TruncateStrategy`), `summarize` (injected
+`Summarizer`), and `ignore` (not applicable to a plain text → `None`).
+`ReferencedCollectionSection` overrides them for a collection — `ignore` keeps
+items in order while they fit, `truncate`/`summarize` apply the universal
+algorithms to the joined (reference-enriched) text.
+
+The **runtime dispatch** of an `OverflowStrategy` to the matching operation is
+owned by the external `OverflowStrategyDispatcher`
+(`src/application/context/overflow_strategy_dispatcher.py`): it maps
+`SUMMARIZE`→`section.summarize(...)`, `TRUNCATE`→`section.truncate(...)`,
+`IGNORE`→`section.ignore(...)` and invokes the operation, but never implements
+it. `ContextBuilder` (the Context Manager) walks the strategy stack in priority
+order (honouring the restart policy) through the dispatcher and contains no
+strategy-specific branching.
 
 ```python
 from src.domain.enums import OverflowStrategy
@@ -217,8 +229,12 @@ The `TRUNCATE`, `SUMMARIZE`, and `IGNORE` semantics above are implemented and
 consumed by the context pipeline:
 
 - Strategy execution lives in `src/domain/context/overflow/` (`TruncateStrategy`,
-  `SummarizeStrategy`, `IgnoreStrategy`) and is driven by the default
-  `PromptSection.fit_to_capacity` walk over the section's `OverflowStrategyStack`.
+  `SummarizeStrategy`, `IgnoreStrategy`) and is reached through each Section's
+  `CompressibleSection` operations (`src/application/interfaces/i_compressible_section.py`).
+- Runtime dispatch from `OverflowStrategy` to the matching Section operation is
+  owned by `OverflowStrategyDispatcher`
+  (`src/application/context/overflow_strategy_dispatcher.py`); `ContextBuilder`
+  walks each Section's `OverflowStrategyStack` through it.
 - The tokenizer port is the domain `Tokenizer` (`src/domain/context/tokenizer.py`);
   `SUMMARIZE` additionally requires an injected `Summarizer` (otherwise it is
   skipped as unavailable).

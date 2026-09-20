@@ -1,5 +1,7 @@
 import pytest
 
+from src.application.context import OverflowStrategyDispatcher
+from src.application.context.sections import CompressibleSection
 from src.application.context.sections.history_section import HistorySection
 from src.application.context.sections.referenced_collection_section import (
     ReferencedCollectionSection,
@@ -11,6 +13,7 @@ from src.domain.context.tokenizer import Tokenizer
 from src.domain.entities import GenerationChunk, HistoryMessage
 from src.domain.enums import HistoryRole, OverflowStrategy
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
+from src.infrastructure.services.summarizers import FakeSummarizer
 
 
 class FakeTokenizer(Tokenizer):
@@ -42,29 +45,54 @@ class PlainTextSection(PromptSection):
         return self._content
 
 
-def test_base_ships_default_fit_to_capacity():
+def test_skeleton_implements_compressible_plain_text_defaults():
     section = PlainTextSection("abcdefghij")
     assert isinstance(section, PromptSection)
     assert isinstance(section, IPromptSection)
-    assert section.fit_to_capacity(
-        "abcdefghij", 100, tokenizer=FakeTokenizer()
-    ) == "abcdefghij"
-    assert section.fit_to_capacity("abcdefghij", 3, tokenizer=FakeTokenizer()) == "abc"
+    assert isinstance(section, CompressibleSection)
+    assert section.truncate("abcdefghij", 100, tokenizer=FakeTokenizer()) == "abcdefghij"
+    assert section.truncate("abcdefghij", 3, tokenizer=FakeTokenizer()) == "abc"
+    assert (
+        section.summarize("abcdefghij", 3, summarizer=FakeSummarizer())
+        == "[fake-summarizer-output]"
+    )
+    assert section.ignore("abcdefghij", 3, tokenizer=FakeTokenizer()) is None
 
 
-def test_base_fit_to_capacity_honours_configured_stack():
+def test_dispatch_honours_configured_strategy_priority():
     stack = OverflowStrategyStack([OverflowStrategy.IGNORE, OverflowStrategy.TRUNCATE])
     section = PlainTextSection("abcdefghij", overflow_strategies=stack)
-    assert section.fit_to_capacity("abcdefghij", 3, tokenizer=FakeTokenizer()) == "abc"
+    dispatcher = OverflowStrategyDispatcher()
+    assert (
+        dispatcher.apply(
+            section,
+            OverflowStrategy.IGNORE,
+            "abcdefghij",
+            3,
+            tokenizer=FakeTokenizer(),
+        )
+        is None
+    )
+    assert (
+        dispatcher.apply(
+            section,
+            OverflowStrategy.TRUNCATE,
+            "abcdefghij",
+            3,
+            tokenizer=FakeTokenizer(),
+        )
+        == "abc"
+    )
 
 
-def test_referenced_section_inherits_default_fit_to_capacity():
+def test_referenced_section_inherits_compressible_defaults():
     from src.application.context.sections.output_format_section import (
         OutputFormatSection,
     )
 
     section = OutputFormatSection("abcdefghij")
-    assert section.fit_to_capacity("abcdefghij", 3, tokenizer=FakeTokenizer()) == "abc"
+    assert isinstance(section, CompressibleSection)
+    assert section.truncate("abcdefghij", 3, tokenizer=FakeTokenizer()) == "abc"
 
 
 def test_render_still_frames_running_through_base_compose():
@@ -117,7 +145,5 @@ def test_default_item_separator_matches_previous_behavior():
 
 def test_referenced_collection_section_uses_item_separator_for_overflow():
     section = TaggedSection(_messages(), item_separator=",")
-    result = section.fit_to_capacity(
-        _messages(), 100, tokenizer=FakeTokenizer()
-    )
-    assert result == "uaa,sbb"
+    assert section.truncate("uaa,sbb", 100, tokenizer=FakeTokenizer()) == "uaa,sbb"
+    assert section.ignore("uaa,sbb", 3, tokenizer=FakeTokenizer()) == "uaa"

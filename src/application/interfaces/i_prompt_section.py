@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-from src.domain.context.summarizer import Summarizer
-from src.domain.context.tokenizer import Tokenizer
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 
@@ -13,8 +11,8 @@ class IPromptSection(ABC):
     (``src/application/context/sections/prompt_section.py``) implements this
     port and ships the default prompt-section behavior on top of the
     contract: the tuning properties with validation, the optional pre/post
-    context framing, and the default overflow interpretation via
-    ``fit_to_capacity``.
+    context framing, and the default ``CompressibleSection`` overflow interpretation
+    for plain-text content.
 
     Developers building a new section subclass the ``PromptSection`` skeleton
     to inherit the defaults; they only need to provide ``section_type`` and
@@ -55,21 +53,6 @@ class IPromptSection(ABC):
     @abstractmethod
     def body(self) -> str:
         """Return the section's main content."""
-
-    @abstractmethod
-    def fit_to_capacity(
-        self,
-        content: str,
-        capacity_tokens: int,
-        *,
-        tokenizer: Tokenizer,
-        summarizer: Summarizer | None = None,
-    ) -> str:
-        """Fit ``content`` into ``capacity_tokens`` per the section's overflow policy.
-
-        ``tokenizer`` drives token accounting; ``summarizer`` enables the
-        ``SUMMARIZE`` strategy when configured.
-        """
 
     @abstractmethod
     def render(self) -> str:

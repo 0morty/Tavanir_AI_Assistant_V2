@@ -4,7 +4,10 @@ from src.application.context.allocation.capacity_allocator import (
     CapacityAllocator,
     CapacityRequest,
 )
-from src.application.interfaces import IPromptSection
+from src.application.context.overflow_strategy_dispatcher import (
+    OverflowStrategyDispatcher,
+)
+from src.application.interfaces.i_compressible_section import CompressibleSection
 from src.application.prompt.prompt_builder import PromptBuilder
 from src.domain.context.overflow.truncate import TruncateStrategy
 from src.domain.context.summarizer import Summarizer
@@ -50,9 +53,10 @@ class ContextBuilder:
        resolves and composes its reference text into the content, so the
        reference counts toward the section's tokens.
     4. **Summarize/Truncate/Ignore** -- a section whose rendered content
-       exceeds its final capacity is fitted through its own overflow
-       ``OverflowStrategyStack``; a final truncation safety net keeps the
-       budget guarantee.
+       exceeds its final capacity is fitted by walking its own overflow
+       ``OverflowStrategyStack`` through the
+       :class:`OverflowStrategyDispatcher`; a final truncation safety net
+       keeps the budget guarantee.
     5. **Output** -- delegate the concatenation to
        :meth:`PromptBuilder.assemble`; the separator token cost is reserved
        out of the budget, so the prompt never exceeds ``max_tokens``.
@@ -66,6 +70,7 @@ class ContextBuilder:
     ) -> None:
         self._tokenizer = tokenizer
         self._summarizer = summarizer
+        self._dispatcher = OverflowStrategyDispatcher()
 
     def build(
         self,
@@ -139,25 +144,40 @@ class ContextBuilder:
 
     def _fit(
         self,
-        section: IPromptSection,
+        section: CompressibleSection,
         content: str,
         capacity: int,
     ) -> str:
         """Fit ``content`` through the section's overflow chain.
 
-        The section owns the default strategy-stack execution via
-        ``fit_to_capacity`` (``Summarize`` when a summarizer is injected,
-        ``Truncate``, ``Ignore``). A final truncation safety net guarantees
-        the fitted content never exceeds the capacity, even when the chosen
-        strategy returns an over-capacity result (e.g. an ``IGNORE``-only
-        stack or a lazy summarizer).
+        Walks the section's ``OverflowStrategyStack`` in priority order
+        (honouring the restart policy), invoking each strategy through the
+        :class:`OverflowStrategyDispatcher` and returning the first result that
+        fits ``capacity``. The builder knows nothing about how ``SUMMARIZE``,
+        ``TRUNCATE``, or ``IGNORE`` are implemented -- the dispatcher owns that
+        mapping. A final truncation safety net guarantees the fitted content
+        never exceeds the capacity, even when the chosen strategy returns an
+        over-capacity result (e.g. an ``IGNORE``-only stack or a lazy
+        summarizer).
         """
-        fitted = section.fit_to_capacity(
-            content,
-            capacity,
-            tokenizer=self._tokenizer,
-            summarizer=self._summarizer,
-        )
-        if fitted and self._tokenizer.count_tokens(fitted) > capacity:
-            fitted = TruncateStrategy(self._tokenizer).apply(fitted, capacity)
-        return fitted
+        stack = section.overflow_strategies
+        best = content
+        passes = range(stack.max_restarts + 1) if stack.restart else (0,)
+        for _ in passes:
+            for strategy in stack.strategies:
+                result = self._dispatcher.apply(
+                    section,
+                    strategy,
+                    content,
+                    capacity,
+                    tokenizer=self._tokenizer,
+                    summarizer=self._summarizer,
+                )
+                if result is None:
+                    continue
+                best = result
+                if self._tokenizer.count_tokens(result) <= capacity:
+                    return result
+        if best and self._tokenizer.count_tokens(best) > capacity:
+            best = TruncateStrategy(self._tokenizer).apply(best, capacity)
+        return best

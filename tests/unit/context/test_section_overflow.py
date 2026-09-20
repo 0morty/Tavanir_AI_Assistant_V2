@@ -1,13 +1,10 @@
+from src.application.context.sections import CompressibleSection, ReferencedCollectionSection
 from src.application.context.sections.output_format_section import (
     OutputFormatSection,
 )
-from src.application.context.sections.referenced_collection_section import (
-    ReferencedCollectionSection,
-)
+from src.domain.context.overflow.summarize import SummarizeStrategy
 from src.domain.context.tokenizer import Tokenizer
-from src.domain.entities import GenerationChunk
-from src.domain.enums import OverflowStrategy
-from src.domain.overflow_strategy_stack import OverflowStrategyStack
+from src.domain.entities import GenerationChunk, Reference
 from src.infrastructure.services.summarizers import FakeSummarizer
 
 
@@ -33,6 +30,17 @@ class PlainCollectionSection(ReferencedCollectionSection):
         return "TEST-COLLECTION"
 
 
+class FluentReference(Reference):
+    """Reference whose native fluent text is a fixed prefix."""
+
+    @property
+    def description(self) -> str:
+        return "A reference with native fluent text."
+
+    def fluent_text(self) -> str:
+        return "REF:"
+
+
 def _chunks(*contents: str) -> list[GenerationChunk]:
     return [
         GenerationChunk(chunk_id=str(index), content=content)
@@ -40,100 +48,116 @@ def _chunks(*contents: str) -> list[GenerationChunk]:
     ]
 
 
-# --- single plain text (ReferencedSection) ---
+# --- plain text (PromptSection default) ---
 
 
 def test_plain_text_within_capacity_is_returned_unchanged():
     section = OutputFormatSection("short content")
-    result = section.fit_to_capacity(
-        "short content", 100, tokenizer=FakeTokenizer()
-    )
+    result = section.truncate("short content", 100, tokenizer=FakeTokenizer())
     assert result == "short content"
 
 
-def test_plain_text_exceeding_capacity_is_truncated_with_default_stack():
+def test_plain_text_exceeding_capacity_is_truncated():
     section = OutputFormatSection("abcdefghij")
-    result = section.fit_to_capacity(
-        "abcdefghij", 3, tokenizer=FakeTokenizer()
-    )
+    result = section.truncate("abcdefghij", 3, tokenizer=FakeTokenizer())
     assert result == "abc"
 
 
-def test_plain_text_empty_returns_empty_string():
+def test_plain_text_truncate_empty_returns_empty_string():
     section = OutputFormatSection("")
-    assert section.fit_to_capacity("", 100, tokenizer=FakeTokenizer()) == ""
+    assert section.truncate("", 100, tokenizer=FakeTokenizer()) == ""
 
 
-def test_zero_capacity_returns_empty_string():
+def test_plain_text_truncate_zero_capacity_returns_empty_string():
     section = OutputFormatSection("abcdef")
-    assert section.fit_to_capacity("abcdef", 0, tokenizer=FakeTokenizer()) == ""
+    assert section.truncate("abcdef", 0, tokenizer=FakeTokenizer()) == ""
 
 
-def test_summarize_strategy_is_used_when_configured():
-    stack = OverflowStrategyStack([OverflowStrategy.SUMMARIZE])
-    section = OutputFormatSection("x" * 100, overflow_strategies=stack)
-    result = section.fit_to_capacity(
-        "x" * 100, 30, tokenizer=FakeTokenizer(), summarizer=FakeSummarizer()
+def test_plain_text_summarize_delegates_to_summarizer():
+    section = OutputFormatSection("x" * 100)
+    result = section.summarize(
+        "x" * 100, 30, summarizer=FakeSummarizer()
     )
     assert result == "[fake-summarizer-output]"
 
 
-def test_summarize_without_summarizer_falls_back_to_best_effort():
-    stack = OverflowStrategyStack([OverflowStrategy.SUMMARIZE])
-    section = OutputFormatSection("x" * 100, overflow_strategies=stack)
-    result = section.fit_to_capacity(
-        "x" * 100, 30, tokenizer=FakeTokenizer()
-    )
-    assert result == "x" * 100
+def test_plain_text_summarize_empty_returns_empty_string():
+    section = OutputFormatSection("")
+    assert section.summarize("", 30, summarizer=FakeSummarizer()) == ""
+
+
+def test_plain_text_ignore_is_not_applicable():
+    section = OutputFormatSection("abcdefghij")
+    assert section.ignore("abcdefghij", 3, tokenizer=FakeTokenizer()) is None
 
 
 # --- collection (ReferencedCollectionSection) ---
 
 
-def test_collection_within_capacity_is_returned_unchanged():
-    section = PlainCollectionSection(_chunks("ab", "cd"))
-    result = section.fit_to_capacity(
-        _chunks("ab", "cd"), 10, tokenizer=FakeTokenizer()
-    )
-    assert result == "ab\n\ncd"
+def test_collection_is_compressible():
+    assert isinstance(PlainCollectionSection([]), CompressibleSection)
 
 
-def test_collection_truncates_joined_text_with_default_stack():
+def test_collection_truncates_joined_text():
     section = PlainCollectionSection(_chunks("ab", "cd", "ef", "gh"))
-    result = section.fit_to_capacity(
-        _chunks("ab", "cd", "ef", "gh"), 7, tokenizer=FakeTokenizer()
+    result = section.truncate(
+        "ab\n\ncd\n\nef\n\ngh", 7, tokenizer=FakeTokenizer()
     )
     assert result == "ab\n\ncd\n"
 
 
-def test_collection_ignores_items_that_cannot_fit_in_order():
-    stack = OverflowStrategyStack(
-        [OverflowStrategy.IGNORE, OverflowStrategy.TRUNCATE]
+def test_collection_truncate_empty_returns_empty_string():
+    section = PlainCollectionSection([])
+    assert section.truncate("", 100, tokenizer=FakeTokenizer()) == ""
+
+
+def test_collection_truncate_zero_capacity_returns_empty_string():
+    section = PlainCollectionSection(_chunks("ab"))
+    assert section.truncate("ab", 0, tokenizer=FakeTokenizer()) == ""
+
+
+def test_collection_summarize_compresses_joined_text():
+    section = PlainCollectionSection(_chunks("ab", "cd"))
+    result = section.summarize(
+        "ab\n\ncd", 30, summarizer=FakeSummarizer()
     )
-    section = PlainCollectionSection(
-        _chunks("ab", "cd", "ef", "gh"), overflow_strategies=stack
-    )
-    result = section.fit_to_capacity(
-        _chunks("ab", "cd", "ef", "gh"), 7, tokenizer=FakeTokenizer()
+    assert result == "[fake-summarizer-output]"
+
+
+def test_collection_ignore_keeps_items_that_fit_in_order():
+    section = PlainCollectionSection(_chunks("ab", "cd", "ef", "gh"))
+    result = section.ignore(
+        "ab\n\ncd\n\nef\n\ngh", 7, tokenizer=FakeTokenizer()
     )
     assert result == "ab\n\ncd"
 
 
-def test_collection_empty_returns_empty_string():
-    section = PlainCollectionSection([])
-    assert section.fit_to_capacity([], 100, tokenizer=FakeTokenizer()) == ""
-
-
-def test_collection_zero_capacity_returns_empty_string():
-    section = PlainCollectionSection(_chunks("ab"))
-    assert section.fit_to_capacity(_chunks("ab"), 0, tokenizer=FakeTokenizer()) == ""
-
-
-def test_collection_fitting_keeps_items_untouched():
-    stack = OverflowStrategyStack(
-        [OverflowStrategy.IGNORE, OverflowStrategy.TRUNCATE]
+def test_collection_ignore_nothing_fits_returns_empty_string():
+    section = PlainCollectionSection(_chunks("abhijklm", "cd"))
+    result = section.ignore(
+        "abhijklm\n\ncd", 3, tokenizer=FakeTokenizer()
     )
-    items = _chunks("ab", "cd", "ef", "gh")
-    section = PlainCollectionSection(items, overflow_strategies=stack)
-    result = section.fit_to_capacity(items, 100, tokenizer=FakeTokenizer())
-    assert result == "ab\n\ncd\n\nef\n\ngh"
+    assert result == ""
+
+
+def test_collection_ignore_empty_returns_empty_string():
+    section = PlainCollectionSection([])
+    assert section.ignore("", 100, tokenizer=FakeTokenizer()) == ""
+
+
+def test_collection_ignore_zero_capacity_returns_empty_string():
+    section = PlainCollectionSection(_chunks("ab"))
+    assert section.ignore("ab", 0, tokenizer=FakeTokenizer()) == ""
+
+
+def test_collection_ignore_counts_reference_text_toward_capacity():
+    chunks = [
+        GenerationChunk(chunk_id="0", content="ab", reference=FluentReference()),
+        GenerationChunk(chunk_id="1", content="cd", reference=FluentReference()),
+        GenerationChunk(chunk_id="2", content="ef", reference=FluentReference()),
+    ]
+    section = PlainCollectionSection(chunks)
+    result = section.ignore(
+        "REF:\nab\n\nREF:\ncd\n\nREF:\nef", 10, tokenizer=FakeTokenizer()
+    )
+    assert result == "REF:\nab"

@@ -3,10 +3,11 @@ from typing import Any
 
 from src.application.context.sections.referenced_section import ReferencedSection
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.domain.context.overflow.summarize import SummarizeStrategy
+from src.domain.context.overflow.truncate import TruncateStrategy
 from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.entities import Reference
-from src.domain.enums import OverflowStrategy
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 
@@ -26,6 +27,13 @@ class ReferencedCollectionSection(ReferencedSection):
     per-item text so subclasses own their item formatting while the reference
     machinery stays here. Items are joined with ``item_separator``, which is
     independent of the section's framing ``separator``.
+
+    The :class:`CompressibleSection` contract is inherited transitively through
+    :class:`ReferencedSection`; this class overrides the three overflow
+    operations for its collection representation, keeping the collection's
+    internal shape a private concern. ``ignore`` keeps items in order while
+    they fit and drops the rest; ``truncate`` and ``summarize`` apply the
+    universal algorithms to the collection's joined (reference-enriched) text.
     """
 
     def __init__(
@@ -71,8 +79,13 @@ class ReferencedCollectionSection(ReferencedSection):
         """
         return getattr(item, "content", "")
 
-    def append_references(self) -> str:
-        """Apply each item's Reference independently and join the results."""
+    def _enriched_item_texts(self) -> list[str]:
+        """The per-item texts, Reference-enriched, skipping empty items.
+
+        Each item's own content is obtained from ``item_content()`` and, when
+        the item carries a Reference, its resolved reference text is composed
+        through ``compose_referenced_content()``.
+        """
         rendered: list[str] = []
         for item in self._items:
             content = self.item_content(item)
@@ -91,63 +104,60 @@ class ReferencedCollectionSection(ReferencedSection):
             rendered.append(
                 self.compose_referenced_content(reference_text, content)
             )
-        return self.item_separator.join(rendered)
+        return rendered
 
-    def fit_to_capacity(
+    def append_references(self) -> str:
+        """Apply each item's Reference independently and join the results."""
+        return self.item_separator.join(self._enriched_item_texts())
+
+    def truncate(
         self,
-        chunks: Sequence[Any],
+        content: str,
         capacity_tokens: int,
         *,
         tokenizer: Tokenizer,
-        summarizer: Summarizer | None = None,
     ) -> str:
-        """Fit a collection of items into ``capacity_tokens``.
+        """Apply the universal truncation to the collection's joined text.
 
-        Collection-level overflow handling for the same ``OverflowStrategyStack``
-        concept: when the joined collection already fits it is returned
-        unchanged. Otherwise the stack is walked in priority order exactly like
-        the parent, except that ``IGNORE`` operates at the item level -- it
-        keeps items in order while they fit within the capacity and drops the
-        rest. ``TRUNCATE`` and ``SUMMARIZE`` apply to the joined collection text
-        through the parent's implementation.
+        The collection's internal representation is its ordered, Reference-
+        enriched item texts joined by ``item_separator``; the universal
+        :class:`TruncateStrategy` reduces that joined text to a prefix that
+        fits ``capacity_tokens``.
         """
-        if not chunks or capacity_tokens <= 0:
+        if not self._items or capacity_tokens <= 0:
             return ""
-        texts = [self.item_content(chunk) for chunk in chunks]
-        content = self.item_separator.join(texts)
-        if not content.strip():
+        joined = self.item_separator.join(self._enriched_item_texts())
+        if not joined.strip():
             return ""
-        if self._fits_within(content, capacity_tokens, tokenizer):
-            return content
-        return self._resolve_collection_overflow(
-            texts, content, capacity_tokens, tokenizer, summarizer
-        )
+        return TruncateStrategy(tokenizer).apply(joined, capacity_tokens)
 
-    def _resolve_collection_overflow(
+    def summarize(
         self,
-        texts: Sequence[str],
         content: str,
         capacity_tokens: int,
-        tokenizer: Tokenizer,
-        summarizer: Summarizer | None,
+        *,
+        summarizer: Summarizer,
     ) -> str:
-        def apply(
-            strategy: OverflowStrategy,
-            _content: str,
-            _capacity_tokens: int,
-            _tokenizer: Tokenizer,
-            _summarizer: Summarizer | None,
-        ) -> str | None:
-            if strategy is OverflowStrategy.IGNORE:
-                return self._include_fitting_items(
-                    texts, capacity_tokens, tokenizer
-                )
-            return self._apply_strategy(
-                strategy, content, capacity_tokens, tokenizer, summarizer
-            )
+        """Compress the collection's joined text through ``summarizer``."""
+        if not self._items or capacity_tokens <= 0:
+            return ""
+        joined = self.item_separator.join(self._enriched_item_texts())
+        if not joined.strip():
+            return ""
+        return SummarizeStrategy(summarizer).apply(joined, capacity_tokens)
 
-        return self._resolve_overflow(
-            content, capacity_tokens, tokenizer, summarizer, applier=apply
+    def ignore(
+        self,
+        content: str,
+        capacity_tokens: int,
+        *,
+        tokenizer: Tokenizer,
+    ) -> str:
+        """Keep items in order while they fit; drop the items that would overflow."""
+        if not self._items or capacity_tokens <= 0:
+            return ""
+        return self._include_fitting_items(
+            self._enriched_item_texts(), capacity_tokens, tokenizer
         )
 
     def _include_fitting_items(
@@ -156,7 +166,7 @@ class ReferencedCollectionSection(ReferencedSection):
         capacity_tokens: int,
         tokenizer: Tokenizer,
     ) -> str:
-        """Keep items in order while they fit; drop the items that would overflow."""
+        """Return the items in ``texts`` kept while each fits within the capacity."""
         included: list[str] = []
         total_tokens = 0
         separator_tokens = tokenizer.count_tokens(self.item_separator)

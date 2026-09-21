@@ -18,10 +18,27 @@ def extract_placeholders(template: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class TemplateValidationResult:
-    """Outcome of validating a template against a ``ReferenceDetails`` instance."""
+    """Outcome of validating a template against a ``ReferenceDetails`` instance.
+
+    ``missing`` holds the placeholders that refer to properties not available
+    in the validated ``ReferenceDetails``, sorted alphabetically. The
+    validator only *reports*; deciding whether to retry or fall back belongs to
+    the calling generation workflow.
+    """
 
     valid: bool
     missing: tuple[str, ...] = ()
+
+    def error_message(self) -> str:
+        """Human-readable description of the failure, or ``""`` when valid.
+
+        This is the exact error text a generation workflow should feed back to
+        the LLM on a retry attempt, without rewriting or reformatting.
+        """
+        if self.valid:
+            return ""
+        listed = ", ".join(self.missing)
+        return f"Template references unavailable properties: {listed}."
 
 
 class TemplateValidator:

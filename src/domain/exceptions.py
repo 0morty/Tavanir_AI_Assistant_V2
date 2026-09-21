@@ -42,6 +42,18 @@ class InvalidSuggestionStatusError(DomainError):
     pass
 
 
+class InvalidSecretariatScrutinyError(DomainError):
+    """Raised when an unrecognized secretariat scrutiny value or code is encountered."""
+
+    pass
+
+
+class InvalidCommitteeScrutinyError(DomainError):
+    """Raised when an unrecognized committee scrutiny value or code is encountered."""
+
+    pass
+
+
 class InvalidSparseVectorError(DomainError):
     pass
 
@@ -88,3 +100,55 @@ class ParentChildIntegrityError(DomainError):
 
 
 # endregion
+
+
+# region Chunking Exceptions
+class ChunkingError(DomainError):
+    """Base domain exception for document decomposition failures."""
+
+    pass
+
+
+class SuggestionChunkingError(ChunkingError):
+    """Raised when decomposing a Suggestion entity into vector chunks fails."""
+
+    pass
+
+
+class RegulatoryChunkingError(ChunkingError):
+    """Raised when decomposing a RegulatoryDocument into vector chunks fails."""
+
+    pass
+
+
+# endregion
+
+
+class InvalidSuggestionContentError(DomainError):
+    """Raised when suggestion content fields violate domain invariants (e.g. empty, noise placeholders)."""
+
+    pass
+
+
+class SuggestionAlreadyExistsError(DomainError):
+    """Raised when attempting to ingest a suggestion whose ID already exists."""
+
+    pass
+
+
+class SuggestionNotFoundError(EntityNotFoundError):
+    """Raised when a specific suggestion ID is not found in the repository."""
+
+    pass
+
+
+class SuggestionProcessingConflictError(DomainError):
+    """Raised when a suggestion is currently locked by another concurrent process or version mismatch."""
+
+    pass
+
+
+class SuggestionPayloadValidationError(DomainError):
+    """Raised when a suggestion mutation request payload violates input invariants (e.g. body ID mismatch)."""
+
+    pass

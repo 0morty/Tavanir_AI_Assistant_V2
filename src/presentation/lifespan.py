@@ -20,7 +20,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 2. Bootstrapping Dependency Injection Container
     container = Container()
     await container.init_resources()  # type: ignore
-    container.wire(packages=["src.presentation.routers"])
     app.state.container = container
 
     await logger.ainfo(

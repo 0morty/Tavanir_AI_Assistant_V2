@@ -1,0 +1,28 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+# Install minimal OS dependencies for network & DB drivers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    freetds-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source code and scripts
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY migrations/ ./migrations/
+COPY alembic.ini .
+
+ENTRYPOINT ["python", "scripts/extract_and_ingest_historical_suggestions.py"]
+CMD ["--resume"]

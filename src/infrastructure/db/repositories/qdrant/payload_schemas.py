@@ -14,7 +14,9 @@ from src.domain.entities import (
 from src.domain.enums import (
     AuthorityLevel,
     ChunkStatus,
+    CommitteeScrutiny,
     RegulatoryDocumentType,
+    SecretariatScrutiny,
     SuggestionChunkType,
     SuggestionStatus,
 )
@@ -36,14 +38,47 @@ class SuggestionChunkPayloadDTO(BaseChunkPayloadDTO):
     """DTO for serializing/deserializing suggestion chunks to/from Qdrant payload."""
 
     chunk_type: str
+    sub_index: int = 0
     status: str | None = None
     context_title: str | None = None
     date: str | None = None
+    committee_scrutiny: str | None = None
+    committee_scrutiny_id: int | None = None
+    secretariat_scrutiny: str | None = None
+    secretariat_scrutiny_id: int | None = None
 
     @classmethod
     def from_domain(
         cls, chunk: Chunk[SuggestionChunkMetadata]
     ) -> SuggestionChunkPayloadDTO:
+        com_scrutiny = (
+            chunk.metadata.committee_scrutiny.title_fa
+            if isinstance(chunk.metadata.committee_scrutiny, CommitteeScrutiny)
+            else (
+                str(chunk.metadata.committee_scrutiny)
+                if chunk.metadata.committee_scrutiny
+                else None
+            )
+        )
+        com_scrutiny_id = (
+            chunk.metadata.committee_scrutiny.code
+            if isinstance(chunk.metadata.committee_scrutiny, CommitteeScrutiny)
+            else chunk.metadata.committee_scrutiny_id
+        )
+        sec_scrutiny = (
+            chunk.metadata.secretariat_scrutiny.title_fa
+            if isinstance(chunk.metadata.secretariat_scrutiny, SecretariatScrutiny)
+            else (
+                str(chunk.metadata.secretariat_scrutiny)
+                if chunk.metadata.secretariat_scrutiny
+                else None
+            )
+        )
+        sec_scrutiny_id = (
+            chunk.metadata.secretariat_scrutiny.code
+            if isinstance(chunk.metadata.secretariat_scrutiny, SecretariatScrutiny)
+            else chunk.metadata.secretariat_scrutiny_id
+        )
         return cls(
             chunk_id=chunk.chunk_id,
             parent_id=chunk.parent_id,
@@ -51,17 +86,51 @@ class SuggestionChunkPayloadDTO(BaseChunkPayloadDTO):
             parent_content=chunk.parent_content,
             chunk_status=chunk.chunk_status.value,
             chunk_type=chunk.metadata.chunk_type.value,
+            sub_index=chunk.metadata.sub_index,
             status=chunk.metadata.status.title_fa if chunk.metadata.status else None,
             context_title=chunk.metadata.context_title,
             date=str(chunk.metadata.date) if chunk.metadata.date else None,
+            committee_scrutiny=com_scrutiny,
+            committee_scrutiny_id=com_scrutiny_id,
+            secretariat_scrutiny=sec_scrutiny,
+            secretariat_scrutiny_id=sec_scrutiny_id,
         )
 
     def to_domain(self, score: float = 0.0) -> SuggestionSearchResult:
+        com_enum: CommitteeScrutiny | None = None
+        if self.committee_scrutiny_id is not None:
+            try:
+                com_enum = CommitteeScrutiny.from_code(self.committee_scrutiny_id)
+            except Exception:
+                pass
+        elif self.committee_scrutiny:
+            try:
+                com_enum = CommitteeScrutiny.from_string(self.committee_scrutiny)
+            except Exception:
+                pass
+
+        sec_enum: SecretariatScrutiny | None = None
+        if self.secretariat_scrutiny_id is not None:
+            try:
+                sec_enum = SecretariatScrutiny.from_code(self.secretariat_scrutiny_id)
+            except Exception:
+                pass
+        elif self.secretariat_scrutiny:
+            try:
+                sec_enum = SecretariatScrutiny.from_string(self.secretariat_scrutiny)
+            except Exception:
+                pass
+
         metadata = SuggestionChunkMetadata(
             chunk_type=SuggestionChunkType(self.chunk_type),
+            sub_index=self.sub_index,
             status=SuggestionStatus.from_string(self.status) if self.status else None,
             context_title=self.context_title,
             date=ShamsiDate(self.date) if self.date else None,
+            committee_scrutiny=com_enum,
+            committee_scrutiny_id=self.committee_scrutiny_id,
+            secretariat_scrutiny=sec_enum,
+            secretariat_scrutiny_id=self.secretariat_scrutiny_id,
         )
         chunk = Chunk[SuggestionChunkMetadata](
             chunk_id=self.chunk_id,

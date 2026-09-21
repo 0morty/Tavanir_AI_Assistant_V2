@@ -59,7 +59,7 @@ class EmbeddingSettings(BaseSettings):
     EMBEDDING_PROVIDER: str = "tei"
     EMBEDDING_MODEL: str = "google/embedding-gemma-2b"
     EMBEDDING_DIMENSION: int = 768
-    EMBEDDING_BATCH_SIZE: int = 512
+    EMBEDDING_BATCH_SIZE: int = 128
     EMBEDDING_TIMEOUT: float = 30.0
     EMBEDDING_QUERY_PREFIX: str = ""
     EMBEDDING_DOCUMENT_PREFIX: str = ""
@@ -85,12 +85,14 @@ class QdrantSettings(BaseSettings):
     QDRANT_HTTPS: bool = False
     QDRANT_STORAGE_PATH: str = "./data/qdrant_storage"
 
-    # ADR-001 Collection Names
+    # ADR-001 Collection Names & Search Aliases
     QDRANT_SUGGESTION_COLLECTION: str = "tavanir_suggestion_v1"
+    QDRANT_SUGGESTION_ALIAS: str = "tavanir_suggestion_active"
     QDRANT_REGULATORY_COLLECTION: str = "tavanir_regulatory_knowledge_v1"
 
     # Search & Batch Defaults
     QDRANT_BATCH_SIZE: int = 64
+    QDRANT_BULK_UPSERT_BATCH_SIZE: int = 256
     QDRANT_DENSE_VECTOR_NAME: str = "dense"
     QDRANT_SPARSE_VECTOR_NAME: str = "sparse"
     QDRANT_DENSE_SCORE_THRESHOLD: float | None = None
@@ -147,6 +149,28 @@ class SecuritySettings(BaseSettings):
     model_config = _base_config
 
 
+class MssqlSettings(BaseSettings):
+    model_config = _base_config
+
+    MSSQL_SERVER: str = "localhost"
+    MSSQL_PORT: int = 1433
+    MSSQL_USER: str = "sa"
+    MSSQL_PASSWORD: str = "YourStrongPassword123"
+    MSSQL_DATABASE: str = "TavanirSuggestionDB"
+    MSSQL_BATCH_SIZE: int = 200
+    MSSQL_MAX_RETRIES: int = 3
+    MSSQL_RETRY_BASE_DELAY: float = 1.0
+
+
+class HistoricalIngestionSettings(BaseSettings):
+    model_config = _base_config
+
+    CHECKPOINT_JOB_NAME: str = "historical_suggestion_ingestion"
+    BATCH_SIZE: int = 200
+    VALIDATION_PROBE_COUNT: int = 3
+    AUTO_SWITCH_ALIAS: bool = True
+
+
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 embedding_settings = EmbeddingSettings()
@@ -155,3 +179,5 @@ qdrant_settings = QdrantSettings()
 db_settings = DBSettings()
 logging_settings = LoggingSettings()
 security_settings = SecuritySettings()
+mssql_settings = MssqlSettings()
+historical_ingestion_settings = HistoricalIngestionSettings()

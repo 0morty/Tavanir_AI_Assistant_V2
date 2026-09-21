@@ -91,13 +91,33 @@ or
 
 ## Conventions
 
-### 1) Partial Success (mixed result)
+### 1) Partial Success (HTTP 207 Multi-Status)
 
-In batch or asynchronous processing scenarios, a response can contain both successful items (`data`) and failed items (`errors`):
-- `data` → successful items
-- `errors[]` → failed items
+In batch processing scenarios (e.g. bulk deletion), an operation can produce both successful and failed items. When a batch request contains mixed results:
+- **HTTP status**: `207 Multi-Status`
+- **Body**: contains both `data` (list of successful items) and `errors` (list of `ErrorItem`s for failed items, each with RFC 6901 `source.pointer`):
+
+```json
+{
+  "status": 207,
+  "data": [
+    { "suggestionId": "sug-1", "status": "DELETED" }
+  ],
+  "errors": [
+    {
+      "status": 404,
+      "code": "SUGGESTION_NOT_FOUND",
+      "source": { "pointer": "/data/suggestionIds/1" }
+    }
+  ]
+}
+```
+
+- **Full Success (all succeeded)**: returns `200 OK` with `data` array and no `errors`.
+- **Full Failure (all failed)**: returns `400 Bad Request` with `errors` array and no `data`.
 
 ### 2) Use of `source.pointer`
+
 
 - For request fields: points to the exact field (e.g. `/data/title`).
 - For resources: points to `/data` or `/data/{index}`.

@@ -4,10 +4,21 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Any, TypeVar, cast
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.application.interfaces.i_checkpoint_repository import ICheckpointRepository
+from src.application.interfaces.i_skipped_suggestion_repository import (
+    ISkippedSuggestionRepository,
+)
+from src.application.interfaces.i_unit_of_work import IUnitOfWork
 from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
-from src.domain.interfaces.i_unit_of_work import IUnitOfWork
+from src.infrastructure.db.repositories.sql.checkpoint_repository import (
+    SqlCheckpointRepository,
+)
+from src.infrastructure.db.repositories.sql.skipped_suggestion_repository import (
+    SqlSkippedSuggestionRepository,
+)
 from src.infrastructure.db.repositories.sql.suggestion_repository import (
     SqlSuggestionRepository,
 )
@@ -28,11 +39,20 @@ class SqlUnitOfWork(IUnitOfWork):
         suggestion_repo_factory: Callable[
             [AsyncSession], ISuggestionRepository
         ] = SqlSuggestionRepository,
+        checkpoint_repo_factory: Callable[
+            [AsyncSession], ICheckpointRepository
+        ] = SqlCheckpointRepository,
+        skipped_repo_factory: Callable[
+            [AsyncSession], ISkippedSuggestionRepository
+        ] = SqlSkippedSuggestionRepository,
     ) -> None:
         self._session_factory = session_factory
         self._suggestion_repo_factory = suggestion_repo_factory
+        self._checkpoint_repo_factory = checkpoint_repo_factory
+        self._skipped_repo_factory = skipped_repo_factory
         self._session: AsyncSession | None = None
         self._repo_cache: dict[Any, Any] = {}
+        self._committed = False
 
     @property
     def session(self) -> AsyncSession:
@@ -48,6 +68,15 @@ class SqlUnitOfWork(IUnitOfWork):
         """Access the suggestion repository bound to the active transaction."""
         return self.get_repository(self._suggestion_repo_factory)
 
+    @property
+    def checkpoints(self) -> ICheckpointRepository:
+        """Access the checkpoint repository bound to the active transaction."""
+        return self.get_repository(self._checkpoint_repo_factory)
+
+    @property
+    def skipped_suggestions(self) -> ISkippedSuggestionRepository:
+        """Access the skipped suggestions repository bound to the active transaction."""
+        return self.get_repository(self._skipped_repo_factory)
 
     def get_repository(self, repo_cls: Callable[[AsyncSession], RepoT]) -> RepoT:
         """
@@ -66,6 +95,7 @@ class SqlUnitOfWork(IUnitOfWork):
     async def __aenter__(self) -> SqlUnitOfWork:
         self._session = self._session_factory()
         self._repo_cache.clear()
+        self._committed = False
         return self
 
     async def __aexit__(
@@ -75,13 +105,8 @@ class SqlUnitOfWork(IUnitOfWork):
         exc_tb: TracebackType | None,
     ) -> None:
         try:
-            if exc_type is not None:
+            if exc_type is not None or not self._committed:
                 await self.rollback()
-            else:
-                await self.commit()
-        except Exception:
-            await self.rollback()
-            raise
         finally:
             if self._session is not None:
                 await self._session.close()
@@ -89,12 +114,22 @@ class SqlUnitOfWork(IUnitOfWork):
                 self._repo_cache.clear()
 
     async def commit(self) -> None:
-        if self._session is not None:
+        if self._session is not None and not self._committed:
             await self._session.commit()
+            self._committed = True
 
     async def rollback(self) -> None:
-        if self._session is not None:
+        if self._session is not None and not self._committed:
             await self._session.rollback()
+
+    async def try_acquire_advisory_lock(self, lock_key: int) -> bool:
+        """
+        Attempt to acquire a PostgreSQL transaction-scoped advisory mutex
+        for the given 64-bit integer lock key on the active session.
+        """
+        stmt = select(func.pg_try_advisory_xact_lock(lock_key))
+        result = await self.session.execute(stmt)
+        return bool(result.scalar_one())
 
 
 __all__ = ["SqlUnitOfWork"]

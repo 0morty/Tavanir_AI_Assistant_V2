@@ -297,6 +297,34 @@ class QdrantBaseVectorRepository(IVectorRepository[TMetadata], ABC):
                 f"Failed to delete chunks for parent_id='{parent_id}': {e}"
             ) from e
 
+    async def delete_chunks_by_parent_ids(self, parent_ids: Sequence[str]) -> None:
+        """Delete all chunks for a list of parent entities."""
+        if not parent_ids:
+            return
+        try:
+            qdrant_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="parent_id", match=models.MatchAny(any=list(parent_ids))
+                    )
+                ]
+            )
+            await self._client.delete(
+                collection_name=self._collection_name,
+                points_selector=models.FilterSelector(filter=qdrant_filter),
+            )
+            logger.debug(
+                f"Deleted all chunks for {len(parent_ids)} parent_ids from '{self._collection_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to delete chunks for {len(parent_ids)} parent_ids in '{self._collection_name}': {e}",
+                exc_info=True,
+            )
+            raise VectorStorageError(
+                f"Failed to delete chunks for {len(parent_ids)} parent_ids: {e}"
+            ) from e
+
     async def delete_staging_chunks(self, parent_id: str) -> None:
         """Delete staging chunks (chunk_status=STAGING) for a parent entity."""
         try:
@@ -379,6 +407,60 @@ class QdrantBaseVectorRepository(IVectorRepository[TMetadata], ABC):
                 f"Failed to activate staging chunks for parent_id='{parent_id}': {e}"
             ) from e
 
+    async def activate_staging_chunks_batch(self, parent_ids: Sequence[str]) -> None:
+        """
+        Execute atomic zero-downtime promotion for multiple parent entities:
+        1. Demote ACTIVE chunks to DEPRECATED.
+        2. Promote STAGING chunks to ACTIVE.
+        """
+        if not parent_ids:
+            return
+        try:
+            # Step 1: Active -> Deprecated
+            await self._client.set_payload(
+                collection_name=self._collection_name,
+                payload={"chunk_status": ChunkStatus.DEPRECATED.value},
+                points=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="parent_id", match=models.MatchAny(any=list(parent_ids))
+                        ),
+                        models.FieldCondition(
+                            key="chunk_status",
+                            match=models.MatchValue(value=ChunkStatus.ACTIVE.value),
+                        ),
+                    ]
+                ),
+            )
+
+            # Step 2: Staging -> Active
+            await self._client.set_payload(
+                collection_name=self._collection_name,
+                payload={"chunk_status": ChunkStatus.ACTIVE.value},
+                points=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="parent_id", match=models.MatchAny(any=list(parent_ids))
+                        ),
+                        models.FieldCondition(
+                            key="chunk_status",
+                            match=models.MatchValue(value=ChunkStatus.STAGING.value),
+                        ),
+                    ]
+                ),
+            )
+            logger.debug(
+                f"Promoted STAGING chunks to ACTIVE for {len(parent_ids)} parent_ids in '{self._collection_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to activate staging chunks for {len(parent_ids)} parent_ids in '{self._collection_name}': {e}",
+                exc_info=True,
+            )
+            raise VectorStorageError(
+                f"Failed to activate staging chunks for {len(parent_ids)} parent_ids: {e}"
+            ) from e
+
     async def delete_deprecated_chunks(self, parent_id: str) -> None:
         """Delete deprecated chunks (chunk_status=DEPRECATED) for a parent entity."""
         try:
@@ -407,6 +489,67 @@ class QdrantBaseVectorRepository(IVectorRepository[TMetadata], ABC):
             )
             raise VectorStorageError(
                 f"Failed to delete deprecated chunks for parent_id='{parent_id}': {e}"
+            ) from e
+
+    async def delete_chunks_by_ids(self, chunk_ids: Sequence[str]) -> None:
+        """
+        Delete an exact list of chunk IDs by point primary key.
+        Essential for compensating failed staging batches without touching active chunks.
+        """
+        if not chunk_ids:
+            return
+        try:
+            await self._client.delete(
+                collection_name=self._collection_name,
+                points_selector=models.PointIdsList(points=list(chunk_ids)),
+            )
+            logger.debug(
+                f"Deleted {len(chunk_ids)} chunks by IDs from '{self._collection_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to delete {len(chunk_ids)} chunks by IDs from '{self._collection_name}': {e}",
+                exc_info=True,
+            )
+            raise VectorStorageError(f"Failed to delete chunks by IDs: {e}") from e
+
+    async def delete_superseded_chunks(
+        self, parent_id: str, active_chunk_ids: Sequence[str]
+    ) -> None:
+        """
+        Delete all chunks for a parent entity that are NOT in the active_chunk_ids list.
+        Executes zero-blackout cutover without state-machine race conditions.
+        """
+        try:
+            must_conditions: list[Any] = [
+                models.FieldCondition(
+                    key="parent_id", match=models.MatchValue(value=parent_id)
+                )
+            ]
+            must_not_conditions: list[Any] = []
+            if active_chunk_ids:
+                must_not_conditions.append(
+                    models.HasIdCondition(has_id=list(active_chunk_ids))
+                )
+
+            qdrant_filter = models.Filter(
+                must=must_conditions,
+                must_not=must_not_conditions if must_not_conditions else None,
+            )
+            await self._client.delete(
+                collection_name=self._collection_name,
+                points_selector=models.FilterSelector(filter=qdrant_filter),
+            )
+            logger.debug(
+                f"Deleted superseded chunks for parent_id='{parent_id}' keeping {len(active_chunk_ids)} chunks from '{self._collection_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to delete superseded chunks for parent_id='{parent_id}' in '{self._collection_name}': {e}",
+                exc_info=True,
+            )
+            raise VectorStorageError(
+                f"Failed to delete superseded chunks for parent_id='{parent_id}': {e}"
             ) from e
 
 

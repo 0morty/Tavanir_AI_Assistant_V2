@@ -143,7 +143,7 @@ This document outlines all features and infrastructure components from the legac
   * `POST /analyze-suggestion/set-template`: Updates and persists custom prompt templates.
 
 ### 4.2 Suggestion Ingestion & Management Router
-* **Target File**: `src/presentation/routers/v1/suggestion_ingestion_router.py`
+* **Target File**: `src/presentation/routers/v1/suggestion.py`
 * **Prefix**: `/ingest-suggestion`
 * **Endpoints**:
   * `POST /ingest-suggestion/ingest`: Real-time ingestion endpoint for new suggestions.

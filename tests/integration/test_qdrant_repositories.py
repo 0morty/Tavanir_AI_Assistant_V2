@@ -153,9 +153,11 @@ async def test_suggestion_repository_live_crud_and_hybrid_search(
         assert len(matching) == 1
         hit = matching[0]
         assert hit.parent_id == parent_id
-        assert hit.chunk.metadata.chunk_type == SuggestionChunkType.SOLUTION
-        assert hit.chunk.metadata.status == SuggestionStatus.APPROVED
-        assert str(hit.chunk.metadata.date) == "1404/02/10"
+        meta = hit.chunk.metadata
+        assert isinstance(meta, SuggestionChunkMetadata)
+        assert meta.chunk_type == SuggestionChunkType.SOLUTION
+        assert meta.status == SuggestionStatus.APPROVED
+        assert str(meta.date) == "1404/02/10"
         assert hit.score > 0.0
 
         # 3. Clean up by parent_id
@@ -246,6 +248,81 @@ async def test_suggestion_staging_lifecycle_live(
         await auth_client.close()
 
 
+async def test_suggestion_batch_staging_lifecycle_and_batch_delete_live(
+    suggestion_repo: QdrantSuggestionRepository,
+    auth_client: AsyncQdrantClient,
+) -> None:
+    """Verify batch staging promotion and batch parent deletion on live Qdrant."""
+    p1 = f"sugg-batch-1-{uuid.uuid4()}"
+    p2 = f"sugg-batch-2-{uuid.uuid4()}"
+    dim = embedding_settings.EMBEDDING_DIMENSION
+
+    c1 = Chunk[SuggestionChunkMetadata](
+        chunk_id=str(uuid.uuid4()),
+        parent_id=p1,
+        content="راهکار اول بهینه‌سازی دیسپاچینگ",
+        metadata=SuggestionChunkMetadata(
+            chunk_type=SuggestionChunkType.SOLUTION,
+            status=SuggestionStatus.APPROVED,
+        ),
+        dense_vector=[0.05] * dim,
+        sparse_vector=SparseVector(indices=[10], values=[2.0]),
+        chunk_status=ChunkStatus.STAGING,
+    )
+
+    c2 = Chunk[SuggestionChunkMetadata](
+        chunk_id=str(uuid.uuid4()),
+        parent_id=p2,
+        content="راهکار دوم بهینه‌سازی دیسپاچینگ",
+        metadata=SuggestionChunkMetadata(
+            chunk_type=SuggestionChunkType.SOLUTION,
+            status=SuggestionStatus.APPROVED,
+        ),
+        dense_vector=[0.05] * dim,
+        sparse_vector=SparseVector(indices=[10], values=[2.0]),
+        chunk_status=ChunkStatus.STAGING,
+    )
+
+    try:
+        # Upsert both chunks as STAGING
+        await suggestion_repo.upsert_chunks_batch([c1, c2])
+
+        # Step 1: Staging isolation - search should NOT find either chunk
+        results_pre = await suggestion_repo.search_suggestions(
+            dense_vector=[0.05] * dim,
+            sparse_vector=SparseVector(indices=[10], values=[2.0]),
+            limit=10,
+        )
+        found_pre = [r for r in results_pre if r.parent_id in (p1, p2)]
+        assert len(found_pre) == 0, "STAGING chunks must be invisible to search"
+
+        # Step 2: Batch promote STAGING -> ACTIVE
+        await suggestion_repo.activate_staging_chunks_batch([p1, p2])
+
+        # Search should now find both chunks
+        results_post = await suggestion_repo.search_suggestions(
+            dense_vector=[0.05] * dim,
+            sparse_vector=SparseVector(indices=[10], values=[2.0]),
+            limit=10,
+        )
+        found_post = [r for r in results_post if r.parent_id in (p1, p2)]
+        assert len(found_post) == 2, "Promoted chunks must now be visible in search"
+
+        # Step 3: Batch delete chunks by parent IDs
+        await suggestion_repo.delete_chunks_by_parent_ids([p1, p2])
+
+        results_deleted = await suggestion_repo.search_suggestions(
+            dense_vector=[0.05] * dim,
+            sparse_vector=SparseVector(indices=[10], values=[2.0]),
+            limit=10,
+        )
+        found_deleted = [r for r in results_deleted if r.parent_id in (p1, p2)]
+        assert len(found_deleted) == 0, "Deleted chunks must no longer exist in search"
+
+    finally:
+        await auth_client.close()
+
+
 async def test_regulatory_repository_live_crud_filters_and_exclusion(
     regulatory_repo: QdrantRegulatoryRepository,
     auth_client: AsyncQdrantClient,
@@ -306,7 +383,9 @@ async def test_regulatory_repository_live_crud_filters_and_exclusion(
         hit = binding_matches[0]
         assert hit.chunk.chunk_id == chunk1_id
         assert hit.chunk.parent_content == table_markdown
-        assert hit.chunk.metadata.document_type == RegulatoryDocumentType.STATUTE
+        reg_meta = hit.chunk.metadata
+        assert isinstance(reg_meta, RegulatoryChunkMetadata)
+        assert reg_meta.document_type == RegulatoryDocumentType.STATUTE
 
         # 2. Hop-1 exclusion test: exclude chunk1_id
         excluded_results = await regulatory_repo.search_regulatory_documents(

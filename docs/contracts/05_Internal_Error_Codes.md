@@ -61,6 +61,7 @@ Whenever a new capability is added or a new error scenario is defined:
 | `MSSQL_EXTRACTION_FAILED` | 500 | — | error extracting suggestions from legacy MSSQL **[planned]** |
 | `STATUTE_PARSE_FAILED` | 422 | — | error parsing an Excel statute file **[planned]** |
 | `TEXT_NORMALIZATION_FAILED` | 422 | `TextNormalizationError` | Persian text cleaning or normalization failed |
+| `CHUNKING_FAILED` | 422 | `ChunkingError` | error decomposing document into vector chunks |
 | `RATE_LIMITED` | 429 | — | too many requests |
 | `INTERNAL_ERROR` | 500 | `ApplicationError` | unexpected internal service error |
 | `NOT_IMPLEMENTED` | 501 | — | this capability is not yet implemented |

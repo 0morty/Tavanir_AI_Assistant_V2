@@ -100,3 +100,25 @@ class SuccessResponse(BaseResponseModel, Generic[T]):
     def create(cls, data: T, status: int = 200) -> "SuccessResponse[T]":
         """Factory helper to construct a standardized SuccessResponse."""
         return cls(status=status, data=data)
+
+
+class PartialSuccessResponse(BaseResponseModel, Generic[T]):
+    """Standardized top-level JSON:API envelope for batch operations returning HTTP 207 Multi-Status."""
+
+    status: int = Field(default=207, description="HTTP status code (207 Multi-Status).")
+    data: list[T] = Field(
+        default_factory=list, description="List of successfully processed items."
+    )
+    errors: list[ErrorItem] = Field(
+        default_factory=list, description="List of discrete errors for failed items."
+    )
+
+    @classmethod
+    def create(
+        cls,
+        data: list[T],
+        errors: list[ErrorItem],
+        status: int = 207,
+    ) -> "PartialSuccessResponse[T]":
+        """Factory helper to construct a standardized PartialSuccessResponse."""
+        return cls(status=status, data=data, errors=errors)

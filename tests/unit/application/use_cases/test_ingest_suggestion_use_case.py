@@ -10,6 +10,7 @@ from src.application.services.hybrid_embedding_service import HybridEmbeddingSer
 from src.application.use_cases.ingest_suggestion_use_case import IngestSuggestionUseCase
 
 from src.application.dtos import CreateSuggestionDTO, IngestSuggestionResponseDTO
+from src.application.interfaces import IUnitOfWork
 from src.domain.entities import (
     Chunk,
     CommitteeEvaluation,
@@ -36,7 +37,6 @@ from src.domain.interfaces import (
     IChunkingStrategy,
     ISuggestionRepository,
     ISuggestionVectorRepository,
-    IUnitOfWork,
 )
 
 
@@ -47,6 +47,7 @@ class FakeSuggestionRepository(ISuggestionRepository):
     save_batch: AsyncMock = AsyncMock()
     delete: AsyncMock = AsyncMock()
     delete_batch: AsyncMock = AsyncMock()
+    soft_delete: AsyncMock = AsyncMock()
 
     def __init__(self, existing_suggestion: Suggestion | None = None):
         self.get_by_id = AsyncMock(return_value=existing_suggestion)
@@ -55,6 +56,7 @@ class FakeSuggestionRepository(ISuggestionRepository):
         self.save_batch = AsyncMock()
         self.delete = AsyncMock()
         self.delete_batch = AsyncMock()
+        self.soft_delete = AsyncMock()
 
 
 class FakeUoW(IUnitOfWork):
@@ -76,6 +78,9 @@ class FakeUoW(IUnitOfWork):
     @property
     def skipped_suggestions(self) -> AsyncMock:
         return self._skipped
+
+    async def try_acquire_advisory_lock(self, lock_key: int) -> bool:
+        return True
 
     async def commit(self) -> None:
         self.committed = True
@@ -170,6 +175,8 @@ class FakeVectorRepo(ISuggestionVectorRepository):
     delete_chunks_by_parent_ids: AsyncMock = AsyncMock()
     activate_staging_chunks: AsyncMock = AsyncMock()
     activate_staging_chunks_batch: AsyncMock = AsyncMock()
+    delete_chunks_by_ids: AsyncMock = AsyncMock()
+    delete_superseded_chunks: AsyncMock = AsyncMock()
 
     def __init__(
         self,
@@ -197,6 +204,8 @@ class FakeVectorRepo(ISuggestionVectorRepository):
                 "Qdrant payload activation failed"
             )
         self.activate_staging_chunks_batch = AsyncMock()
+        self.delete_chunks_by_ids = AsyncMock()
+        self.delete_superseded_chunks = AsyncMock()
 
     async def provision_collection(self, dense_dimension: int | None = None) -> None:
         pass
@@ -256,7 +265,7 @@ async def test_successful_ingestion_flow(valid_dto):
     assert result.status == "CREATED"
 
     # Verify short-lived pre-check called
-    uow.suggestions.get_by_id.assert_awaited_once_with("sugg-101")
+    uow.suggestions.get_by_id.assert_awaited_once_with("sugg-101", include_deleted=True)
 
     # Verify SQL save called with normalized entity
     uow.suggestions.save.assert_awaited_once()

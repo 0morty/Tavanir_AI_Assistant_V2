@@ -491,5 +491,66 @@ class QdrantBaseVectorRepository(IVectorRepository[TMetadata], ABC):
                 f"Failed to delete deprecated chunks for parent_id='{parent_id}': {e}"
             ) from e
 
+    async def delete_chunks_by_ids(self, chunk_ids: Sequence[str]) -> None:
+        """
+        Delete an exact list of chunk IDs by point primary key.
+        Essential for compensating failed staging batches without touching active chunks.
+        """
+        if not chunk_ids:
+            return
+        try:
+            await self._client.delete(
+                collection_name=self._collection_name,
+                points_selector=models.PointIdsList(points=list(chunk_ids)),
+            )
+            logger.debug(
+                f"Deleted {len(chunk_ids)} chunks by IDs from '{self._collection_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to delete {len(chunk_ids)} chunks by IDs from '{self._collection_name}': {e}",
+                exc_info=True,
+            )
+            raise VectorStorageError(f"Failed to delete chunks by IDs: {e}") from e
+
+    async def delete_superseded_chunks(
+        self, parent_id: str, active_chunk_ids: Sequence[str]
+    ) -> None:
+        """
+        Delete all chunks for a parent entity that are NOT in the active_chunk_ids list.
+        Executes zero-blackout cutover without state-machine race conditions.
+        """
+        try:
+            must_conditions: list[Any] = [
+                models.FieldCondition(
+                    key="parent_id", match=models.MatchValue(value=parent_id)
+                )
+            ]
+            must_not_conditions: list[Any] = []
+            if active_chunk_ids:
+                must_not_conditions.append(
+                    models.HasIdCondition(has_id=list(active_chunk_ids))
+                )
+
+            qdrant_filter = models.Filter(
+                must=must_conditions,
+                must_not=must_not_conditions if must_not_conditions else None,
+            )
+            await self._client.delete(
+                collection_name=self._collection_name,
+                points_selector=models.FilterSelector(filter=qdrant_filter),
+            )
+            logger.debug(
+                f"Deleted superseded chunks for parent_id='{parent_id}' keeping {len(active_chunk_ids)} chunks from '{self._collection_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to delete superseded chunks for parent_id='{parent_id}' in '{self._collection_name}': {e}",
+                exc_info=True,
+            )
+            raise VectorStorageError(
+                f"Failed to delete superseded chunks for parent_id='{parent_id}': {e}"
+            ) from e
+
 
 __all__ = ["QdrantBaseVectorRepository"]

@@ -11,12 +11,16 @@ class ISuggestionRepository(ABC):
     """
 
     @abstractmethod
-    async def get_by_id(self, suggestion_id: str) -> Suggestion | None:
+    async def get_by_id(
+        self, suggestion_id: str, include_deleted: bool = False
+    ) -> Suggestion | None:
         """Fetch a single suggestion by its primary key identifier."""
         pass
 
     @abstractmethod
-    async def get_by_ids(self, suggestion_ids: Sequence[str]) -> list[Suggestion]:
+    async def get_by_ids(
+        self, suggestion_ids: Sequence[str], include_deleted: bool = False
+    ) -> list[Suggestion]:
         """
         Batch fetch suggestions by their primary key identifiers.
         Essential for on-demand parent hydration after Max-Passage Pooling (MaxP).
@@ -34,13 +38,18 @@ class ISuggestionRepository(ABC):
         pass
 
     @abstractmethod
+    async def soft_delete(self, suggestion_id: str) -> None:
+        """Soft-delete a suggestion record by setting is_deleted=True."""
+        pass
+
+    @abstractmethod
     async def delete(self, suggestion_id: str) -> None:
-        """Delete a suggestion record by its identifier."""
+        """Hard delete a suggestion record by its identifier (for compensation/rollback)."""
         pass
 
     @abstractmethod
     async def delete_batch(self, suggestion_ids: Sequence[str]) -> None:
-        """Batch delete suggestion records by identifiers for compensating rollbacks."""
+        """Batch hard delete suggestion records by identifiers for compensating rollbacks."""
         pass
 
 

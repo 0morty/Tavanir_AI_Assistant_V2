@@ -16,7 +16,7 @@ class IUnitOfWork(ABC):
     """
     Abstract Unit of Work (UoW) port conforming to Cosmic Python & PoEAA.
     Guarantees atomic transaction demarcation across repository operations
-    without coupling the domain layer to database-specific session types.
+    without coupling the application layer to database-specific session types.
 
     Safe-by-default: Rolls back uncommitted changes upon context exit.
     Mutating operations must explicitly call commit() to persist state.
@@ -59,6 +59,21 @@ class IUnitOfWork(ABC):
     @abstractmethod
     async def rollback(self) -> None:
         """Discard all staged mutations within this transactional unit."""
+        pass
+
+    @abstractmethod
+    async def try_acquire_advisory_lock(self, lock_key: int) -> bool:
+        """
+        Attempt to acquire a transaction-scoped advisory mutex
+        for the given 64-bit integer lock key.
+
+        Args:
+            lock_key: Deterministic 64-bit signed integer key.
+
+        Returns:
+            True if the lock was successfully acquired for this transaction.
+            False if another concurrent transaction currently holds the lock.
+        """
         pass
 
 

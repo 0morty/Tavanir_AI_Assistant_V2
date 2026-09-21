@@ -26,6 +26,7 @@ from src.application.dtos import (
     RawSuggestionDataDTO,
     SkippedRecordDTO,
 )
+from src.application.interfaces import IUnitOfWork
 from src.domain.entities import (
     Chunk,
     SparseVector,
@@ -48,7 +49,6 @@ from src.domain.interfaces import (
     ISuggestionChunker,
     ISuggestionRepository,
     ISuggestionVectorRepository,
-    IUnitOfWork,
 )
 
 
@@ -57,14 +57,26 @@ class FakeSuggestionRepo(ISuggestionRepository):
         self.saved_suggestions: list[Suggestion] = []
         self.deleted_ids: list[str] = []
 
-    async def get_by_id(self, suggestion_id: str) -> Suggestion | None:
+    async def get_by_id(
+        self, suggestion_id: str, include_deleted: bool = False
+    ) -> Suggestion | None:
         for s in self.saved_suggestions:
             if s.id == suggestion_id:
+                if not include_deleted and s.is_deleted:
+                    continue
                 return s
         return None
 
-    async def get_by_ids(self, suggestion_ids: Sequence[str]) -> list[Suggestion]:
-        return [s for s in self.saved_suggestions if s.id in suggestion_ids]
+    async def get_by_ids(
+        self, suggestion_ids: Sequence[str], include_deleted: bool = False
+    ) -> list[Suggestion]:
+        results = []
+        for s in self.saved_suggestions:
+            if s.id in suggestion_ids:
+                if not include_deleted and s.is_deleted:
+                    continue
+                results.append(s)
+        return results
 
     async def save(self, suggestion: Suggestion) -> None:
         self.saved_suggestions.append(suggestion)
@@ -74,9 +86,20 @@ class FakeSuggestionRepo(ISuggestionRepository):
 
     async def delete(self, suggestion_id: str) -> None:
         self.deleted_ids.append(suggestion_id)
+        self.saved_suggestions = [
+            s for s in self.saved_suggestions if s.id != suggestion_id
+        ]
 
     async def delete_batch(self, suggestion_ids: Sequence[str]) -> None:
         self.deleted_ids.extend(suggestion_ids)
+        self.saved_suggestions = [
+            s for s in self.saved_suggestions if s.id not in suggestion_ids
+        ]
+
+    async def soft_delete(self, suggestion_id: str) -> None:
+        for s in self.saved_suggestions:
+            if s.id == suggestion_id:
+                s.mark_deleted()
 
 
 class FakeCheckpointRepo(ICheckpointRepository):
@@ -139,6 +162,9 @@ class FakeUoW(IUnitOfWork):
     @property
     def skipped_suggestions(self) -> ISkippedSuggestionRepository:
         return self._skipped
+
+    async def try_acquire_advisory_lock(self, lock_key: int) -> bool:
+        return True
 
     async def commit(self) -> None:
         self.committed = True
@@ -266,6 +292,14 @@ class FakeVectorRepo(ISuggestionVectorRepository):
         self.activated_parent_ids.extend(parent_ids)
 
     async def delete_deprecated_chunks(self, parent_id: str) -> None:
+        pass
+
+    async def delete_chunks_by_ids(self, chunk_ids: Sequence[str]) -> None:
+        pass
+
+    async def delete_superseded_chunks(
+        self, parent_id: str, active_chunk_ids: Sequence[str]
+    ) -> None:
         pass
 
     async def search_suggestions(self, *args, **kwargs):
@@ -579,7 +613,10 @@ def test_resolve_suggestion_status_mapping():
 def test_resolve_scrutinies_strict_validation():
     # Committee Scrutiny resolution - valid
     assert _resolve_committee_scrutiny(0, None) == (CommitteeScrutiny.APPROVED, 0)
-    assert _resolve_committee_scrutiny(-10, None) == (CommitteeScrutiny.SELECT_CONSULTANT_RETURN_FOR_CORRECTION, -10)
+    assert _resolve_committee_scrutiny(-10, None) == (
+        CommitteeScrutiny.SELECT_CONSULTANT_RETURN_FOR_CORRECTION,
+        -10,
+    )
     assert _resolve_committee_scrutiny(None, "رد") == (CommitteeScrutiny.REJECTED, 1)
     assert _resolve_committee_scrutiny(None, None) == (None, None)
     assert _resolve_committee_scrutiny(None, "   ") == (None, None)
@@ -591,9 +628,18 @@ def test_resolve_scrutinies_strict_validation():
         _resolve_committee_scrutiny(None, "عنوان غیر استاندارد")
 
     # Secretariat Scrutiny resolution - valid
-    assert _resolve_secretariat_scrutiny(0, None) == (SecretariatScrutiny.OUT_OF_FRAMEWORK, 0)
-    assert _resolve_secretariat_scrutiny(-2, None) == (SecretariatScrutiny.SEND_TO_APPROVER, -2)
-    assert _resolve_secretariat_scrutiny(None, "ارجاع به کمیته") == (SecretariatScrutiny.REFER_TO_COMMITTEE, 3)
+    assert _resolve_secretariat_scrutiny(0, None) == (
+        SecretariatScrutiny.OUT_OF_FRAMEWORK,
+        0,
+    )
+    assert _resolve_secretariat_scrutiny(-2, None) == (
+        SecretariatScrutiny.SEND_TO_APPROVER,
+        -2,
+    )
+    assert _resolve_secretariat_scrutiny(None, "ارجاع به کمیته") == (
+        SecretariatScrutiny.REFER_TO_COMMITTEE,
+        3,
+    )
     assert _resolve_secretariat_scrutiny(None, None) == (None, None)
     assert _resolve_secretariat_scrutiny(None, "   ") == (None, None)
 
@@ -713,7 +759,10 @@ async def test_historical_ingestion_with_scrutiny_and_secretariat_fields(fake_en
     assert entity.evaluation.scrutiny_id == 0
     assert entity.evaluation.description == "مصوب جلسه کارگروه با تخصیص بودجه"
     assert entity.secretariat_evaluation is not None
-    assert entity.secretariat_evaluation.scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+    assert (
+        entity.secretariat_evaluation.scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+    )
     assert entity.secretariat_evaluation.scrutiny_id == 3
-    assert entity.secretariat_evaluation.comment == "تایید مدارک و ارسال به کمیته مربوطه"
-
+    assert (
+        entity.secretariat_evaluation.comment == "تایید مدارک و ارسال به کمیته مربوطه"
+    )

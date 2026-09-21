@@ -11,17 +11,20 @@ from src.application.interfaces import (
     IQdrantAdminService,
     ISparseEmbedder,
     ITextNormalizer,
+    IUnitOfWork,
 )
 from src.application.services import HybridEmbeddingService
 from src.application.use_cases import (
+    BulkDeleteSuggestionsUseCase,
+    DeleteSuggestionUseCase,
     ExtractAndIngestHistoricalSuggestionsUseCase,
     IngestSuggestionUseCase,
+    UpdateSuggestionUseCase,
 )
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
     ISuggestionChunker,
     ISuggestionVectorRepository,
-    IUnitOfWork,
 )
 from src.infrastructure.configs.settings import (
     bm25_settings,
@@ -223,4 +226,33 @@ class Container(containers.DeclarativeContainer):
         embedding_service=hybrid_embedding_service,
         vector_repo=suggestion_vector_repository,
         job_name=historical_ingestion_settings.CHECKPOINT_JOB_NAME,
+    )
+
+    # 14. Suggestion Update Use Case
+    update_suggestion_use_case: providers.Provider[UpdateSuggestionUseCase] = (
+        providers.Factory(
+            UpdateSuggestionUseCase,
+            uow=unit_of_work,
+            normalizer=text_normalizer,
+            chunker=suggestion_chunker,
+            embedding_service=hybrid_embedding_service,
+            vector_repo=suggestion_vector_repository,
+        )
+    )
+
+    # 15. Suggestion Delete Use Case
+    delete_suggestion_use_case: providers.Provider[DeleteSuggestionUseCase] = (
+        providers.Factory(
+            DeleteSuggestionUseCase,
+            uow=unit_of_work,
+            vector_repo=suggestion_vector_repository,
+        )
+    )
+
+    # 16. Suggestion Bulk Delete Use Case
+    bulk_delete_suggestions_use_case: providers.Provider[
+        BulkDeleteSuggestionsUseCase
+    ] = providers.Factory(
+        BulkDeleteSuggestionsUseCase,
+        delete_use_case=delete_suggestion_use_case,
     )

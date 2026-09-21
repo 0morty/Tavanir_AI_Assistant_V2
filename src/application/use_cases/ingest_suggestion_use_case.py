@@ -1,6 +1,7 @@
 import structlog
 
 from src.application.dtos import CreateSuggestionDTO, IngestSuggestionResponseDTO
+from src.application.interfaces import IUnitOfWork
 from src.application.interfaces.i_hybrid_embedding_service import (
     IHybridEmbeddingService,
 )
@@ -21,7 +22,6 @@ from src.domain.exceptions import (
 from src.domain.interfaces import (
     ISuggestionChunker,
     ISuggestionVectorRepository,
-    IUnitOfWork,
 )
 
 logger = structlog.get_logger(__name__)
@@ -65,9 +65,11 @@ class IngestSuggestionUseCase:
         self._vector_repo = vector_repo
 
     async def execute(self, dto: CreateSuggestionDTO) -> IngestSuggestionResponseDTO:
-        # Step 1: Pre-check duplicate existence (Gatekeeper: protects healthy suggestions)
+        # Step 1: Pre-check duplicate existence (Gatekeeper: protects healthy suggestions and soft-deleted records)
         async with self._uow as uow:
-            existing = await uow.suggestions.get_by_id(dto.suggestion_id)
+            existing = await uow.suggestions.get_by_id(
+                dto.suggestion_id, include_deleted=True
+            )
             if existing is not None:
                 raise SuggestionAlreadyExistsError(
                     f"Suggestion with ID '{dto.suggestion_id}' already exists.",

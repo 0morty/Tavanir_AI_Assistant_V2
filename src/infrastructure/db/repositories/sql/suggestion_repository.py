@@ -4,7 +4,7 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,6 +88,8 @@ class SqlSuggestionRepository(
             date=ShamsiDate(model.shamsi_date) if model.shamsi_date else None,
             context_title=model.context_title,
             secretariat_evaluation=sec_evaluation,
+            is_deleted=model.is_deleted,
+            version=model.version,
         )
 
     def _extract_evaluation_fields(
@@ -95,9 +97,7 @@ class SqlSuggestionRepository(
     ) -> tuple[str | None, int | None, str | None, str | None, int | None]:
         """Extract (com_title, com_id, sec_title, sec_comment, sec_id) from Suggestion."""
         com_title = (
-            entity.evaluation.scrutiny.title_fa
-            if entity.evaluation.scrutiny
-            else None
+            entity.evaluation.scrutiny.title_fa if entity.evaluation.scrutiny else None
         )
         com_id = (
             entity.evaluation.scrutiny.code
@@ -110,23 +110,17 @@ class SqlSuggestionRepository(
         sec_id = None
         if entity.secretariat_evaluation:
             sec = entity.secretariat_evaluation
-            sec_title = (
-                sec.scrutiny.title_fa
-                if sec.scrutiny
-                else None
-            )
-            sec_id = (
-                sec.scrutiny.code
-                if sec.scrutiny
-                else sec.scrutiny_id
-            )
+            sec_title = sec.scrutiny.title_fa if sec.scrutiny else None
+            sec_id = sec.scrutiny.code if sec.scrutiny else sec.scrutiny_id
             sec_comment = sec.comment
 
         return com_title, com_id, sec_title, sec_comment, sec_id
 
     def _to_model(self, entity: Suggestion) -> SuggestionModel:
         """Map domain entity to SQLAlchemy model."""
-        com_title, com_id, sec_title, sec_comment, sec_id = self._extract_evaluation_fields(entity)
+        com_title, com_id, sec_title, sec_comment, sec_id = (
+            self._extract_evaluation_fields(entity)
+        )
         return SuggestionModel(
             id=entity.id,
             title=entity.content.title,
@@ -141,11 +135,15 @@ class SqlSuggestionRepository(
             secretariat_comment=sec_comment,
             shamsi_date=str(entity.date) if entity.date else None,
             context_title=entity.context_title,
+            is_deleted=entity.is_deleted,
+            version=entity.version,
         )
 
     def _entity_to_dict(self, entity: Suggestion) -> dict[str, Any]:
         """Flatten domain entity to dictionary for PostgreSQL upsert values."""
-        com_title, com_id, sec_title, sec_comment, sec_id = self._extract_evaluation_fields(entity)
+        com_title, com_id, sec_title, sec_comment, sec_id = (
+            self._extract_evaluation_fields(entity)
+        )
         return {
             "id": entity.id,
             "title": entity.content.title,
@@ -160,17 +158,24 @@ class SqlSuggestionRepository(
             "secretariat_comment": sec_comment,
             "shamsi_date": str(entity.date) if entity.date else None,
             "context_title": entity.context_title,
+            "is_deleted": entity.is_deleted,
+            "version": entity.version,
         }
 
-
-    async def get_by_id(self, suggestion_id: str) -> Suggestion | None:
+    async def get_by_id(
+        self, suggestion_id: str, include_deleted: bool = False
+    ) -> Suggestion | None:
         """Fetch a single suggestion by its primary key identifier."""
         stmt = select(SuggestionModel).where(SuggestionModel.id == suggestion_id)
+        if not include_deleted:
+            stmt = stmt.where(SuggestionModel.is_deleted.is_(False))
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
-    async def get_by_ids(self, suggestion_ids: Sequence[str]) -> list[Suggestion]:
+    async def get_by_ids(
+        self, suggestion_ids: Sequence[str], include_deleted: bool = False
+    ) -> list[Suggestion]:
         """
         Batch fetch suggestions by their primary key identifiers.
         Preserves candidate order after Max-Passage Pooling (MaxP).
@@ -181,6 +186,8 @@ class SqlSuggestionRepository(
         # Deduplicate while preserving input ranking order
         unique_ids = list(dict.fromkeys(suggestion_ids))
         stmt = select(SuggestionModel).where(SuggestionModel.id.in_(unique_ids))
+        if not include_deleted:
+            stmt = stmt.where(SuggestionModel.is_deleted.is_(False))
         result = await self.session.execute(stmt)
         models = result.scalars().all()
 
@@ -206,6 +213,8 @@ class SqlSuggestionRepository(
                 "secretariat_comment": stmt.excluded.secretariat_comment,
                 "shamsi_date": stmt.excluded.shamsi_date,
                 "context_title": stmt.excluded.context_title,
+                "is_deleted": stmt.excluded.is_deleted,
+                "version": stmt.excluded.version,
                 "updated_at": func.now(),
             },
         )
@@ -235,10 +244,27 @@ class SqlSuggestionRepository(
                 "secretariat_comment": stmt.excluded.secretariat_comment,
                 "shamsi_date": stmt.excluded.shamsi_date,
                 "context_title": stmt.excluded.context_title,
+                "is_deleted": stmt.excluded.is_deleted,
+                "version": stmt.excluded.version,
                 "updated_at": func.now(),
             },
         )
         await self.session.execute(upsert_stmt)
+
+    async def soft_delete(self, suggestion_id: str) -> None:
+        """Soft-delete a suggestion record by setting is_deleted=True and incrementing version."""
+        stmt = (
+            update(SuggestionModel)
+            .where(SuggestionModel.id == suggestion_id)
+            .values(
+                {
+                    SuggestionModel.is_deleted: True,
+                    SuggestionModel.version: SuggestionModel.version + 1,
+                    SuggestionModel.updated_at: func.now(),
+                }
+            )
+        )
+        await self.session.execute(stmt)
 
     async def delete(self, suggestion_id: str) -> None:
         """Delete a suggestion record by its identifier."""

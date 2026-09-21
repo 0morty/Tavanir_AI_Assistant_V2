@@ -48,6 +48,77 @@ class IngestSuggestionResponseDTO:
 
 
 @dataclass(frozen=True)
+class UpdateSuggestionDTO:
+    suggestion_id: str
+    title: str
+    problem: str
+    solution: str
+    status: SuggestionStatus
+    committee_scrutiny: CommitteeScrutiny | None = None
+    description: str | None = None
+    shamsi_date: str | None = None
+    context_title: str | None = None
+    committee_scrutiny_id: int | None = None
+    secretariat_scrutiny: SecretariatScrutiny | None = None
+    secretariat_comment: str | None = None
+    secretariat_scrutiny_id: int | None = None
+
+
+@dataclass(frozen=True)
+class PatchSuggestionDTO:
+    suggestion_id: str
+    title: str | None = None
+    problem: str | None = None
+    solution: str | None = None
+    status: SuggestionStatus | None = None
+    committee_scrutiny: CommitteeScrutiny | None = None
+    description: str | None = None
+    shamsi_date: str | None = None
+    context_title: str | None = None
+    committee_scrutiny_id: int | None = None
+    secretariat_scrutiny: SecretariatScrutiny | None = None
+    secretariat_comment: str | None = None
+    secretariat_scrutiny_id: int | None = None
+
+
+@dataclass(frozen=True)
+class UpdateSuggestionResponseDTO:
+    suggestion_id: str
+    chunks_count: int
+    version: int
+    status: str = "UPDATED"
+
+
+@dataclass(frozen=True)
+class DeleteSuggestionResponseDTO:
+    suggestion_id: str
+    status: str = "DELETED"
+
+
+@dataclass(frozen=True)
+class BulkDeleteSuggestionsDTO:
+    suggestion_ids: list[str]
+
+
+@dataclass(frozen=True)
+class BulkDeleteErrorItemDTO:
+    suggestion_id: str
+    index: int
+    code: str
+    detail: str
+    source_pointer: str
+
+
+@dataclass(frozen=True)
+class BulkDeleteResultDTO:
+    deleted_ids: list[str]
+    errors: list[BulkDeleteErrorItemDTO]
+    total_requested: int
+    total_deleted: int
+    total_failed: int
+
+
+@dataclass(frozen=True)
 class RawSuggestionDataDTO:
     """Raw legacy suggestion record extracted from MSSQL with committee evaluation data."""
 
@@ -101,6 +172,13 @@ __all__ = [
     "AnalyzeSuggestionResponse",
     "CreateSuggestionDTO",
     "IngestSuggestionResponseDTO",
+    "UpdateSuggestionDTO",
+    "PatchSuggestionDTO",
+    "UpdateSuggestionResponseDTO",
+    "DeleteSuggestionResponseDTO",
+    "BulkDeleteSuggestionsDTO",
+    "BulkDeleteErrorItemDTO",
+    "BulkDeleteResultDTO",
     "RawSuggestionDataDTO",
     "SkippedRecordDTO",
     "CheckpointData",

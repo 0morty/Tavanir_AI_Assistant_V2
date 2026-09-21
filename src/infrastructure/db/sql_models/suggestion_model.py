@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, Index, SmallInteger, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.db.sql_models.base import Base, TimestampMixin
@@ -19,6 +28,11 @@ class SuggestionModel(Base, TimestampMixin):
             name="ck_suggestions_status_id",
         ),
         Index("ix_suggestions_status_context", "status_id", "context_title"),
+        Index(
+            "ix_suggestions_active",
+            "id",
+            postgresql_where=text("is_deleted = FALSE"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -41,6 +55,12 @@ class SuggestionModel(Base, TimestampMixin):
     )
     context_title: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, default=1, nullable=False, server_default="1"
     )
 
 

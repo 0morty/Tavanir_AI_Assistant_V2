@@ -9,6 +9,7 @@ from src.application.dtos import (
     HistoricalIngestionResultDTO,
     SkippedRecordDTO,
 )
+from src.application.interfaces import IUnitOfWork
 from src.application.interfaces.i_historical_suggestion_extractor import (
     IHistoricalSuggestionExtractor,
 )
@@ -39,7 +40,6 @@ from src.domain.exceptions import (
 from src.domain.interfaces import (
     ISuggestionChunker,
     ISuggestionVectorRepository,
-    IUnitOfWork,
 )
 from src.infrastructure.configs.settings import (
     historical_ingestion_settings,

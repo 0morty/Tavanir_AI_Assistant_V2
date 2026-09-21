@@ -107,5 +107,29 @@ class IVectorRepository(ABC, Generic[TMetadata]):
         """
         pass
 
+    @abstractmethod
+    async def delete_chunks_by_ids(self, chunk_ids: Sequence[str]) -> None:
+        """
+        Delete an exact list of chunk IDs by point primary key.
+        Essential for compensating failed staging batches without touching active chunks.
+
+        Raises:
+            VectorStorageError: If deletion fails.
+        """
+        pass
+
+    @abstractmethod
+    async def delete_superseded_chunks(
+        self, parent_id: str, active_chunk_ids: Sequence[str]
+    ) -> None:
+        """
+        Delete all chunks for a parent entity that are NOT in the active_chunk_ids list.
+        Executes zero-blackout cutover without state-machine race conditions.
+
+        Raises:
+            VectorStorageError: If cleanup fails.
+        """
+        pass
+
 
 __all__ = ["IVectorRepository"]

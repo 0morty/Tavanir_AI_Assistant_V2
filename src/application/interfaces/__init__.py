@@ -13,6 +13,7 @@ from src.application.interfaces.i_skipped_suggestion_repository import (
 )
 from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
+from src.application.interfaces.i_unit_of_work import IUnitOfWork
 
 __all__ = [
     "IDenseEmbedder",
@@ -24,4 +25,5 @@ __all__ = [
     "IHistoricalSuggestionExtractor",
     "IHybridEmbeddingService",
     "IChunkEmbeddingService",
+    "IUnitOfWork",
 ]

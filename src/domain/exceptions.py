@@ -134,3 +134,21 @@ class SuggestionAlreadyExistsError(DomainError):
     """Raised when attempting to ingest a suggestion whose ID already exists."""
 
     pass
+
+
+class SuggestionNotFoundError(EntityNotFoundError):
+    """Raised when a specific suggestion ID is not found in the repository."""
+
+    pass
+
+
+class SuggestionProcessingConflictError(DomainError):
+    """Raised when a suggestion is currently locked by another concurrent process or version mismatch."""
+
+    pass
+
+
+class SuggestionPayloadValidationError(DomainError):
+    """Raised when a suggestion mutation request payload violates input invariants (e.g. body ID mismatch)."""
+
+    pass

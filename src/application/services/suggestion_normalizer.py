@@ -44,9 +44,7 @@ def normalize_suggestion(
     if suggestion.secretariat_evaluation is not None:
         sec = suggestion.secretariat_evaluation
         norm_sec_comment = (
-            normalizer.normalize(sec.comment)
-            if sec.comment is not None
-            else None
+            normalizer.normalize(sec.comment) if sec.comment is not None else None
         )
         normalized_sec_evaluation = SecretariatEvaluation(
             scrutiny=sec.scrutiny,
@@ -68,8 +66,9 @@ def normalize_suggestion(
         date=suggestion.date,
         context_title=normalized_context_title,
         secretariat_evaluation=normalized_sec_evaluation,
+        is_deleted=suggestion.is_deleted,
+        version=suggestion.version,
     )
 
 
 __all__ = ["normalize_suggestion"]
-

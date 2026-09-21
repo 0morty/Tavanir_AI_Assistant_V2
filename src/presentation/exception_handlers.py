@@ -46,6 +46,9 @@ from src.domain.exceptions import (
     RegulatoryChunkingError,
     SuggestionAlreadyExistsError,
     SuggestionChunkingError,
+    SuggestionNotFoundError,
+    SuggestionPayloadValidationError,
+    SuggestionProcessingConflictError,
     VectorCollectionProvisioningError,
     VectorPayloadValidationError,
     VectorSearchError,
@@ -116,6 +119,21 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         status_code=status.HTTP_404_NOT_FOUND,
         code="SUGGESTION_NOT_FOUND",
         default_pointer=None,
+    ),
+    SuggestionNotFoundError: ErrorSpec(
+        status_code=status.HTTP_404_NOT_FOUND,
+        code="SUGGESTION_NOT_FOUND",
+        default_pointer=None,
+    ),
+    SuggestionProcessingConflictError: ErrorSpec(
+        status_code=status.HTTP_409_CONFLICT,
+        code="SUGGESTION_IN_PROCESSING",
+        default_pointer=None,
+    ),
+    SuggestionPayloadValidationError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="VALIDATION_ERROR",
+        default_pointer="/data",
     ),
     VectorStorageError: ErrorSpec(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

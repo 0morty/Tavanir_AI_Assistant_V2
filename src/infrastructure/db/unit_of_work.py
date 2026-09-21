@@ -4,14 +4,15 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Any, TypeVar, cast
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.interfaces.i_checkpoint_repository import ICheckpointRepository
 from src.application.interfaces.i_skipped_suggestion_repository import (
     ISkippedSuggestionRepository,
 )
+from src.application.interfaces.i_unit_of_work import IUnitOfWork
 from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
-from src.domain.interfaces.i_unit_of_work import IUnitOfWork
 from src.infrastructure.db.repositories.sql.checkpoint_repository import (
     SqlCheckpointRepository,
 )
@@ -120,6 +121,15 @@ class SqlUnitOfWork(IUnitOfWork):
     async def rollback(self) -> None:
         if self._session is not None and not self._committed:
             await self._session.rollback()
+
+    async def try_acquire_advisory_lock(self, lock_key: int) -> bool:
+        """
+        Attempt to acquire a PostgreSQL transaction-scoped advisory mutex
+        for the given 64-bit integer lock key on the active session.
+        """
+        stmt = select(func.pg_try_advisory_xact_lock(lock_key))
+        result = await self.session.execute(stmt)
+        return bool(result.scalar_one())
 
 
 __all__ = ["SqlUnitOfWork"]

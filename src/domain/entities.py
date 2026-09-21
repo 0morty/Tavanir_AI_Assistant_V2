@@ -119,6 +119,20 @@ class Suggestion:
     date: ShamsiDate | None = None
     context_title: str | None = None
     secretariat_evaluation: SecretariatEvaluation | None = None
+    is_deleted: bool = False
+    version: int = 1
+
+    def mark_deleted(self) -> None:
+        """Mark suggestion as soft-deleted."""
+        self.is_deleted = True
+
+    def restore(self) -> None:
+        """Restore soft-deleted suggestion back to active state."""
+        self.is_deleted = False
+
+    def increment_version(self) -> None:
+        """Advance optimistic concurrency version token."""
+        self.version += 1
 
 
 # endregion

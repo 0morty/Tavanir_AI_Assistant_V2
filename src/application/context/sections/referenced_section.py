@@ -4,6 +4,7 @@ from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.application.reference.deterministic_reference_generator import (
     DeterministicReferenceGenerator,
 )
+from src.domain.context.summarizer import Summarizer
 from src.domain.entities import Reference
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
@@ -42,6 +43,7 @@ class ReferencedSection(PromptSection, CompressibleSection):
         default_demand: float = 0.5,
         overflow_strategies: OverflowStrategyStack | None = None,
         default_overflow_strategies: OverflowStrategyStack | None = None,
+        summarizer: Summarizer | None = None,
     ) -> None:
         super().__init__(
             separator=separator,
@@ -51,6 +53,7 @@ class ReferencedSection(PromptSection, CompressibleSection):
             default_demand=default_demand,
             overflow_strategies=overflow_strategies,
             default_overflow_strategies=default_overflow_strategies,
+            summarizer=summarizer,
         )
         self._reference = reference
         self._reference_generator = (

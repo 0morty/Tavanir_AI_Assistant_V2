@@ -74,16 +74,19 @@ def test_plain_text_truncate_zero_capacity_returns_empty_string():
 
 
 def test_plain_text_summarize_delegates_to_summarizer():
-    section = OutputFormatSection("x" * 100)
-    result = section.summarize(
-        "x" * 100, 30, summarizer=FakeSummarizer()
-    )
+    section = OutputFormatSection("x" * 100, summarizer=FakeSummarizer())
+    result = section.summarize("x" * 100, 30)
     assert result == "[fake-summarizer-output]"
 
 
 def test_plain_text_summarize_empty_returns_empty_string():
-    section = OutputFormatSection("")
-    assert section.summarize("", 30, summarizer=FakeSummarizer()) == ""
+    section = OutputFormatSection("", summarizer=FakeSummarizer())
+    assert section.summarize("", 30) == ""
+
+
+def test_plain_text_summarize_without_summarizer_returns_none():
+    section = OutputFormatSection("x" * 10)
+    assert section.summarize("x" * 10, 30) is None
 
 
 def test_plain_text_ignore_is_not_applicable():
@@ -117,10 +120,10 @@ def test_collection_truncate_zero_capacity_returns_empty_string():
 
 
 def test_collection_summarize_compresses_joined_text():
-    section = PlainCollectionSection(_chunks("ab", "cd"))
-    result = section.summarize(
-        "ab\n\ncd", 30, summarizer=FakeSummarizer()
+    section = PlainCollectionSection(
+        _chunks("ab", "cd"), summarizer=FakeSummarizer()
     )
+    result = section.summarize("ab\n\ncd", 30)
     assert result == "[fake-summarizer-output]"
 
 

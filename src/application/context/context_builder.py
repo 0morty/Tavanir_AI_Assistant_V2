@@ -8,9 +8,8 @@ from src.application.context.overflow_strategy_dispatcher import (
 from src.application.dtos import ContextBuilderResult, SectionOutput
 from src.application.interfaces.i_compressible_section import CompressibleSection
 from src.application.prompt.prompt_builder import PromptBuilder
-from src.domain.context.overflow.truncate import TruncateStrategy
-from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
+from src.domain.enums import OverflowStrategy
 
 
 class ContextBuilder:
@@ -43,10 +42,8 @@ class ContextBuilder:
         self,
         *,
         tokenizer: Tokenizer,
-        summarizer: Summarizer | None = None,
     ) -> None:
         self._tokenizer = tokenizer
-        self._summarizer = summarizer
         self._dispatcher = OverflowStrategyDispatcher()
 
     def build(
@@ -130,12 +127,16 @@ class ContextBuilder:
         Walks the section's ``OverflowStrategyStack`` in priority order
         (honouring the restart policy), invoking each strategy through the
         :class:`OverflowStrategyDispatcher` and returning the first result that
-        fits ``capacity``. The builder knows nothing about how ``SUMMARIZE``,
-        ``TRUNCATE``, or ``IGNORE`` are implemented -- the dispatcher owns that
-        mapping. A final truncation safety net guarantees the fitted content
-        never exceeds the capacity, even when the chosen strategy returns an
-        over-capacity result (e.g. an ``IGNORE``-only stack or a lazy
-        summarizer).
+        fits ``capacity``. ``_fit`` owns only the orchestration -- the strategy
+        selection and the loop -- never the reduction itself. Mapping an
+        ``OverflowStrategy`` to its ``Section`` operation
+        (``truncate``/``summarize``/``ignore``) is the dispatcher's job, and
+        the Section owns the actual reduction, so no strategy is ever executed
+        or instantiated here directly. A final ``TRUNCATE`` safety net
+        guarantees the fitted content never exceeds the capacity, even when
+        the chosen strategy returns an over-capacity result (e.g. an
+        ``IGNORE``-only stack); that safety net is also dispatched
+        (``TRUNCATE -> section.truncate``), never executed locally.
         """
         stack = section.overflow_strategies
         best = content
@@ -148,7 +149,6 @@ class ContextBuilder:
                     content,
                     capacity,
                     tokenizer=self._tokenizer,
-                    summarizer=self._summarizer,
                 )
                 if result is None:
                     continue
@@ -156,5 +156,13 @@ class ContextBuilder:
                 if self._tokenizer.count_tokens(result) <= capacity:
                     return result
         if best and self._tokenizer.count_tokens(best) > capacity:
-            best = TruncateStrategy(self._tokenizer).apply(best, capacity)
+            truncated = self._dispatcher.apply(
+                section,
+                OverflowStrategy.TRUNCATE,
+                best,
+                capacity,
+                tokenizer=self._tokenizer,
+            )
+            if truncated is not None:
+                best = truncated
         return best

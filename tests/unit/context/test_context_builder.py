@@ -6,6 +6,7 @@ from src.application.context import ContextBuilder
 from src.application.context.sections import PromptSection, ReferencedSection
 from src.application.prompt import PromptBuilder
 from src.domain.context.overflow.summarize import SummarizeStrategy
+from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.entities import Reference
 from src.domain.enums import OverflowStrategy
@@ -50,6 +51,7 @@ class TextSection(PromptSection):
         default_importance: float = 0.5,
         default_demand: float = 0.5,
         overflow_strategies: OverflowStrategyStack | None = None,
+        summarizer: Summarizer | None = None,
     ) -> None:
         super().__init__(
             importance=importance,
@@ -57,6 +59,7 @@ class TextSection(PromptSection):
             default_importance=default_importance,
             default_demand=default_demand,
             overflow_strategies=overflow_strategies,
+            summarizer=summarizer,
         )
         self._name = name
         self._content = content
@@ -209,12 +212,11 @@ def test_summarize_overflow_with_injected_summarizer():
         TextSection(
             "A",
             "x" * 100,
+            summarizer=summarizer,
             overflow_strategies=OverflowStrategyStack([OverflowStrategy.SUMMARIZE]),
         )
     )
-    result = ContextBuilder(
-        tokenizer=FakeTokenizer(), summarizer=summarizer
-    ).build(builder, max_tokens=10)
+    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=10)
 
     section = result.sections[0]
     assert section.overflowed is True

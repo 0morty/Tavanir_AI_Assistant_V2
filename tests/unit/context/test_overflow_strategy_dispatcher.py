@@ -44,7 +44,7 @@ class SpySection(CompressibleSection):
         self.calls.append("truncate")
         return self.truncate_result
 
-    def summarize(self, content, capacity_tokens, *, summarizer) -> str | None:
+    def summarize(self, content, capacity_tokens) -> str | None:
         self.calls.append("summarize")
         return self.summarize_result
 
@@ -74,7 +74,6 @@ def test_dispatcher_maps_summarize_to_section_summarize():
         "content",
         10,
         tokenizer=FakeTokenizer(),
-        summarizer=RecordingSummarizer(),
     )
     assert result == "summarized"
     assert section.calls == ["summarize"]
@@ -93,8 +92,9 @@ def test_dispatcher_maps_ignore_to_section_ignore():
     assert section.calls == ["ignore"]
 
 
-def test_dispatcher_returns_none_for_summarize_without_summarizer():
+def test_dispatcher_passes_through_none_when_section_summarize_unavailable():
     section = SpySection()
+    section.summarize_result = None
     result = OverflowStrategyDispatcher().apply(
         section,
         OverflowStrategy.SUMMARIZE,
@@ -103,7 +103,7 @@ def test_dispatcher_returns_none_for_summarize_without_summarizer():
         tokenizer=FakeTokenizer(),
     )
     assert result is None
-    assert section.calls == []
+    assert section.calls == ["summarize"]
 
 
 def test_dispatcher_invokes_domain_strategy_through_plain_section():
@@ -117,7 +117,7 @@ def test_dispatcher_invokes_domain_strategy_through_plain_section():
         def body(self) -> str:
             return "abcdefghij"
 
-    section = Plain("abcdefghij")
+    section = Plain("abcdefghij", summarizer=RecordingSummarizer())
     assert (
         dispatcher.apply(
             section,
@@ -135,7 +135,6 @@ def test_dispatcher_invokes_domain_strategy_through_plain_section():
             "abcdefghij",
             3,
             tokenizer=FakeTokenizer(),
-            summarizer=RecordingSummarizer(),
         )
         == "recorded-summary"
     )

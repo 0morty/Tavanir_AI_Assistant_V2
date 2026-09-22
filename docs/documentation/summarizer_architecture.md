@@ -53,19 +53,22 @@ top of that:
 1. **Strict 1:1 mapping** — for chunk summarization, every input chunk yields
    exactly one summary, in the same order. No chunk is lost, **merged,
    reordered, or omitted**.
-2. **Batching under a budget** — as many chunks as possible share a single LLM
-   call, so latency is reduced without ever letting one call's prompt exceed its
-   token capacity.
-3. **Progress is guaranteed** — even when a single chunk alone would overflow
-   the capacity, the batch still takes that chunk, so a large chunk can never
-   produce an infinite loop. The outer `ContextBuilder` truncation safety net
-   absorbs the excess.
-4. **No silent data loss** — if the model output cannot be mapped strictly 1:1
-   after retries, the summarizer **raises** instead of returning a corrupted,
-   partially-mapped result.
-5. **Composition over assembly** — all collaborators (LLM client, tokenizer,
-   prompt builder) are injected; the summarizer never constructs its own
-   dependencies.
+2. **Batch inference, prompts never mixed** — each chunk is rendered as its own
+   independent prompt and the prompts are handed to the LLM as a batch
+   (`complete_many`), so the provider can submit them in a single HTTP request
+   while every chunk keeps a strict `chunk -> prompt -> summary` line. Remaining
+   chunks roll into subsequent batches.
+3. **Progress is guaranteed** — `capacity_tokens` only *gates* the whole call
+   (`<= 0` returns no summaries). A chunk that would overflow is still
+   summarized; the outer `ContextBuilder` truncation safety net absorbs the
+   excess. Empty responses never stall the loop forever: per-item retries are
+   bounded by `max_attempts` and then raise.
+4. **No silent data loss** — if a chunk still has no summary after retries, the
+   summarizer **raises** instead of returning a corrupted, partially-mapped
+   result.
+5. **Composition over assembly** — all collaborators (LLM client, prompt
+   builder) are injected; the summarizer never constructs its own dependencies
+   and never decides *how* a provider batches (that lives in the adapter).
 6. **Same prompt architecture** — summarization prompts are built with the same
    `PromptBuilder`/`PromptSection` machinery as the rest of the Generation API.
 
@@ -85,15 +88,15 @@ class ITextSummarizer(ABC):
 - `max_tokens` on `summarize` is the target upper bound for the summary, when
   known. It is surfaced to the model as an `OUTPUT-FORMAT` instruction (see
   §5) and independently enforced by the `ContextBuilder` truncation safety net.
-- `capacity_tokens` on `summarize_chunks` bounds the token budget of **one
-  batched LLM call**. The adapter decides how many chunks fit; it never exceeds
-  the budget except by the documented single-chunk progress rule.
-- `summarize_chunks` raises when the 1:1 mapping cannot be established after the
+- `capacity_tokens` on `summarize_chunks` *gates* the call: `<= 0` produces no
+  summaries. It does **not** shrink prompt contents; final fitting against the
+  section budget is the `ContextBuilder` truncation safety net's job.
+- `summarize_chunks` raises when a chunk still has no summary after the
   adapter's retries (`ChunkSummarizationError`).
 
 The port lives in the Application layer and references only the LLM-boundary
-abstractions (`ILLMClient`, `Tokenizer`) under `TYPE_CHECKING`-free, required
-constructor injection. It never mentions a concrete provider.
+abstraction (`ILLMClient`) under required constructor injection. It never
+mentions a concrete provider.
 
 ## 4. High-level flow
 
@@ -127,26 +130,25 @@ constructor injection. It never mentions a concrete provider.
                 │
                 ▼
 ┌──────────────────────────────────────────────────────────┐
-│ while remaining chunks exist:                            │
+│ for each round of up to batch_size remaining chunks:     │
 │                                                          │
-│  STEP 1  choose batch = greedy prefix of remaining       │
-│          chunks whose prompt fits capacity_tokens        │
-│          (min 1 chunk — progress guarantee)              │
-│  STEP 2  build one prompt:                               │
+│  STEP 1  build one prompt PER chunk:                     │
 │            ROLE                                          │
 │            SYSTEM-INPUT                                  │
-│            CHUNKS    (joined with "---")                 │
+│            USER-INPUT  = that chunk only                 │
 │            OUTPUT-FORMAT                                 │
-│  STEP 3  call ILLMClient.complete(prompt) once           │
-│  STEP 4  split response on "---"                         │
-│  STEP 5  validate:  #parts == #chunks  AND  no empty     │
-│            │ yes ──► accept                              │
-│            │ no  ──► retry (≤ max_attempts)              │
-│            │        exhausted ──► raise                  │
-│                     ChunkSummarizationError              │
-│  STEP 6  append accepted summaries (order preserved)     │
-│  STEP 7  remove batch from remaining                     │
-│  STEP 8  continue until remaining is empty               │
+│          (chunks are never joined into one prompt)       │
+│  STEP 2  ILLMClient.complete_many(prompts) once          │
+│            → one result per prompt, in order             │
+│            (provider batches them in one HTTP request,   │
+│             e.g. vLLM /chat/completions/batch)           │
+│  STEP 3  assign each non-empty result to its chunk       │
+│            empty ──► add chunk to the retry list         │
+│  STEP 4  retry only the unresolved chunks (a new batch)  │
+│            until none remain  OR  max_attempts exhausted │
+│            ──► raise ChunkSummarizationError             │
+│  STEP 5  append this round's summaries (order preserved) │
+│  STEP 6  continue with the next round of chunks          │
 └──────────────────────────────────────────────────────────┘
                 │
                 ▼
@@ -208,43 +210,37 @@ batch (use `LLMChunkSummarizer` for shared-call batching).
 ## 6. `ChunkPromptBuilder` — the dedicated chunk prompt builder
 
 `src/infrastructure/services/summarizers/chunk_prompt_builder.py` owns the
-**chunk-summarization prompt format** and its **parsing**, keeping the
-summarizer logic free of prose.
+**chunk-summarization prompt format**. Because each chunk gets its own
+independent prompt, there is no separator protocol and no response parsing here
+any more — the builder's only job is to render one prompt around one chunk.
 
 ### 6.1 Fixed structure
 
 ```text
-Role → System Input → Chunks → Output Format
+Role → System Input → chunk (User Input) → Output Format
 ```
 
-The chunks slot is the **`USER-INPUT`** slot of the shared `PromptBuilder`
+The chunk is placed in the **`USER-INPUT`** slot of the shared `PromptBuilder`
 (rendered after `SYSTEM-INPUT`, before `OUTPUT-FORMAT`), so the final order
-matches the required `Role → System Input → Chunks → Output Format` structure.
+matches the required `Role → System Input → User Input → Output Format`
+structure.
 
-### 6.2 Constants
+### 6.2 Semantics
 
-| Constant | Value | Meaning |
-|---|---|---|
-| `CHUNK_DELIMITER` | `"---"` | Structural boundary that separates the chunk summaries **and** the input chunks |
-| `CHUNK_SEPARATOR` | `"\n---\n"` | Joins input chunks inside the prompt |
+The prompt texts (Persian defaults) pin **isolation**: the model is told to
+summarize *only* the text given — never merge, compare, or combine it with
+anything else — and to keep numbers, names, and language. A completed summary
+is therefore attributable to exactly one chunk and never influenced by another
+chunk.
 
-The delimiter is **structural**: the system prompt instructs the model that it
-must never appear *inside* a summary, and `split()` relies on it to parse the
-response back into one block per summary.
-
-### 6.3 Members
+### 6.3 Member
 
 | Member | Responsibility |
 |---|---|
-| `format_chunks(chunks)` | Join the chunks with `CHUNK_SEPARATOR` |
-| `build(chunks)` | Render the full prompt in the fixed four-slot order, with the chunks in the `USER-INPUT` slot |
-| `split(response)` | `[part.strip() for part in response.split("---")]` — one parsed summary block per delimiter |
+| `build(chunk)` | Render the full single-chunk prompt in the fixed four-slot order, with the chunk in the `USER-INPUT` slot |
 
-The chunk prompt (Persian default basics): the system input pins the rules
-(never merge/omit/reorder between chunks, preserve order, keep numbers/names,
-output in the input language, never use `---` inside a summary), and the output
-format mandates exactly as many summaries as input chunks in the layout
-`[خلاصهٔ ۱]\n---\n[خلاصهٔ ۲]\n---\n...`.
+There is **no** `format_chunks` / `split` / delimiter API: those belonged to the
+old join-then-split design and are gone.
 
 ## 7. `LLMChunkSummarizer` — batched, strict 1:1 chunk compression
 
@@ -255,113 +251,84 @@ format mandates exactly as many summaries as input chunks in the layout
 ```python
 LLMChunkSummarizer(
     llm_client: ILLMClient,
-    tokenizer: Tokenizer,
     *,
     builder: ChunkPromptBuilder | None = None,   # default: ChunkPromptBuilder()
     max_attempts: int = 3,                        # ≥ 1
-    capacity_reserve: int = 0,                    # ≥ 0
+    batch_size: int = 32,                         # ≥ 1
 )
 ```
 
-- **`llm_client` and `tokenizer` are required** (type-checked in the
-  constructor, rejected with `TypeError`). No `= None` + lazy instantiation.
+- **`llm_client` is required** (type-checked in the constructor, rejected with
+  `TypeError`). No `= None` + lazy instantiation. The summarizer never decides
+  *how* batching happens — it hands a list of prompts to
+  `ILLMClient.complete_many`, and each adapter batches as its provider allows.
 - `builder` defaults to the standard `ChunkPromptBuilder` (an immutable-strategy
   default behind an explicit seam); a custom builder can be injected for tests
   or tuning.
-- `max_attempts` bounds the retry loop per batch (validated `≥ 1`).
-- `capacity_reserve` shrinks the usable budget, e.g. to keep head-room for model
-  padding (validated `≥ 0`).
+- `max_attempts` bounds the per-item retry rounds (validated `≥ 1`).
+- `batch_size` caps how many chunks share one `complete_many` call (validated
+  `≥ 1`). Remaining chunks are processed in subsequent rounds.
 
-### 7.2 Batch selection (`_choose_batch`) — the token-budget fitting
-
-For each batch, the account is:
-
-```text
-available       = max(0, capacity_tokens - capacity_reserve)
-overhead        = tokenizer.count_tokens(builder.build([]))
-separator_cost  = tokenizer.count_tokens("\n---\n")
-
-scan chunks in order, appending chunk C to the batch while
-    overhead + used + (separator_cost if batch non-empty else 0)
-                + tokenizer.count_tokens(C)  ≤  available
-
-if nothing fit  →  batch = [chunks[0]]        (progress guarantee)
-```
-
-- `overhead` is the once-per-call fixed cost of the `ROLE` + `SYSTEM-INPUT` +
-  `OUTPUT-FORMAT` slots (measured by building the prompt with **zero** chunks —
-  the empty `USER-INPUT` slot renders as `""` and is skipped by `assemble`).
-- The separator cost is paid **between** chunks, so the first chunk in a batch
-  adds none.
-- Token accounting goes exclusively through the injected domain `Tokenizer`
-  (`src/domain/context/tokenizer.py`) — never character guesses — exactly like
-  `TRUNCATE`.
-- The **min-batch-of-one** rule guarantees forward progress: no chunk size can
-  stall the loop. The resulting over-capacity prompt is acceptable because the
-  `ContextBuilder` final truncation safety net enforces the section budget
-  downstream.
-
-### 7.3 Response validation and retry (`_summarize_batch`)
+### 7.2 Batching (`summarize_chunks`) — rounds and the `complete_many` seam
 
 ```python
-expected = len(batch)
-for attempt in range(max_attempts):
-    response = llm_client.complete(prompt).strip()
-    parts    = builder.split(response)            # split on "---", stripped
-    if len(parts) == expected and all(parts):     # strict 1:1 + non-empty
-        return parts
-    last_detail = f"expected {expected} summaries, got {len(parts)}"
-raise ChunkSummarizationError(...)
+for start in range(0, len(chunks), batch_size):
+    group = chunks[start:start + batch_size]
+    results += _summarize_group(group)
 ```
 
-Validation is deliberately strict on **two** axes:
+- Chunks are consumed **in order**, `batch_size` at a time; each round produces
+  its own `complete_many` call, so a collection is never supposed to fit a
+  single call.
+- `complete_many` is **the port seam** (`ILLMClient.complete_many`, with a
+  default that degrades to one `complete` per prompt) — the adapter owns
+  batching. In this codebase `OpenAILLMClient` submits all prompts in **one**
+  HTTP request via the vLLM batch endpoint and falls back to bounded concurrency
+  when the provider has no batch endpoint (see §9).
 
-- **Count**: `len(parts) == expected` — one summary per chunk. A response with
-  fewer parts means the model merged or omitted chunks; more parts means it
-  invented extra summaries.
-- **Emptiness**: `all(parts)` — every part must be non-empty after stripping. An
-  empty block is treated as a lost/missing summary, not accepted.
-
-A mismatch re-requests the whole batch (same prompt) up to `max_attempts`. After
-the last attempt the batch **raises `ChunkSummarizationError`** — the collection
-is never partially summarized and never silently resumed with a corrupted
-mapping.
-
-### 7.4 The outer loop (`summarize_chunks`)
+### 7.3 Per-item validation and retry (`_summarize_group`)
 
 ```python
-results   = []
-remaining = list(chunks)
-while remaining:
-    batch     = _choose_batch(remaining, capacity_tokens)
-    prompt    = builder.build(batch)
-    results  += _summarize_batch(batch, prompt)
-    remaining = remaining[len(batch):]
-return results
+prompts = [builder.build(chunk) for chunk in chunks]
+summaries = [""] * len(chunks)
+pending   = range(len(chunks))
+attempt   = 0
+while pending:
+    if attempt >= max_attempts: raise ChunkSummarizationError(...)
+    responses = llm_client.complete_many([prompts[i] for i in pending])
+    unresolved = []
+    for position, chunk_index in enumerate(pending):
+        stripped = (responses[position] or "").strip()
+        if stripped:   summaries[chunk_index] = stripped
+        else:          unresolved.append(chunk_index)
+    pending = unresolved
+    attempt += 1
+return summaries
 ```
 
-Edge cases:
+Validation is deliberately strict on **one** axis:
+
+- **Emptiness**: a result that is empty (or missing) after stripping means the
+  model produced no summary for that chunk. That chunk alone is re-requested in
+  the next round; chunks that already resolved are never re-sent.
+
+There is no **count** axis to validate: because each chunk has its own prompt
+and `complete_many` returns exactly one result per prompt, the 1:1 mapping is
+guaranteed **by construction** (the adapter raises `LLMAPIError` if the batch
+response cannot be indexed back onto the prompts). After the last attempt any
+still-empty chunk raises `ChunkSummarizationError` — the collection is never
+partially summarized and never silently resumed with a corrupted mapping.
+
+### 7.4 Edge cases
 
 - **Empty input** or `capacity_tokens <= 0` → returns `[]` immediately (no LLM
   call).
 - **Single text** (`summarize`) → `summarize_chunks([text], capacity_tokens)`.
-  A missing/zero `max_tokens` uses the documented default `_DEFAULT_SUMMARIZE_BUDGET
-  = 2048`.
-
-### 7.5 Worked example (char-based tokenizer, 1 char = 1 token)
-
-Assume `overhead = len(builder.build([])) = 80`, `separator_cost = 5`
-(`"\n---\n"`), chunks of `4` tokens each, three chunks total.
-
-| capacity_tokens | batch₁ | batch₂ | LLM calls |
-|---|---|---|---|
-| `80 + 2*(5 + 4) = 98` | `[a, b]` (uses 80+9+9=98) | `[c]` | 2 |
-| `80 + 3*(5 + 4) = 107` | `[a, b, c]` (uses 107) | — | 1 |
-| `5` (tiny) | `[a]` (progress rule) | `[b]` | 2 |
-
-The second row shows the batching goal met — the whole collection in a single
-LLM call. The third row shows the progress guarantee: even a capacity that
-cannot hold the fixed overhead never stalls the loop.
+  A missing/zero `max_tokens` uses the documented default
+  `_DEFAULT_SUMMARIZE_BUDGET = 2048`, which only *gates* whether the call runs.
+- **Tiny capacity** — any positive capacity still summarizes, because capacity
+  never limits prompt contents (final fitting is the `ContextBuilder` truncation
+  safety net's job downstream).
 
 ## 8. How the summarizer is used by Sections
 
@@ -435,14 +402,15 @@ the summarizer returned a longer result than requested.
 
 ## 9. Composition root wiring
 
-In `src/containers.py` (`Container`, the single composition root), the
-single-text summarizer is fully wired:
+In `src/containers.py` (`Container`, the single composition root), both
+summarizers are fully wired:
 
 ```python
 generation_client  = providers.Resource(init_generation_client, ...)   # pooled AsyncOpenAI
 llm_client         = providers.Singleton(OpenAILLMClient, client=generation_client,
                                          model=generation_settings.LLM_MODEL, ...)
 llm_summarizer     = providers.Singleton(LLMSummarizer, llm_client=llm_client)
+chunk_summarizer   = providers.Singleton(LLMChunkSummarizer, llm_client=llm_client)
 ```
 
 - `generation_settings` (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_TIMEOUT`,
@@ -450,26 +418,31 @@ llm_summarizer     = providers.Singleton(LLMSummarizer, llm_client=llm_client)
 - `OpenAILLMClient` (`src/infrastructure/services/llm/openai_llm_client.py`)
   drives chat completions through the pooled `AsyncOpenAI` client from
   `LLMClientRegistry` (`src/infrastructure/services/llm/llm_client_registry.py`),
-  mapping provider failures onto the LLM exception hierarchy. Its `complete()` is
-  **synchronous by contract** (the whole Generation pipeline is synchronous); it
-  bridges the async client with `asyncio.run` and must run in a thread without a
-  running event loop.
+  mapping provider failures onto the LLM exception hierarchy. Its `complete()` /
+  `complete_many()` are **synchronous by contract** (the whole Generation
+  pipeline is synchronous); they bridge the async client with `asyncio.run` and
+  must run in a thread without a running event loop.
+- **Batching strategy:** `complete_many` first tries vLLM's OpenAI-compatible
+  batch endpoint `POST /v1/chat/completions/batch` (all prompts in one HTTP
+  request, one conversation per prompt, response carries one choice per
+  conversation indexed `0..N-1`). Providers without a batch endpoint answer with
+  a 404, and the client falls back to issuing the prompts concurrently
+  (continuous batching) bounded by `max_concurrency` (default 32). There is no
+  tokenizer dependency any more — the chunk summarizer no longer budget-fits,
+  which also closes the former tokenizer wiring gap.
 
-**Known wiring gap (chunk summarizer):** `LLMChunkSummarizer` additionally needs
-a runnable domain `Tokenizer`. The only adapter — `GemmaTokenizer`
-(`src/infrastructure/services/tokenizers/gemma_tokenizer.py`) — requires the
-`transformers` dependency, which is **not installed** (out-of-sync
-`requirements.txt`). This mirrors the already-documented `context_builder`
-tokenizer gap: the seam (`chunk_summarizer` on the collection sections) and its
-test coverage exist; the DI wiring lives entirely inside the composition root and
-is completed once a runnable tokenizer adapter exists. It is **not** added
-outside `containers.py`.
+**Known wiring seam:** the `chunk_summarizer` and `llm_summarizer` providers
+exist in the composition root, but the prompt Sections that *consume* them
+(`ReferencedCollectionSection`, `ReferencedSection`) are not yet wired to these
+providers — that wiring belongs to the `context_builder` provider, which is
+still gated on the `GemmaTokenizer` install gap (`transformers` not installed).
+The summarizers themselves are fully runnable.
 
 ## 10. Error model
 
 | Exception | Base | Raised when |
 |---|---|---|
-| `ChunkSummarizationError` | `LLMBaseError` (`src/application/exceptions.py`) | A batch response still mismatches the 1:1 mapping after `max_attempts` — the collection is never sold as partially summarized |
+| `ChunkSummarizationError` | `LLMBaseError` (`src/application/exceptions.py`) | One or more chunks still have no non-empty summary after `max_attempts` — the collection is never sold as partially summarized |
 
 `OpenAILLMClient` upstream errors flow through the existing LLM hierarchy
 (`LLMConnectionError` / `LLMAPIError` / `LLMAuthenticationError`); a summarizer
@@ -481,51 +454,59 @@ as before this feature.
 
 ## 11. Design notes and trade-offs
 
-- **Batching vs. one-call-per-chunk.** `LLMChunkSummarizer` trades per-batch
-  latency for a strict structural protocol (`---` + count validation); the model
-  can fail that protocol, which is what the retry/raise path absorbs.
-  `LLMSummarizer.summarize_chunks` avoids the risk entirely (1:1 by
-  construction) at the cost of one call per chunk.
-- **A delimiter is a correctness boundary.** The `---` marker is both
-  an input joiner and an output parser; because the prompt forbids it inside a
-  summary, a count mismatch is a reliable signal of corruption rather than of
-  content.
-- **Strictness over resilience.** A merged/reordered/omitted summary is never
+- **Batching vs. one-call-per-chunk.** `LLMChunkSummarizer` moves batching to
+  the provider seam (`ILLMClient.complete_many`): one HTTP request (vLLM batch
+  endpoint) or bounded concurrency can serve a round of chunks with zero
+  merging. Isolation is *by construction* — each chunk has its own prompt, so
+  no response protocol (separators, counts) can be violated. `LLMSummarizer`
+  still makes one `complete` call per chunk, which is simpler but never batched.
+- **No delimiter, no controlled-merge hazard.** The old join-then-split design
+  relied on `---` both as an input joiner and an output parser, giving the model
+  a chance to merge/reorder summaries. Independent prompts make chunk-to-summary
+  attribution structural, and retries re-send only the unresolved chunk.
+- **Strictness over resilience.** An empty (lost) summary is never silently
   accepted. The price is a possible `ChunkSummarizationError`; the guarantee is
   that downstream code never sees a silently wrong chunk-to-summary mapping.
-- **Budgets are hints + verified in two places.** Fixed overhead is pre-measured
-  via `build([])`, input is greedily capped, and the `ContextBuilder` truncation
-  safety net enforces the section budget as a hard boundary.
+- **Budgets are gates; the section budget is enforced downstream.** Capacity no
+  longer shapes prompt contents — `capacity_tokens <= 0` means "no call", and the
+  `ContextBuilder` truncation safety net enforces the section budget as a hard
+  boundary after summarization.
+- **Indexed batch responses.** The OpenAI-compatible batch contract returns one
+  choice per conversation indexed `0..N-1`; the client maps choices back by
+  `index` and validates the count, so a wrong-count/out-of-range response raises
+  `LLMAPIError` rather than misaligning summaries to chunks.
 
 ## 12. Tests
 
 | File | Coverage |
 |---|---|
 | `tests/unit/infrastructure/test_llm_summarizer.py` | Port conformance, required-collaborator rejection, prompt assembly, budget surfacing, `summarize_chunks` 1:1 |
-| `tests/unit/infrastructure/test_chunk_prompt_builder.py` | Fixed `Role → System Input → Chunks → Output Format` order, `---` joins/splits, custom prompts |
-| `tests/unit/infrastructure/test_llm_chunk_summarizer.py` | Batch splitting across calls, retry-then-succeed, raise after exhausted attempts, single-chunk progress on tiny capacity, injected builder, single-text mode |
+| `tests/unit/infrastructure/test_chunk_prompt_builder.py` | Fixed `Role → System Input → User Input → Output Format` order, one-chunk isolation, no `---`, custom prompts |
+| `tests/unit/infrastructure/test_llm_chunk_summarizer.py` | `complete_many` used (never `complete`), whole-collection round, `batch_size` rounding into follow-up rounds, per-item retry of only unresolved chunks, raise after exhausted attempts, tiny-capacity progress, injected builder, single-text mode |
+| `tests/unit/infrastructure/test_openai_llm_client.py` | Single batch request with one conversation per prompt, choice-index mapping, 404 fallback to concurrent completions, batch error translation, count/index contract violations, missing content |
 | `tests/unit/context/test_referenced_section_llm_summarize.py` | `llm_summarizer` seam, fallback to plain `Summarizer`, dispatcher flow |
 | `tests/unit/context/test_referenced_collection_chunk_summarize.py` | `chunk_summarizer` seam on `ChunksSection`/`HistorySection`, item-driven semantics, empty/capsule cases, injection-not-instantiation |
 
-Tests use a char-based `FakeTokenizer` (1 char = 1 token) and recording LLM
-doubles, so batch-fitting math is deterministic and no model is needed.
+Tests use recording LLM doubles that capture the batch of prompts, so
+rounding/ordering/retry logic is deterministic and no model or network is
+needed.
 
 ## 13. File map
 
 | Layer | File | Role |
 |---|---|---|
 | Interface | `src/application/interfaces/i_text_summarizer.py` | Aggregate port (`summarize` + `summarize_chunks`) |
-| Interface | `src/application/interfaces/i_llm_client.py` | LLM invocation contract consumed by both adapters |
+| Interface | `src/application/interfaces/i_llm_client.py` | LLM invocation contract (`complete` + `complete_many`) consumed by both adapters |
 | Infrastructure | `src/infrastructure/services/summarizers/llm_summarizer.py` | Single-text adapter + `SummarizationPrompts` |
-| Infrastructure | `src/infrastructure/services/summarizers/chunk_prompt_builder.py` | Chunk prompt format/parse (`ChunkPromptBuilder`, `ChunkSummarizationPrompts`) |
-| Infrastructure | `src/infrastructure/services/summarizers/llm_chunk_summarizer.py` | Batched strict-1:1 adapter |
-| Infrastructure | `src/infrastructure/services/llm/openai_llm_client.py` | OpenAI-compatible `ILLMClient` adapter |
+| Infrastructure | `src/infrastructure/services/summarizers/chunk_prompt_builder.py` | Single-chunk prompt format (`ChunkPromptBuilder`, `ChunkSummarizationPrompts`) |
+| Infrastructure | `src/infrastructure/services/summarizers/llm_chunk_summarizer.py` | Batched strict-1:1 adapter (rounds + per-item retry) |
+| Infrastructure | `src/infrastructure/services/llm/openai_llm_client.py` | OpenAI-compatible `ILLMClient` adapter — batch endpoint + concurrency fallback |
 | Application | `src/application/context/sections/referenced_section.py` | `llm_summarizer` seam (single text) |
 | Application | `src/application/context/sections/referenced_collection_section.py` | `chunk_summarizer` seam (collections) |
 | Application | `src/application/context/sections/chunks_section.py`, `history_section.py` | Forward `chunk_summarizer` |
 | Application | `src/application/context/sections/{role,system_input,user_input,output_format}_section.py` | Forward `llm_summarizer` |
 | Application | `src/application/exceptions.py` | `ChunkSummarizationError` (LLM hierarchy) |
-| Composition | `src/containers.py` | `llm_client` + `llm_summarizer` providers; chunk summarizer wiring deferred (tokenizer gap) |
+| Composition | `src/containers.py` | `llm_client` + `llm_summarizer` + `chunk_summarizer` providers (all wired) |
 
 ## Related documents
 

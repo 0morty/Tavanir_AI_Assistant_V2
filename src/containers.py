@@ -63,7 +63,7 @@ from src.infrastructure.services.embeddings.persian_bm25_embedder import (
 )
 from src.infrastructure.services.llm import OpenAILLMClient
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
-from src.infrastructure.services.summarizers import LLMSummarizer
+from src.infrastructure.services.summarizers import LLMChunkSummarizer, LLMSummarizer
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
@@ -238,5 +238,11 @@ class Container(containers.DeclarativeContainer):
     # 14. Generation LLM Summarizer (Context overflow SUMMARIZE strategy)
     llm_summarizer: providers.Provider[ITextSummarizer] = providers.Singleton(
         LLMSummarizer,
+        llm_client=llm_client,
+    )
+
+    # 15. Generation LLM Chunk Summarizer (batch inference, one prompt per chunk)
+    chunk_summarizer: providers.Provider[ITextSummarizer] = providers.Singleton(
+        LLMChunkSummarizer,
         llm_client=llm_client,
     )

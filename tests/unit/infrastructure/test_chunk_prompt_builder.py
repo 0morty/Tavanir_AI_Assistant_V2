@@ -7,33 +7,30 @@ from src.infrastructure.services.summarizers import (
 
 def test_chunk_prompt_builder_renders_fixed_section_order():
     builder = ChunkPromptBuilder()
-    prompt = builder.build(["چانک آ", "چانک ب"])
+    prompt = builder.build("چانک آ")
 
     role = prompt.index("متخصص خلاصه")
-    system = prompt.index("ادغام، حذف")
-    chunks = prompt.index("چانک آ")
-    output = prompt.index("بلوک مستقل")
-    assert role < system < chunks < output
+    system = prompt.index("متن زیر را خلاصه کن")
+    chunk = prompt.index("چانک آ")
+    output = prompt.index("فقط متن خلاصه")
+    assert role < system < chunk < output
 
 
-def test_chunk_prompt_builder_joins_chunks_with_separator():
+def test_chunk_prompt_builder_embeds_exactly_one_chunk():
     builder = ChunkPromptBuilder()
-    prompt = builder.build(["آ", "ب", "ج"])
+    prompt = builder.build("چانک آ")
 
-    assert "آ\n---\nب\n---\nج" in prompt
+    assert "چانک آ" in prompt
+    assert "---" not in prompt
 
 
-def test_chunk_prompt_builder_splits_one_summary_per_delimiter():
+def test_chunk_prompt_builder_builds_independent_prompt_per_chunk():
     builder = ChunkPromptBuilder()
-    response = "خلاصه ۱\n---\nخلاصه ۲\n---\nخلاصه ۳"
+    first = builder.build("چانک آ")
+    second = builder.build("چانک ب")
 
-    assert builder.split(response) == ["خلاصه ۱", "خلاصه ۲", "خلاصه ۳"]
-
-
-def test_chunk_prompt_builder_split_strips_whitespace():
-    builder = ChunkPromptBuilder()
-
-    assert builder.split("  آ  \n---\n ب ") == ["آ", "ب"]
+    assert "چانک آ" in first and "چانک ب" not in first
+    assert "چانک ب" in second and "چانک آ" not in second
 
 
 def test_chunk_prompt_builder_honours_custom_prompts():
@@ -44,7 +41,7 @@ def test_chunk_prompt_builder_honours_custom_prompts():
     )
     builder = ChunkPromptBuilder(prompts=prompts)
 
-    prompt = builder.build(["chunk"])
+    prompt = builder.build("chunk")
 
     assert "role-x" in prompt
     assert "system-y" in prompt

@@ -65,6 +65,17 @@ class EmbeddingSettings(BaseSettings):
     EMBEDDING_DOCUMENT_PREFIX: str = ""
 
 
+class GenerationSettings(BaseSettings):
+    model_config = _base_config
+
+    # LLM provider used by the Generation API (completions / summarization)
+    LLM_PROVIDER: str = "vllm"
+    LLM_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
+    LLM_TIMEOUT: float = 60.0
+    LLM_TEMPERATURE: float = 0.2
+    LLM_MAX_TOKENS: int = 4096
+
+
 class BM25Settings(BaseSettings):
     model_config = _base_config
 
@@ -149,6 +160,7 @@ class SecuritySettings(BaseSettings):
 
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
+generation_settings = GenerationSettings()
 embedding_settings = EmbeddingSettings()
 bm25_settings = BM25Settings()
 qdrant_settings = QdrantSettings()

@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from src.application.context.sections.referenced_section import ReferencedSection
+from src.application.interfaces.i_chunk_summarizer import IChunkSummarizer
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.domain.context.overflow.summarize import SummarizeStrategy
 from src.domain.context.overflow.truncate import TruncateStrategy
@@ -34,6 +35,9 @@ class ReferencedCollectionSection(ReferencedSection):
     internal shape a private concern. ``ignore`` keeps items in order while
     they fit and drops the rest; ``truncate`` and ``summarize`` apply the
     universal algorithms to the collection's joined (reference-enriched) text.
+    When a :class:`IChunkSummarizer` is injected, ``summarize`` runs its
+    batched 1:1 chunk summarization instead, mapping every item to its own
+    summary.
     """
 
     def __init__(
@@ -51,6 +55,7 @@ class ReferencedCollectionSection(ReferencedSection):
         overflow_strategies: OverflowStrategyStack | None = None,
         default_overflow_strategies: OverflowStrategyStack | None = None,
         summarizer: Summarizer | None = None,
+        chunk_summarizer: IChunkSummarizer | None = None,
     ) -> None:
         super().__init__(
             reference=reference,
@@ -66,6 +71,7 @@ class ReferencedCollectionSection(ReferencedSection):
         )
         self.item_separator = item_separator
         self._items = list(items)
+        self._chunk_summarizer = chunk_summarizer
 
     @property
     def items(self) -> Sequence[Any]:
@@ -141,8 +147,20 @@ class ReferencedCollectionSection(ReferencedSection):
         """Compress the collection's joined text through the Section's own summarizer.
 
         Returns ``None`` when no summarizer is configured, so the caller falls
-        through to the next strategy.
+        through to the next strategy. When an :class:`IChunkSummarizer` is
+        injected, each item is summarized independently (strict 1:1 mapping)
+        and the summaries are joined with ``item_separator``.
         """
+        if self._chunk_summarizer is not None:
+            if not self._items or capacity_tokens <= 0:
+                return ""
+            texts = self._enriched_item_texts()
+            if not texts:
+                return ""
+            summaries = self._chunk_summarizer.summarize(
+                texts, capacity_tokens=capacity_tokens
+            )
+            return self.item_separator.join(summaries)
         if self._summarizer is None:
             return None
         if not self._items or capacity_tokens <= 0:

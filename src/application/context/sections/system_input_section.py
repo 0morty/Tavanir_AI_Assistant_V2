@@ -1,4 +1,5 @@
 from src.application.context.sections.referenced_section import ReferencedSection
+from src.application.interfaces.i_llm_summarizer import ILLMSummarizer
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.domain.context.summarizer import Summarizer
 from src.domain.entities import Reference
@@ -18,6 +19,7 @@ class SystemInputSection(ReferencedSection):
         demand: float | None = None,
         overflow_strategies: OverflowStrategyStack | None = None,
         summarizer: Summarizer | None = None,
+        llm_summarizer: ILLMSummarizer | None = None,
     ) -> None:
         super().__init__(
             reference=reference,
@@ -28,6 +30,7 @@ class SystemInputSection(ReferencedSection):
             default_demand=0.5,
             overflow_strategies=overflow_strategies,
             summarizer=summarizer,
+            llm_summarizer=llm_summarizer,
         )
         self._content = content
 

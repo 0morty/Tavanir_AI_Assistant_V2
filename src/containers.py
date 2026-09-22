@@ -15,6 +15,8 @@ from src.application.context.overflow_strategy_dispatcher import (
 from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
 from src.application.interfaces.i_demand_allocator import IDemandAllocator
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
+from src.application.interfaces.i_llm_client import ILLMClient
+from src.application.interfaces.i_llm_summarizer import ILLMSummarizer
 from src.application.interfaces.i_overflow_strategy_dispatcher import (
     IOverflowStrategyDispatcher,
 )
@@ -40,6 +42,7 @@ from src.infrastructure.configs.settings import (
     bm25_settings,
     db_settings,
     embedding_settings,
+    generation_settings,
     qdrant_settings,
 )
 from src.infrastructure.db import (
@@ -58,7 +61,9 @@ from src.infrastructure.services.embeddings.openai_dense_embedder import (
 from src.infrastructure.services.embeddings.persian_bm25_embedder import (
     PersianBm25Embedder,
 )
+from src.infrastructure.services.llm import OpenAILLMClient
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
+from src.infrastructure.services.summarizers import LLMSummarizer
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
@@ -77,6 +82,13 @@ async def init_embedding_client(
     registry: LLMClientRegistry, provider: str, timeout: float
 ) -> AsyncOpenAI:
     """Resolves or creates the AsyncOpenAI client for the embedding provider."""
+    return await registry.get_client(provider, timeout=timeout)
+
+
+async def init_generation_client(
+    registry: LLMClientRegistry, provider: str, timeout: float
+) -> AsyncOpenAI:
+    """Resolves or creates the AsyncOpenAI client for the Generation provider."""
     return await registry.get_client(provider, timeout=timeout)
 
 
@@ -206,4 +218,25 @@ class Container(containers.DeclarativeContainer):
     reference_cache: providers.Provider[ReferenceCache] = providers.Singleton(
         ReferenceCache,
         cache_dir=providers.Object(".cache/references"),
+    )
+
+    # 13. Generation LLM Client (OpenAI-compatible, connection-pooled)
+    generation_client = providers.Resource(
+        init_generation_client,
+        registry=client_registry,
+        provider=generation_settings.LLM_PROVIDER,
+        timeout=generation_settings.LLM_TIMEOUT,
+    )
+    llm_client: providers.Provider[ILLMClient] = providers.Singleton(
+        OpenAILLMClient,
+        client=generation_client,
+        model=generation_settings.LLM_MODEL,
+        temperature=generation_settings.LLM_TEMPERATURE,
+        max_tokens=generation_settings.LLM_MAX_TOKENS,
+    )
+
+    # 14. Generation LLM Summarizer (Context overflow SUMMARIZE strategy)
+    llm_summarizer: providers.Provider[ILLMSummarizer] = providers.Singleton(
+        LLMSummarizer,
+        llm_client=llm_client,
     )

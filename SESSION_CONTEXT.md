@@ -88,12 +88,10 @@ Reference.fluent_text()
 ### Doc coverage vs `reference_architecture.md`
 - **Implemented:** §1–2 (concepts), §3–4 (section hierarchy), §6–8 (`Reference`, `ReferenceDetails`,
   None/available-property exclusion), §9–10 (canonical + hash), §11–12 (`fluent_text()` optional/
-  `NotImplementedError`), §13 (generator, concrete-text contract), §16 (`TemplateValidator`),
-  §19–22 (template method, collection behavior, missing references),
-  §23–29 (separation, dependency direction, rules).
-- **Not yet implemented:** §14 LLM-based `ReferenceGenerator`, §15 placeholder substitution,
-  §17 `ReferenceCache`, and the §18 `MISS → LLM` branch — user stated the LLM generator
-  needs **ContextBuilder completed first**.
+  `NotImplementedError`), §13 (generator, concrete-text contract), §14 LLM-based `ReferenceGenerator`,
+  §15 placeholder substitution, §16 (`TemplateValidator`), §17 `ReferenceCache`, §18 `MISS → LLM`
+  cache-resolution branch, §19–22 (template method, collection behavior, missing references),
+  §23–29 (separation, dependency direction, rules). **The entire doc is now implemented.**
 - **`TemplateValidator` behavior (new spec, supersedes the earlier session's plan):**
   extracts `[property_name]` placeholders with a regex, validates **existence only** against
   `ReferenceDetails.properties` (`(name, type)` tuples), and reports unknown properties via
@@ -226,21 +224,25 @@ Reference entities were ADDED there at the user's direction (purely additive, ex
 
 ## 8. Next steps
 
-Order matters. `ContextBuilder` is now implemented and **no longer blocks §14**.
+Order matters. `ContextBuilder` and the ENTIRE reference_architecture.md (§1–29) are **now implemented**, including the §18 cache-resolution flow.
 
-1. **Finish + commit the current in-progress scope** (see §3): the `ContextBuilder`
-   pipeline, the `CapacityAllocator` policy, and `PromptBuilder.assemble` —
-   synchronize the docs (`dynamic_section_capacity_allocation.md`,
-   `overflow_strategies.md`, `prompt_builder_entities.md`, `AGENTS.md`,
-   `docs/index.md`) and commit (suggested: `refactor(context): delegate allocation
-   and assembly out of ContextBuilder`).
-2. Implement the ENTIRE reference_architecture.md (the session purpose). Gap state:
-   - `TemplateValidator` (§16) — done (new spec; see §3). Generator wiring of the validator
-     not yet needed: `DeterministicReferenceGenerator` does not produce templates.
-   - **LLM-based `ReferenceGenerator` (§14) + `ReferenceCache` (§17) + placeholder substitution (§15)
-     + the §18 MISS→LLM branch — unblocked now.** Whether the LLM generator builds its
-     prompt via `ContextBuilder` or a simpler string is still an open design decision.
+1. **Reference architecture — status: COMPLETE.** All reference sections are done:
+   - `TemplateValidator` (§16) — done.
+   - LLM-based `ReferenceGenerator` (§14) + placeholder substitution (§15) — done
+     (`LLMBaseReferenceGenerator`, `template_filler.py`).
+   - `ReferenceCache` (§17) + §18 MISS→LLM branch — done: `reference_cache.py`
+     persists validated templates keyed by `ReferenceDetails.hash()` shape hash at
+     `.cache/references/{hash}.txt` with atomic writes; `LLMBaseReferenceGenerator`
+     takes a **required** `cache: ReferenceCache` and only caches templates that
+     passed validation. Registered as `reference_cache` in `containers.py`.
    - Concrete `Reference` subtypes (§6/§25) — optional/illustrative, do not add unless asked.
+2. What's left for the **Generation API end-to-end** (per AGENTS.md §2.3 + backlog):
+   - `AnalyzeSuggestionUseCase` orchestration, `OpenAILLMClient` implementing
+     `ILLMClient`, `IOutputParser`/`OutputParser`, `GenerationSettings`, Jinja2
+     prompt templates, and extension of `AnalyzeSuggestionResponse` (evidence,
+     citations, confidence).
+   - Runnable app: finish wiring `context_builder`/LLM client (needs a real
+     `GemmaTokenizer` adapter) and the `src/main.py` lifespan.
 3. Keep the corrected design decisions in §4.
 
 ---

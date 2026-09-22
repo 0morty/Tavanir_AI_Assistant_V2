@@ -1,5 +1,7 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
+from tempfile import mkdtemp
 from types import SimpleNamespace
 
 from src.application.context import ContextBuilder, OverflowStrategyDispatcher
@@ -10,6 +12,7 @@ from src.application.context.allocation import (
 )
 from src.application.reference import (
     LLMBaseReferenceGenerator,
+    ReferenceCache,
     ReferenceGenerationPrompts,
 )
 from src.application.reference.template_validator import (
@@ -81,6 +84,15 @@ class EmptyReference(Reference):
         return "Nothing available."
 
 
+@dataclass
+class PageOnlyReference(Reference):
+    page: int = 5
+
+    @property
+    def description(self) -> str:
+        return "Only the page."
+
+
 _VALID_TEMPLATE = "On page [page], written by [author], it is stated:"
 _INVALID_TEMPLATE = "On page [page], written by [writer], it is stated:"
 
@@ -97,14 +109,14 @@ def make_context_builder() -> ContextBuilder:
     )
 
 
-def make_generator(*responses: str, **kwargs) -> tuple[LLMBaseReferenceGenerator, FakeLLM]:
+def make_generator(
+    *responses: str, cache: ReferenceCache | None = None, **kwargs
+) -> tuple[LLMBaseReferenceGenerator, FakeLLM]:
     client = FakeLLM(*responses)
-    generator = LLMBaseReferenceGenerator(
-        client,
-        validator=TemplateValidator(),
-        context_builder=make_context_builder(),
-        **kwargs,
-    )
+    cache = cache if cache is not None else ReferenceCache(mkdtemp(prefix="ref-cache-"))
+    kwargs.setdefault("validator", TemplateValidator())
+    kwargs.setdefault("context_builder", make_context_builder())
+    generator = LLMBaseReferenceGenerator(client, cache=cache, **kwargs)
     return generator, client
 
 
@@ -246,6 +258,7 @@ def test_injected_context_builder_is_used():
         client,
         validator=TemplateValidator(),
         context_builder=context_builder,
+        cache=ReferenceCache(mkdtemp(prefix="ref-cache-")),
     )
 
     text = generator.generate(PageReference())
@@ -262,6 +275,7 @@ def test_injected_context_builder_respects_max_tokens():
         validator=TemplateValidator(),
         max_tokens=512,
         context_builder=context_builder,
+        cache=ReferenceCache(mkdtemp(prefix="ref-cache-")),
     )
 
     generator.generate(PageReference())
@@ -272,3 +286,71 @@ def test_injected_context_builder_respects_max_tokens():
 def test_validation_error_message_reports_missing_properties():
     result = TemplateValidationResult(valid=False, missing=("writer",))
     assert result.error_message() == "Template references unavailable properties: writer."
+
+
+def test_cache_hit_skips_llm_on_repeated_same_shape():
+    generator, client = make_generator(_VALID_TEMPLATE)
+
+    first = generator.generate(PageReference())
+    second = generator.generate(PageReference())
+
+    assert first == "On page 10, written by Hamid Jafari, it is stated:"
+    assert second == first
+    assert len(client.prompts) == 1
+
+
+def test_cache_is_keyed_by_property_shape_not_values():
+    generator, client = make_generator(_VALID_TEMPLATE)
+
+    first = generator.generate(PageReference(page=10, author="Hamid Jafari"))
+    second = generator.generate(PageReference(page=42, author="Another Author"))
+
+    assert first == "On page 10, written by Hamid Jafari, it is stated:"
+    assert second == "On page 42, written by Another Author, it is stated:"
+    assert len(client.prompts) == 1
+
+
+def test_cached_template_is_persisted_to_disk():
+    cache_dir = Path(mkdtemp(prefix="ref-cache-"))
+    cache = ReferenceCache(cache_dir)
+    generator, client = make_generator(_VALID_TEMPLATE, cache=cache)
+
+    generator.generate(PageReference())
+
+    entry = cache_dir / f"{PageReference().details.hash()}.txt"
+    assert entry.read_text(encoding="utf-8") == _VALID_TEMPLATE
+
+
+def test_different_shapes_use_separate_cache_entries():
+    page_only_template = "On page [page], it is stated:"
+    generator, client = make_generator(_VALID_TEMPLATE, page_only_template)
+
+    generator.generate(PageReference())
+    generator.generate(PageOnlyReference())
+
+    assert len(client.prompts) == 2
+    assert PageReference().details.hash() != PageOnlyReference().details.hash()
+
+
+def test_invalid_template_is_not_cached():
+    template = "Written by [ghost]:"
+    cache_dir = Path(mkdtemp(prefix="ref-cache-"))
+    cache = ReferenceCache(cache_dir)
+    generator, client = make_generator(template, template, template, cache=cache)
+
+    generator.generate(PageReference())
+    entry = cache_dir / f"{PageReference().details.hash()}.txt"
+
+    assert not entry.exists()
+    generator.generate(PageReference())
+    assert len(client.prompts) == 6
+
+
+def test_missing_cache_is_rejected():
+    client = FakeLLM(_VALID_TEMPLATE)
+    with raises(TypeError):
+        LLMBaseReferenceGenerator(
+            client,
+            validator=TemplateValidator(),
+            context_builder=make_context_builder(),
+        )

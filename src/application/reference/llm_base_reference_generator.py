@@ -6,6 +6,7 @@ from src.application.interfaces.i_context_builder import IContextBuilder
 from src.application.interfaces.i_llm_client import ILLMClient
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.application.interfaces.i_template_validator import ITemplateValidator
+from src.application.reference.reference_cache import ReferenceCache
 from src.application.reference.template_filler import (
     fill_with_fallback,
     substitute_placeholders,
@@ -71,6 +72,13 @@ class LLMBaseReferenceGenerator(IReferenceGenerator):
       is kept and filled tolerantly (``fill_with_fallback``), replacing
       unavailable placeholders with an empty representation.
 
+    Validated templates are persisted by ``cache`` (§17): the property-shape
+    hash computed from :class:`ReferenceDetails` is the key, so a later
+    Reference sharing the same property shape reuses the cached template and
+    skips the LLM entirely (§18 cache-resolution flow). Only templates that
+    passed validation are cached; a reference with no available properties
+    renders as ``""`` and never touches the cache.
+
     Retry state (counter, error carry-over) lives only in this generator;
     ``ContextBuilder``/``PromptBuilder``/sections/``TemplateValidator`` are
     unchanged elsewhere.
@@ -85,6 +93,7 @@ class LLMBaseReferenceGenerator(IReferenceGenerator):
         validator: ITemplateValidator,
         prompts: ReferenceGenerationPrompts | None = None,
         context_builder: IContextBuilder,
+        cache: ReferenceCache,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
@@ -96,17 +105,26 @@ class LLMBaseReferenceGenerator(IReferenceGenerator):
         self._validator = validator
         self._prompts = prompts if prompts is not None else ReferenceGenerationPrompts()
         self._context_builder = context_builder
+        self._cache = cache
 
     def generate(self, reference: Reference) -> str:
         """Return the concrete reference text for ``reference``.
 
         A Reference with no available properties renders as ``""``: there is
         nothing to describe, matching :class:`DeterministicReferenceGenerator`.
+        Otherwise the property-shape hash is resolved through the cache; only
+        a cache miss triggers LLM template generation.
         """
         details = reference.details
         if not details.properties:
             return ""
-        template, valid = self._resolve_template(details)
+        shape_hash = details.hash()
+        template = self._cache.load(shape_hash)
+        valid = True
+        if template is None:
+            template, valid = self._resolve_template(details)
+            if valid:
+                self._cache.save(shape_hash, template)
         if valid:
             return substitute_placeholders(template, reference)
         return fill_with_fallback(template, reference)

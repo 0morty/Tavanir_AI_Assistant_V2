@@ -28,6 +28,7 @@ from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.application.reference.deterministic_reference_generator import (
     DeterministicReferenceGenerator,
 )
+from src.application.reference.reference_cache import ReferenceCache
 from src.application.reference.template_validator import TemplateValidator
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
@@ -199,4 +200,10 @@ class Container(containers.DeclarativeContainer):
     )
     template_validator: providers.Provider[ITemplateValidator] = providers.Singleton(
         TemplateValidator
+    )
+
+    # 12. Generation Reference Template Cache
+    reference_cache: providers.Provider[ReferenceCache] = providers.Singleton(
+        ReferenceCache,
+        cache_dir=providers.Object(".cache/references"),
     )

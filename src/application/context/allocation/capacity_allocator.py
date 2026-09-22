@@ -1,14 +1,15 @@
 from collections.abc import Sequence
 
-from src.application.context.allocation.demand_allocator import DemandAllocator
 from src.application.context.allocation.expansion_request import ExpansionRequest
-from src.application.context.allocation.redistribution_allocator import (
-    RedistributionAllocator,
-)
 from src.application.dtos import CapacityAllocation, CapacityRequest
+from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
+from src.application.interfaces.i_demand_allocator import IDemandAllocator
+from src.application.interfaces.i_redistribution_allocator import (
+    IRedistributionAllocator,
+)
 
 
-class CapacityAllocator:
+class CapacityAllocator(ICapacityAllocator):
     """Turn Section allocation properties into final capacities.
 
     This is the Section-level allocation policy of
@@ -29,6 +30,14 @@ class CapacityAllocator:
     (packing content into the returned capacity) is deliberately out of scope.
     """
 
+    def __init__(
+        self,
+        demand_allocator: IDemandAllocator,
+        redistribution_allocator: IRedistributionAllocator,
+    ) -> None:
+        self._demand_allocator = demand_allocator
+        self._redistribution_allocator = redistribution_allocator
+
     def allocate(
         self,
         requests: Sequence[CapacityRequest],
@@ -45,7 +54,7 @@ class CapacityAllocator:
                 raise ValueError(f"Duplicate CapacityRequest key {request.key!r}")
             seen.add(request.key)
 
-        initial = DemandAllocator().allocate(
+        initial = self._demand_allocator.allocate(
             {request.key: request.demand for request in requests},
             budget_tokens,
         )
@@ -70,7 +79,7 @@ class CapacityAllocator:
                     )
                 )
 
-        result = RedistributionAllocator().redistribute(
+        result = self._redistribution_allocator.redistribute(
             free_capacity, expansion_requests
         )
         for key, updated in zip(request_keys, result.allocations):

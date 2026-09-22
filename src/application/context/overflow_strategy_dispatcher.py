@@ -1,9 +1,12 @@
 from src.application.interfaces.i_compressible_section import CompressibleSection
+from src.application.interfaces.i_overflow_strategy_dispatcher import (
+    IOverflowStrategyDispatcher,
+)
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.enums import OverflowStrategy
 
 
-class OverflowStrategyDispatcher:
+class OverflowStrategyDispatcher(IOverflowStrategyDispatcher):
     """Dispatch an ``OverflowStrategy`` to the matching :class:`CompressibleSection` operation.
 
     The dispatcher owns the mapping only -- it selects the operation and

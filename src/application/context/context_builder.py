@@ -1,18 +1,17 @@
-from src.application.context.allocation.capacity_allocator import (
-    CapacityAllocator,
-    CapacityRequest,
-)
-from src.application.context.overflow_strategy_dispatcher import (
-    OverflowStrategyDispatcher,
-)
+from src.application.context.allocation.capacity_allocator import CapacityRequest
 from src.application.dtos import ContextBuilderResult, SectionOutput
+from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
 from src.application.interfaces.i_compressible_section import CompressibleSection
+from src.application.interfaces.i_context_builder import IContextBuilder
+from src.application.interfaces.i_overflow_strategy_dispatcher import (
+    IOverflowStrategyDispatcher,
+)
 from src.application.prompt.prompt_builder import PromptBuilder
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.enums import OverflowStrategy
 
 
-class ContextBuilder:
+class ContextBuilder(IContextBuilder):
     """Assemble a token-budgeted prompt from a :class:`PromptBuilder`'s sections.
 
     ``ContextBuilder`` orchestrates context-capacity management. It does not
@@ -42,9 +41,12 @@ class ContextBuilder:
         self,
         *,
         tokenizer: Tokenizer,
+        capacity_allocator: ICapacityAllocator,
+        dispatcher: IOverflowStrategyDispatcher,
     ) -> None:
         self._tokenizer = tokenizer
-        self._dispatcher = OverflowStrategyDispatcher()
+        self._capacity_allocator = capacity_allocator
+        self._dispatcher = dispatcher
 
     def build(
         self,
@@ -83,7 +85,9 @@ class ContextBuilder:
             )
             for section in sections
         ]
-        capacity = dict(CapacityAllocator().allocate(requests, usable_budget).capacities)
+        capacity = dict(
+            self._capacity_allocator.allocate(requests, usable_budget).capacities
+        )
 
         # Step 5: overflow per section.
         outputs: list[SectionOutput] = []

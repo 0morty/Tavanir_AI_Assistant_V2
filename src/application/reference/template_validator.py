@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 
+from src.application.interfaces.i_template_validator import ITemplateValidator
 from src.domain.entities import ReferenceDetails
 
 _PLACEHOLDER_PATTERN = re.compile(r"\[([A-Za-z_][A-Za-z0-9_]*)\]")
@@ -41,7 +42,7 @@ class TemplateValidationResult:
         return f"Template references unavailable properties: {listed}."
 
 
-class TemplateValidator:
+class TemplateValidator(ITemplateValidator):
     """Validate that every placeholder in a template refers to an available property.
 
     The check is about property *existence* in the given

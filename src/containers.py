@@ -1,17 +1,40 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 from dependency_injector import containers, providers
 from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
 
+from src.application.context.allocation import (
+    CapacityAllocator,
+    DemandAllocator,
+    RedistributionAllocator,
+)
+from src.application.context.overflow_strategy_dispatcher import (
+    OverflowStrategyDispatcher,
+)
+from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
+from src.application.interfaces.i_demand_allocator import IDemandAllocator
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
+from src.application.interfaces.i_overflow_strategy_dispatcher import (
+    IOverflowStrategyDispatcher,
+)
+from src.application.interfaces.i_redistribution_allocator import (
+    IRedistributionAllocator,
+)
+from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
+from src.application.interfaces.i_template_validator import ITemplateValidator
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
+from src.application.reference.deterministic_reference_generator import (
+    DeterministicReferenceGenerator,
+)
+from src.application.reference.template_validator import TemplateValidator
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
     ISuggestionVectorRepository,
     IUnitOfWork,
 )
+from src.infrastructure.configs.llm_provider_configs import AsyncOpenAIClientFactory
 from src.infrastructure.configs.settings import (
     bm25_settings,
     db_settings,
@@ -40,9 +63,11 @@ from src.infrastructure.services.text_processing.shekar_text_normalizer import (
 )
 
 
-async def init_client_registry() -> AsyncGenerator[LLMClientRegistry, None]:
+async def init_client_registry(
+    client_factory: Callable[[str, float], AsyncOpenAI],
+) -> AsyncGenerator[LLMClientRegistry, None]:
     """Initializes the LLMClientRegistry and guarantees graceful teardown."""
-    registry = LLMClientRegistry()
+    registry = LLMClientRegistry(client_factory=client_factory)
     yield registry
     await registry.close_all()
 
@@ -56,7 +81,10 @@ async def init_embedding_client(
 
 class Container(containers.DeclarativeContainer):
     # 1. Centralized Registry (Shared across Embedding and future LLM services)
-    client_registry = providers.Resource(init_client_registry)
+    client_registry = providers.Resource(
+        init_client_registry,
+        client_factory=providers.Object(AsyncOpenAIClientFactory.create_client),
+    )
 
     # 2. Embedding Client Resolution
     embedding_client = providers.Resource(
@@ -145,4 +173,30 @@ class Container(containers.DeclarativeContainer):
         SqlUnitOfWork,
         session_factory=db_session_factory,
         suggestion_repo_factory=providers.Object(SqlSuggestionRepository),
+    )
+
+    # 9. Generation Context Allocation Engine
+    demand_allocator: providers.Provider[IDemandAllocator] = providers.Singleton(
+        DemandAllocator
+    )
+    redistribution_allocator: providers.Provider[IRedistributionAllocator] = (
+        providers.Singleton(RedistributionAllocator)
+    )
+    capacity_allocator: providers.Provider[ICapacityAllocator] = providers.Singleton(
+        CapacityAllocator,
+        demand_allocator=demand_allocator,
+        redistribution_allocator=redistribution_allocator,
+    )
+
+    # 10. Generation Overflow Strategy Dispatch
+    overflow_strategy_dispatcher: providers.Provider[IOverflowStrategyDispatcher] = (
+        providers.Singleton(OverflowStrategyDispatcher)
+    )
+
+    # 11. Generation Reference-Template Building Blocks
+    deterministic_reference_generator: providers.Provider[IReferenceGenerator] = (
+        providers.Singleton(DeterministicReferenceGenerator)
+    )
+    template_validator: providers.Provider[ITemplateValidator] = providers.Singleton(
+        TemplateValidator
     )

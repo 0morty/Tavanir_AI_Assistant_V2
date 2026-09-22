@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
+from src.application.interfaces.i_context_builder import IContextBuilder
 from src.application.interfaces.i_llm_client import ILLMClient
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.application.interfaces.i_template_validator import ITemplateValidator
 from src.application.reference.template_filler import (
     fill_with_fallback,
     substitute_placeholders,
 )
-from src.application.reference.template_validator import TemplateValidator
-from src.domain.context.tokenizer import Tokenizer
 from src.domain.entities import Reference, ReferenceDetails
 
 _DEFAULT_ROLE = (
@@ -78,22 +80,22 @@ class LLMBaseReferenceGenerator(IReferenceGenerator):
         self,
         llm_client: ILLMClient,
         *,
-        tokenizer: Tokenizer,
         max_attempts: int = 3,
         max_tokens: int = 2048,
-        validator: TemplateValidator | None = None,
+        validator: ITemplateValidator,
         prompts: ReferenceGenerationPrompts | None = None,
+        context_builder: IContextBuilder,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
         if max_tokens < 0:
             raise ValueError("max_tokens must be non-negative")
         self._llm_client = llm_client
-        self._tokenizer = tokenizer
         self._max_attempts = max_attempts
         self._max_tokens = max_tokens
-        self._validator = validator if validator is not None else TemplateValidator()
+        self._validator = validator
         self._prompts = prompts if prompts is not None else ReferenceGenerationPrompts()
+        self._context_builder = context_builder
 
     def generate(self, reference: Reference) -> str:
         """Return the concrete reference text for ``reference``.
@@ -135,7 +137,6 @@ class LLMBaseReferenceGenerator(IReferenceGenerator):
         # Deferred imports: the context/prompt packages import the reference
         # package (DeterministicReferenceGenerator) at module load time, so
         # importing them here avoids a circular import during package init.
-        from src.application.context.context_builder import ContextBuilder
         from src.application.context.sections.error_section import ErrorSection
         from src.application.context.sections.properties_section import (
             PropertiesSection,
@@ -149,8 +150,6 @@ class LLMBaseReferenceGenerator(IReferenceGenerator):
         builder.add_section(PropertiesSection(details))
         builder.set_output_format(self._prompts.output_format)
 
-        return (
-            ContextBuilder(tokenizer=self._tokenizer)
-            .build(builder, max_tokens=self._max_tokens)
-            .prompt
-        )
+        return self._context_builder.build(
+            builder, max_tokens=self._max_tokens
+        ).prompt

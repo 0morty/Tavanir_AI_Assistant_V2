@@ -1,6 +1,13 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
+from types import SimpleNamespace
 
+from src.application.context import ContextBuilder, OverflowStrategyDispatcher
+from src.application.context.allocation import (
+    CapacityAllocator,
+    DemandAllocator,
+    RedistributionAllocator,
+)
 from src.application.reference import (
     LLMBaseReferenceGenerator,
     ReferenceGenerationPrompts,
@@ -80,11 +87,22 @@ _INVALID_TEMPLATE = "On page [page], written by [writer], it is stated:"
 _PROMPTS = ReferenceGenerationPrompts()
 
 
+def make_context_builder() -> ContextBuilder:
+    return ContextBuilder(
+        tokenizer=FakeTokenizer(),
+        capacity_allocator=CapacityAllocator(
+            DemandAllocator(), RedistributionAllocator()
+        ),
+        dispatcher=OverflowStrategyDispatcher(),
+    )
+
+
 def make_generator(*responses: str, **kwargs) -> tuple[LLMBaseReferenceGenerator, FakeLLM]:
     client = FakeLLM(*responses)
     generator = LLMBaseReferenceGenerator(
         client,
-        tokenizer=FakeTokenizer(),
+        validator=TemplateValidator(),
+        context_builder=make_context_builder(),
         **kwargs,
     )
     return generator, client
@@ -208,6 +226,47 @@ def test_injected_validator_is_used():
 def test_validation_error_message_is_empty_when_valid():
     result = TemplateValidationResult(valid=True, missing=())
     assert result.error_message() == ""
+
+
+class CallingContextBuilder:
+    """Records the budgets passed to ``build``, mirroring ContextBuilder's shape."""
+
+    def __init__(self) -> None:
+        self.budgets: list[int] = []
+
+    def build(self, builder, max_tokens: int):
+        self.budgets.append(max_tokens)
+        return SimpleNamespace(prompt=builder.render())
+
+
+def test_injected_context_builder_is_used():
+    context_builder = CallingContextBuilder()
+    client = FakeLLM(_VALID_TEMPLATE)
+    generator = LLMBaseReferenceGenerator(
+        client,
+        validator=TemplateValidator(),
+        context_builder=context_builder,
+    )
+
+    text = generator.generate(PageReference())
+
+    assert text == "On page 10, written by Hamid Jafari, it is stated:"
+    assert context_builder.budgets == [2048]
+
+
+def test_injected_context_builder_respects_max_tokens():
+    context_builder = CallingContextBuilder()
+    client = FakeLLM(_VALID_TEMPLATE)
+    generator = LLMBaseReferenceGenerator(
+        client,
+        validator=TemplateValidator(),
+        max_tokens=512,
+        context_builder=context_builder,
+    )
+
+    generator.generate(PageReference())
+
+    assert context_builder.budgets == [512]
 
 
 def test_validation_error_message_reports_missing_properties():

@@ -1,13 +1,15 @@
 from src.application.exceptions import ChunkSummarizationError
-from src.application.interfaces.i_chunk_summarizer import IChunkSummarizer
 from src.application.interfaces.i_llm_client import ILLMClient
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.context.tokenizer import Tokenizer
 from src.infrastructure.services.summarizers.chunk_prompt_builder import (
     ChunkPromptBuilder,
 )
 
+_DEFAULT_SUMMARIZE_BUDGET = 2048
 
-class LLMChunkSummarizer(IChunkSummarizer):
+
+class LLMChunkSummarizer(ITextSummarizer):
     """Summarize chunks in batches, one LLM call per batch.
 
     Each batch is the greedy prefix of the remaining chunks whose serialized
@@ -22,6 +24,10 @@ class LLMChunkSummarizer(IChunkSummarizer):
     reorders, or invents summaries is re-requested up to ``max_attempts`` times;
     persistent failure raises :class:`ChunkSummarizationError` instead of
     silently continuing with a corrupted mapping.
+
+    As part of the aggregate :class:`ITextSummarizer` contract it also exposes
+    the single-text :meth:`summarize`, which maps onto the batched path with a
+    single chunk.
 
     The LLM client and tokenizer are injected through the constructor
     (:class:`ILLMClient` / :class:`Tokenizer`), never instantiated here.
@@ -46,7 +52,25 @@ class LLMChunkSummarizer(IChunkSummarizer):
         self._max_attempts = max_attempts
         self._capacity_reserve = capacity_reserve
 
-    def summarize(self, chunks: list[str], *, capacity_tokens: int) -> list[str]:
+    def summarize(self, text: str, *, max_tokens: int | None = None) -> str:
+        """Return an LLM-produced summary of a single ``text``.
+
+        Routes through the strict batched path with one chunk; ``max_tokens``
+        (when given) becomes the batch capacity, otherwise a documented default
+        budget is used.
+        """
+        if not text or not text.strip():
+            return ""
+        capacity = (
+            max_tokens
+            if max_tokens is not None and max_tokens > 0
+            else _DEFAULT_SUMMARIZE_BUDGET
+        )
+        return self.summarize_chunks([text], capacity_tokens=capacity)[0]
+
+    def summarize_chunks(
+        self, chunks: list[str], *, capacity_tokens: int
+    ) -> list[str]:
         """Return exactly one summary per input chunk, preserving their order."""
         if not chunks or capacity_tokens <= 0:
             return []

@@ -1,7 +1,7 @@
 from src.application.interfaces.i_compressible_section import CompressibleSection
 from src.application.context.sections.prompt_section import PromptSection
-from src.application.interfaces.i_llm_summarizer import ILLMSummarizer
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.application.reference.deterministic_reference_generator import (
     DeterministicReferenceGenerator,
 )
@@ -28,7 +28,7 @@ class ReferencedSection(PromptSection, CompressibleSection):
     the inherited plain-text defaults: its content is a single text, so
     ``truncate`` applies the universal algorithm as-is, ``ignore`` is not
     applicable (``None``), and ``summarize`` compresses through the Section's
-    injected LLM summarizer (:class:`ILLMSummarizer`) when one is configured,
+    injected LLM summarizer (:class:`ITextSummarizer`) when one is configured,
     otherwise falling through to the shared plain-text default. The default
     lives here (inherited from ``PromptSection``); collection-based subclasses
     override the three operations for their own item-aware representation.
@@ -47,7 +47,7 @@ class ReferencedSection(PromptSection, CompressibleSection):
         overflow_strategies: OverflowStrategyStack | None = None,
         default_overflow_strategies: OverflowStrategyStack | None = None,
         summarizer: Summarizer | None = None,
-        llm_summarizer: ILLMSummarizer | None = None,
+        llm_summarizer: ITextSummarizer | None = None,
     ) -> None:
         super().__init__(
             separator=separator,
@@ -111,7 +111,7 @@ class ReferencedSection(PromptSection, CompressibleSection):
     ) -> str | None:
         """Compress a plain-text ``content`` through the Section's LLM summarizer.
 
-        Delegates to the injected :class:`ILLMSummarizer`, carrying the
+        Delegates to the injected :class:`ITextSummarizer`, carrying the
         ``capacity_tokens`` budget into the summary instruction. Returns
         ``None`` when no LLM summarizer is configured, so the caller falls
         through to the inherited plain-text default (and then to the next

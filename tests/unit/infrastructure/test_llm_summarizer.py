@@ -1,7 +1,7 @@
 import pytest
 
 from src.application.context import ContextBuilder
-from src.application.interfaces.i_llm_summarizer import ILLMSummarizer
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.infrastructure.services.summarizers import (
     LLMSummarizer,
     SummarizationPrompts,
@@ -29,8 +29,8 @@ class NoCallLLM:
         raise AssertionError("complete must not be called")
 
 
-def test_llm_summarizer_implements_illm_summarizer_port():
-    assert isinstance(LLMSummarizer(RecordingLLM()), ILLMSummarizer)
+def test_llm_summarizer_implements_i_text_summarizer_port():
+    assert isinstance(LLMSummarizer(RecordingLLM()), ITextSummarizer)
 
 
 def test_llm_summarizer_requires_an_llm_client():
@@ -93,3 +93,15 @@ def test_llm_summarizer_honours_custom_prompts():
     assert "o" in prompt
     assert "7 tokens max" in prompt
     assert "text" in prompt
+
+
+def test_llm_summarizer_summarize_chunks_maps_one_per_chunk():
+    llm = RecordingLLM("one", "two", "three")
+    summarizer = LLMSummarizer(llm)
+
+    result = summarizer.summarize_chunks(
+        ["chunk a", "chunk b", "chunk c"], capacity_tokens=60
+    )
+
+    assert result == ["one", "two", "three"]
+    assert len(llm.prompts) == 3

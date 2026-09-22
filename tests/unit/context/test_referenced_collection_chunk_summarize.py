@@ -1,7 +1,7 @@
 from src.application.context import ContextBuilder, OverflowStrategyDispatcher
 from src.application.context.sections.chunks_section import ChunksSection
 from src.application.context.sections.history_section import HistorySection
-from src.application.interfaces.i_chunk_summarizer import IChunkSummarizer
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.entities import GenerationChunk, HistoryMessage
 from src.domain.enums import HistoryRole, OverflowStrategy
 from src.infrastructure.services.summarizers import FAKE_SUMMARY_TEXT, FakeSummarizer
@@ -9,13 +9,16 @@ from src.infrastructure.services.summarizers import FAKE_SUMMARY_TEXT, FakeSumma
 CAPACITY = 400
 
 
-class RecordingChunkSummarizer(IChunkSummarizer):
+class RecordingChunkSummarizer(ITextSummarizer):
     """Records chunk/capacity pairs and returns one summary per chunk in order."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], int]] = []
 
-    def summarize(self, chunks: list[str], *, capacity_tokens: int) -> list[str]:
+    def summarize(self, text: str, *, max_tokens: int | None = None) -> str:
+        return "llm-summary"
+
+    def summarize_chunks(self, chunks: list[str], *, capacity_tokens: int) -> list[str]:
         self.calls.append((chunks, capacity_tokens))
         return [f"summary-{i + 1}" for i in range(len(chunks))]
 

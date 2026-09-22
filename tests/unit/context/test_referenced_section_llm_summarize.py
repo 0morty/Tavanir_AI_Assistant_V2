@@ -2,13 +2,13 @@ from src.application.context import ContextBuilder, OverflowStrategyDispatcher
 from src.application.context.sections.output_format_section import (
     OutputFormatSection,
 )
-from src.application.interfaces.i_llm_summarizer import ILLMSummarizer
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.infrastructure.services.summarizers import FAKE_SUMMARY_TEXT, FakeSummarizer
 
 SUMMARY_CAPACITY = 200
 
 
-class RecordingLLMSummarizer(ILLMSummarizer):
+class RecordingLLMSummarizer(ITextSummarizer):
     """Records text/budget pairs and returns a predictable summary."""
 
     def __init__(self) -> None:
@@ -17,6 +17,11 @@ class RecordingLLMSummarizer(ILLMSummarizer):
     def summarize(self, text: str, *, max_tokens: int | None = None) -> str:
         self.calls.append((text, max_tokens))
         return "llm-summary"
+
+    def summarize_chunks(
+        self, chunks: list[str], *, capacity_tokens: int
+    ) -> list[str]:
+        return [self.summarize(chunk, max_tokens=capacity_tokens) for chunk in chunks]
 
 
 def test_referenced_section_uses_injected_llm_summarizer():

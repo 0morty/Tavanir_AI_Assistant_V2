@@ -2,7 +2,7 @@ import pytest
 
 from src.application.context import ContextBuilder
 from src.application.exceptions import ChunkSummarizationError
-from src.application.interfaces.i_chunk_summarizer import IChunkSummarizer
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.context.tokenizer import Tokenizer
 from src.infrastructure.services.summarizers import (
     ChunkPromptBuilder,
@@ -46,9 +46,9 @@ def make_responses(*counts: int) -> list[str]:
     ]
 
 
-def test_llm_chunk_summarizer_implements_i_chunk_summarizer_port():
+def test_llm_chunk_summarizer_implements_i_text_summarizer_port():
     assert isinstance(
-        LLMChunkSummarizer(RecordingLLM(), CharTokenizer()), IChunkSummarizer
+        LLMChunkSummarizer(RecordingLLM(), CharTokenizer()), ITextSummarizer
     )
 
 
@@ -70,8 +70,8 @@ def test_llm_chunk_summarizer_returns_empty_for_no_input():
     llm = RecordingLLM()
     summarizer = LLMChunkSummarizer(llm, CharTokenizer())
 
-    assert summarizer.summarize([], capacity_tokens=100) == []
-    assert summarizer.summarize(["آ"], capacity_tokens=0) == []
+    assert summarizer.summarize_chunks([], capacity_tokens=100) == []
+    assert summarizer.summarize_chunks(["آ"], capacity_tokens=0) == []
     assert llm.prompts == []
 
 
@@ -80,7 +80,7 @@ def test_llm_chunk_summarizer_maps_all_chunks_in_one_call():
     llm = RecordingLLM("s0-1\n---\ns0-2\n---\ns0-3")
     summarizer = LLMChunkSummarizer(llm, CharTokenizer(), max_attempts=1)
 
-    result = summarizer.summarize(chunks, capacity_tokens=100000)
+    result = summarizer.summarize_chunks(chunks, capacity_tokens=100000)
 
     assert result == ["s0-1", "s0-2", "s0-3"]
     assert len(llm.prompts) == 1
@@ -95,7 +95,7 @@ def test_llm_chunk_summarizer_splits_batches_across_calls():
     llm = RecordingLLM("s0-1\n---\ns0-2", "s1-1")
     summarizer = LLMChunkSummarizer(llm, CharTokenizer(), max_attempts=1)
 
-    result = summarizer.summarize(
+    result = summarizer.summarize_chunks(
         chunks, capacity_tokens=overhead + 2 * (separator + 10)
     )
 
@@ -109,7 +109,7 @@ def test_llm_chunk_summarizer_retries_unmapped_response_then_succeeds():
         llm, CharTokenizer(), max_attempts=3
     )
 
-    result = summarizer.summarize(["aaaa", "bbbb"], capacity_tokens=100000)
+    result = summarizer.summarize_chunks(["aaaa", "bbbb"], capacity_tokens=100000)
 
     assert result == ["s0-1", "s0-2"]
     assert len(llm.prompts) == 2
@@ -120,7 +120,7 @@ def test_llm_chunk_summarizer_raises_after_exhausted_attempts():
     summarizer = LLMChunkSummarizer(llm, CharTokenizer(), max_attempts=2)
 
     with pytest.raises(ChunkSummarizationError):
-        summarizer.summarize(["aaaa", "bbbb"], capacity_tokens=100000)
+        summarizer.summarize_chunks(["aaaa", "bbbb"], capacity_tokens=100000)
 
     assert len(llm.prompts) == 2
 
@@ -129,7 +129,7 @@ def test_llm_chunk_summarizer_guarantees_progress_on_tiny_capacity():
     llm = RecordingLLM("s0-1", "s1-1")
     summarizer = LLMChunkSummarizer(llm, CharTokenizer(), max_attempts=1)
 
-    result = summarizer.summarize(["aaaa", "bbbb"], capacity_tokens=5)
+    result = summarizer.summarize_chunks(["aaaa", "bbbb"], capacity_tokens=5)
 
     assert result == ["s0-1", "s1-1"]
     assert len(llm.prompts) == 2
@@ -141,6 +141,28 @@ def test_llm_chunk_summarizer_uses_injected_builder():
     llm = RecordingLLM("s0-1\n---\ns0-2")
     summarizer = LLMChunkSummarizer(llm, CharTokenizer(), builder=custom_builder)
 
-    summarizer.summarize(["aaaa", "bbbb"], capacity_tokens=100000)
+    summarizer.summarize_chunks(["aaaa", "bbbb"], capacity_tokens=100000)
 
     assert "custom-role" in llm.prompts[0]
+
+
+def test_llm_chunk_summarizer_single_text_summarize_uses_given_budget():
+    llm = RecordingLLM("single-summary")
+    summarizer = LLMChunkSummarizer(llm, CharTokenizer(), max_attempts=1)
+
+    assert summarizer.summarize("some text", max_tokens=200) == "single-summary"
+    assert len(llm.prompts) == 1
+
+
+def test_llm_chunk_summarizer_single_text_summarize_defaults_budget():
+    llm = RecordingLLM("single-summary")
+    summarizer = LLMChunkSummarizer(llm, CharTokenizer(), max_attempts=1)
+
+    assert summarizer.summarize("some text") == "single-summary"
+
+
+def test_llm_chunk_summarizer_single_text_summarize_empty_input():
+    summarizer = LLMChunkSummarizer(RecordingLLM(), CharTokenizer())
+
+    assert summarizer.summarize("") == ""
+    assert summarizer.summarize("   ") == ""

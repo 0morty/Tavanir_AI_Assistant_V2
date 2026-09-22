@@ -2,8 +2,8 @@ from collections.abc import Sequence
 from typing import Any
 
 from src.application.context.sections.referenced_section import ReferencedSection
-from src.application.interfaces.i_chunk_summarizer import IChunkSummarizer
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.context.overflow.summarize import SummarizeStrategy
 from src.domain.context.overflow.truncate import TruncateStrategy
 from src.domain.context.summarizer import Summarizer
@@ -35,7 +35,7 @@ class ReferencedCollectionSection(ReferencedSection):
     internal shape a private concern. ``ignore`` keeps items in order while
     they fit and drops the rest; ``truncate`` and ``summarize`` apply the
     universal algorithms to the collection's joined (reference-enriched) text.
-    When a :class:`IChunkSummarizer` is injected, ``summarize`` runs its
+    When a :class:`ITextSummarizer` is injected, ``summarize`` runs its
     batched 1:1 chunk summarization instead, mapping every item to its own
     summary.
     """
@@ -55,7 +55,7 @@ class ReferencedCollectionSection(ReferencedSection):
         overflow_strategies: OverflowStrategyStack | None = None,
         default_overflow_strategies: OverflowStrategyStack | None = None,
         summarizer: Summarizer | None = None,
-        chunk_summarizer: IChunkSummarizer | None = None,
+        chunk_summarizer: ITextSummarizer | None = None,
     ) -> None:
         super().__init__(
             reference=reference,
@@ -147,7 +147,7 @@ class ReferencedCollectionSection(ReferencedSection):
         """Compress the collection's joined text through the Section's own summarizer.
 
         Returns ``None`` when no summarizer is configured, so the caller falls
-        through to the next strategy. When an :class:`IChunkSummarizer` is
+        through to the next strategy. When an :class:`ITextSummarizer` is
         injected, each item is summarized independently (strict 1:1 mapping)
         and the summaries are joined with ``item_separator``.
         """
@@ -157,7 +157,7 @@ class ReferencedCollectionSection(ReferencedSection):
             texts = self._enriched_item_texts()
             if not texts:
                 return ""
-            summaries = self._chunk_summarizer.summarize(
+            summaries = self._chunk_summarizer.summarize_chunks(
                 texts, capacity_tokens=capacity_tokens
             )
             return self.item_separator.join(summaries)

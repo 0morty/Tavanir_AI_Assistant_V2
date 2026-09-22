@@ -16,7 +16,6 @@ from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
 from src.application.interfaces.i_demand_allocator import IDemandAllocator
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
 from src.application.interfaces.i_llm_client import ILLMClient
-from src.application.interfaces.i_llm_summarizer import ILLMSummarizer
 from src.application.interfaces.i_overflow_strategy_dispatcher import (
     IOverflowStrategyDispatcher,
 )
@@ -27,6 +26,7 @@ from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
 from src.application.interfaces.i_template_validator import ITemplateValidator
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.application.reference.deterministic_reference_generator import (
     DeterministicReferenceGenerator,
 )
@@ -236,7 +236,7 @@ class Container(containers.DeclarativeContainer):
     )
 
     # 14. Generation LLM Summarizer (Context overflow SUMMARIZE strategy)
-    llm_summarizer: providers.Provider[ILLMSummarizer] = providers.Singleton(
+    llm_summarizer: providers.Provider[ITextSummarizer] = providers.Singleton(
         LLMSummarizer,
         llm_client=llm_client,
     )

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from src.application.interfaces.i_llm_client import ILLMClient
-from src.application.interfaces.i_llm_summarizer import ILLMSummarizer
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
 
 _DEFAULT_ROLE = (
     "تو یک متخصص خلاصه‌سازی متن هستی که فقط بر اساس متنی که به او داده "
@@ -38,7 +38,7 @@ class SummarizationPrompts:
     max_tokens_instruction: str = _DEFAULT_MAX_TOKENS_INSTRUCTION
 
 
-class LLMSummarizer(ILLMSummarizer):
+class LLMSummarizer(ITextSummarizer):
     """Summarize a text through an injected LLM.
 
     The summary prompt is assembled by the shared ``PromptBuilder`` from the
@@ -48,6 +48,11 @@ class LLMSummarizer(ILLMSummarizer):
     through :meth:`summarize` is surfaced as an OUTPUT-FORMAT instruction; the
     ``ContextBuilder`` safety net enforces the exact cap regardless of what the
     model returns.
+
+    The aggregate :class:`ITextSummarizer` contract also requires
+    :meth:`summarize_chunks`: it compresses each chunk independently through
+    :meth:`summarize`, preserving a strict one-summary-per-chunk mapping
+    without batching.
 
     The LLM client is injected through the constructor (:class:`ILLMClient`),
     never instantiated here.
@@ -85,3 +90,16 @@ class LLMSummarizer(ILLMSummarizer):
             builder.set_output_format(self._prompts.output_format)
 
         return self._llm_client.complete(builder.render()).strip()
+
+    def summarize_chunks(
+        self, chunks: list[str], *, capacity_tokens: int
+    ) -> list[str]:
+        """Return one summary per chunk, compressed independently and in order.
+
+        Each chunk goes through the single-text :meth:`summarize` path, so the
+        1:1 mapping is guaranteed by construction (one ``ILLMClient`` call per
+        chunk, ``capacity_tokens`` as the budget).
+        """
+        return [
+            self.summarize(chunk, max_tokens=capacity_tokens) for chunk in chunks
+        ]

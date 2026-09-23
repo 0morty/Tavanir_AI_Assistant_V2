@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -8,6 +9,18 @@ from src.application.context import ContextBuilder
 from src.application.exceptions import LLMAPIError, LLMConnectionError
 from src.application.interfaces.i_llm_client import ILLMClient
 from src.infrastructure.services.llm import OpenAILLMClient
+
+_created_clients: list[OpenAILLMClient] = []
+
+
+@pytest.fixture(autouse=True)
+def _close_created_clients():
+    """Every OpenAILLMClient owns a loop thread; close them all after each test."""
+    _created_clients.clear()
+    yield
+    for client in _created_clients:
+        client.close()
+    _created_clients.clear()
 
 
 class FakeCompletionClient:
@@ -57,6 +70,31 @@ class FakeCompletionClient:
         }
 
 
+class LoopBindingClient(FakeCompletionClient):
+    """Simulates the real ``AsyncOpenAI`` transport: site-bound to the first
+    event loop it runs on, failing with ``RuntimeError: Event loop is closed``
+    once a later call runs on a different (fresh) loop."""
+
+    def __init__(self, *, content="answer", batch_contents=None, **kwargs) -> None:
+        super().__init__(content=content, batch_contents=batch_contents, **kwargs)
+        self._bound_loop: asyncio.AbstractEventLoop | None = None
+
+    def _verify_loop(self) -> None:
+        loop = asyncio.get_running_loop()
+        if self._bound_loop is None:
+            self._bound_loop = loop
+        elif self._bound_loop is not loop:
+            raise RuntimeError("Event loop is closed")
+
+    async def create(self, **kwargs):
+        self._verify_loop()
+        return await super().create(**kwargs)
+
+    async def post(self, path, *, cast_to=None, body=None, **kwargs):
+        self._verify_loop()
+        return await super().post(path, cast_to=cast_to, body=body, **kwargs)
+
+
 class InvertedBatchClient(FakeCompletionClient):
     """Returns batch choices in reverse index order."""
 
@@ -85,12 +123,12 @@ class ChoiceBatchClient(FakeCompletionClient):
         return {"choices": list(self._choices)}
 
 
-def make_client(**kwargs) -> OpenAILLMClient:
-    return OpenAILLMClient(
-        FakeCompletionClient(kwargs.pop("content", "answer")),
-        model=kwargs.pop("model", "m"),
-        **kwargs,
-    )
+def make_client(client=None, **kwargs) -> OpenAILLMClient:
+    if client is None:
+        client = FakeCompletionClient(kwargs.pop("content", "answer"))
+    tracked = OpenAILLMClient(client, model=kwargs.pop("model", "m"), **kwargs)
+    _created_clients.append(tracked)
+    return tracked
 
 
 def test_openai_llm_client_implements_illm_client_port():
@@ -104,23 +142,21 @@ def test_openai_llm_client_requires_a_client():
 
 def test_complete_returns_message_content():
     fake = FakeCompletionClient("done")
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     assert client.complete("prompt") == "done"
 
 
 def test_complete_returns_empty_when_content_is_none():
     fake = FakeCompletionClient(None)
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     assert client.complete("prompt") == ""
 
 
 def test_complete_passes_generation_parameters_through():
     fake = FakeCompletionClient("answer")
-    client = OpenAILLMClient(
-        fake, model="m", temperature=0.7, max_tokens=512
-    )
+    client = make_client(client=fake, model="m", temperature=0.7, max_tokens=512)
 
     client.complete("prompt")
 
@@ -132,7 +168,7 @@ def test_complete_passes_generation_parameters_through():
 
 def test_complete_translates_connection_errors():
     fake = FakeCompletionClient("x", error=APIConnectionError(request=None))
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     with pytest.raises(LLMConnectionError):
         client.complete("prompt")
@@ -140,7 +176,7 @@ def test_complete_translates_connection_errors():
 
 def test_complete_many_returns_empty_for_no_prompts():
     fake = FakeCompletionClient("x")
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     assert client.complete_many([]) == []
     assert fake.post_path is None
@@ -149,7 +185,7 @@ def test_complete_many_returns_empty_for_no_prompts():
 
 def test_complete_many_sends_one_batch_request_one_conversation_per_prompt():
     fake = FakeCompletionClient("x", batch_contents=["s1", "s2"])
-    client = OpenAILLMClient(fake, model="m", temperature=0.5, max_tokens=128)
+    client = make_client(client=fake, model="m", temperature=0.5, max_tokens=128)
 
     result = client.complete_many(["p1", "p2"])
 
@@ -167,7 +203,7 @@ def test_complete_many_sends_one_batch_request_one_conversation_per_prompt():
 
 def test_complete_many_maps_choices_back_to_prompts_by_index():
     fake = InvertedBatchClient("x")
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     result = client.complete_many(["p1", "p2", "p3"])
 
@@ -187,7 +223,7 @@ def test_complete_many_falls_back_to_concurrency_when_batch_is_unsupported():
         body=None,
     )
     fake = FakeCompletionClient("canned", post_error=not_found)
-    client = OpenAILLMClient(fake, model="m", max_concurrency=2)
+    client = make_client(client=fake, model="m", max_concurrency=2)
 
     result = client.complete_many(["p1", "p2", "p3"])
 
@@ -200,7 +236,7 @@ def test_complete_many_falls_back_to_concurrency_when_batch_is_unsupported():
 
 def test_complete_many_translates_batch_connection_errors():
     fake = FakeCompletionClient("x", post_error=APIConnectionError(request=None))
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     with pytest.raises(LLMConnectionError):
         client.complete_many(["p1", "p2"])
@@ -208,7 +244,7 @@ def test_complete_many_translates_batch_connection_errors():
 
 def test_complete_many_rejects_choice_count_mismatch():
     fake = ChoiceBatchClient([{"index": 0, "message": {"content": "only-one"}}])
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     with pytest.raises(LLMAPIError):
         client.complete_many(["p1", "p2"])
@@ -221,7 +257,7 @@ def test_complete_many_rejects_out_of_range_choice_index():
             {"index": 1, "message": {"content": "second"}},
         ]
     )
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     with pytest.raises(LLMAPIError):
         client.complete_many(["p1", "p2"])
@@ -234,6 +270,34 @@ def test_complete_many_returns_empty_for_missing_content():
             {"index": 1},
         ]
     )
-    client = OpenAILLMClient(fake, model="m")
+    client = make_client(client=fake, model="m")
 
     assert client.complete_many(["p1", "p2"]) == ["", ""]
+
+
+def test_complete_then_complete_many_reuses_one_event_loop():
+    """Regression: two sequential calls on the SAME client must reuse one
+    persistent event loop. The site-bound fake fails (``Event loop is
+    closed``) if the client bridges with a fresh ``asyncio.run`` loop per
+    call, and succeeds once the client owns a long-lived loop."""
+    fake = LoopBindingClient(content="done", batch_contents=["b1", "b2"])
+    client = make_client(client=fake, model="m")
+
+    assert client.complete("first prompt") == "done"
+    assert client.complete_many(["p1", "p2"]) == ["b1", "b2"]
+    assert len(fake.create_calls) == 1
+    assert fake.post_path == "/chat/completions/batch"
+
+
+def test_close_is_idempotent():
+    client = make_client(content="x")
+    client.close()
+    client.close()  # second close must be a no-op
+
+
+def test_complete_after_close_fails_fast():
+    client = make_client(content="x")
+    client.close()
+
+    with pytest.raises(RuntimeError):
+        client.complete("prompt")

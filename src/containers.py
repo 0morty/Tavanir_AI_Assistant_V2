@@ -9,10 +9,12 @@ from src.application.context.allocation import (
     DemandAllocator,
     RedistributionAllocator,
 )
+from src.application.context.context_builder import ContextBuilder
 from src.application.context.overflow_strategy_dispatcher import (
     OverflowStrategyDispatcher,
 )
 from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
+from src.application.interfaces.i_context_builder import IContextBuilder
 from src.application.interfaces.i_demand_allocator import IDemandAllocator
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
 from src.application.interfaces.i_llm_client import ILLMClient
@@ -27,6 +29,7 @@ from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
 from src.application.interfaces.i_template_validator import ITemplateValidator
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
+from src.domain.context.tokenizer import Tokenizer
 from src.application.reference.deterministic_reference_generator import (
     DeterministicReferenceGenerator,
 )
@@ -67,6 +70,7 @@ from src.infrastructure.services.summarizers import LLMChunkSummarizer, LLMSumma
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
+from src.infrastructure.services.tokenizers.gemma_tokenizer import GemmaTokenizer
 
 
 async def init_client_registry(
@@ -90,6 +94,50 @@ async def init_generation_client(
 ) -> AsyncOpenAI:
     """Resolves or creates the AsyncOpenAI client for the Generation provider."""
     return await registry.get_client(provider, timeout=timeout)
+
+
+async def init_llm_client(
+    client: AsyncOpenAI,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+) -> AsyncGenerator[OpenAILLMClient, None]:
+    """Builds the Generation OpenAILLMClient on the pooled provider client and
+    guarantees its persistent event loop is shut down on teardown.
+
+    The OpenAILLMClient owns a long-lived event loop (daemon thread) which must
+    be closed explicitly; wrapping the client in a Resource makes that teardown
+    part of :meth:`Container.init_resources`/``shutdown_resources`` instead of
+    leaking the loop thread for the whole process lifetime.
+    """
+    llm_client = OpenAILLMClient(
+        client=client,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    yield llm_client
+    llm_client.close()
+
+
+async def init_tokenizer() -> GemmaTokenizer:
+    """Initialize the Hugging Face tokenizer for context overflow handling."""
+    from transformers import AutoTokenizer
+
+    try:
+        raw = AutoTokenizer.from_pretrained(
+            generation_settings.TOKENIZER_MODEL, use_fast=True
+        )
+    except Exception as err:
+        raise RuntimeError(
+            "Failed to load tokenizer "
+            f"{generation_settings.TOKENIZER_MODEL!r}: {err}"
+        ) from err
+    if raw is None:
+        raise RuntimeError(
+            f"Tokenizer {generation_settings.TOKENIZER_MODEL!r} could not be loaded."
+        )
+    return GemmaTokenizer(raw)
 
 
 class Container(containers.DeclarativeContainer):
@@ -227,8 +275,8 @@ class Container(containers.DeclarativeContainer):
         provider=generation_settings.LLM_PROVIDER,
         timeout=generation_settings.LLM_TIMEOUT,
     )
-    llm_client: providers.Provider[ILLMClient] = providers.Singleton(
-        OpenAILLMClient,
+    llm_client: providers.Provider[ILLMClient] = providers.Resource(
+        init_llm_client,
         client=generation_client,
         model=generation_settings.LLM_MODEL,
         temperature=generation_settings.LLM_TEMPERATURE,
@@ -245,4 +293,15 @@ class Container(containers.DeclarativeContainer):
     chunk_summarizer: providers.Provider[ITextSummarizer] = providers.Singleton(
         LLMChunkSummarizer,
         llm_client=llm_client,
+    )
+
+    # 16. Tokenizer for context overflow handling
+    tokenizer: providers.Provider[Tokenizer] = providers.Resource(init_tokenizer)
+
+    # 17. Generation Context Builder
+    context_builder: providers.Provider[IContextBuilder] = providers.Singleton(
+        ContextBuilder,
+        tokenizer=tokenizer,
+        capacity_allocator=capacity_allocator,
+        dispatcher=overflow_strategy_dispatcher,
     )

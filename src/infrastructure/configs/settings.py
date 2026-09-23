@@ -75,6 +75,9 @@ class GenerationSettings(BaseSettings):
     LLM_TEMPERATURE: float = 0.2
     LLM_MAX_TOKENS: int = 4096
 
+    # Tokenizer configuration for context overflow handling
+    TOKENIZER_MODEL: str = "google/gemma-2b"
+
 
 class BM25Settings(BaseSettings):
     model_config = _base_config

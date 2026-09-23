@@ -1,5 +1,7 @@
 import asyncio
-from collections.abc import Sequence
+import threading
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TypeVar
 
 from openai import AsyncOpenAI, NotFoundError
 
@@ -14,6 +16,9 @@ from src.infrastructure.services.base_openai_service import BaseOpenAIService
 
 _BATCH_PATH = "/chat/completions/batch"
 _DEFAULT_MAX_CONCURRENCY = 32
+_LOOP_SHUTDOWN_TIMEOUT = 5.0
+
+T = TypeVar("T")
 
 
 class OpenAILLMClient(BaseOpenAIService, ILLMClient):
@@ -34,10 +39,20 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
     bounded by ``max_concurrency``.
 
     ``complete``/``complete_many`` are synchronous by contract (the whole
-    Generation pipeline is synchronous). They bridge the async client with
-    ``asyncio.run`` and must therefore be invoked from a thread without a
-    running event loop (e.g. a FastAPI sync endpoint or ``run_in_executor``) --
-    the same constraint the rest of the sync Generation API carries.
+    Generation pipeline is synchronous). They must therefore bridge the async
+    ``AsyncOpenAI`` API. Bridging with a throwaway ``asyncio.run`` per call is
+    broken: it creates and closes one event loop per call, whereas the
+    ``httpx.AsyncClient`` wrapped by ``AsyncOpenAI`` binds lazily to the *first*
+    loop it runs on -- once that loop is closed, every later call using the same
+    shared client fails with ``RuntimeError: Event loop is closed`` (reproduced
+    as a real client lifecycle bug, independent of any test).
+
+    Instead, this instance owns a single long-lived event loop running in a
+    dedicated daemon thread. Every call submits its coroutine onto that loop via
+    :func:`asyncio.run_coroutine_threadsafe` and blocks on the result, so
+    repeated calls on the same ``OpenAILLMClient`` reuse one running loop and
+    never touch a closed one. Call :meth:`close` (e.g. from DI resource
+    teardown) to shut the loop and its thread down; it is idempotent.
     """
 
     def __init__(
@@ -54,6 +69,14 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._max_concurrency = max_concurrency
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(
+            target=self._loop.run_forever,
+            name="OpenAILLMClient-loop",
+            daemon=True,
+        )
+        self._loop_thread.start()
+        self._closed = False
 
     @property
     def _connection_error_cls(self) -> type[Exception]:
@@ -80,9 +103,19 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
         async with self._handle_api_call_scope("chat completion"):
             return await self._create(prompt)
 
+    def _run_on_loop(self, coro_factory: Callable[[], Awaitable[T]]) -> T:
+        """Run the coroutine produced by ``coro_factory`` to completion on the
+        client's persistent event loop."""
+        if self._closed:
+            raise RuntimeError(
+                "OpenAILLMClient has been closed; its event loop is no longer running."
+            )
+        future = asyncio.run_coroutine_threadsafe(coro_factory(), self._loop)
+        return future.result()
+
     def complete(self, prompt: str) -> str:
         """Return the model's raw completion for ``prompt``."""
-        return asyncio.run(self._generate(prompt))
+        return self._run_on_loop(lambda: self._generate(prompt))
 
     def complete_many(self, prompts: Sequence[str]) -> list[str]:
         """Return one completion per prompt, preserving ``prompts`` order.
@@ -94,7 +127,7 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
         prompts = list(prompts)
         if not prompts:
             return []
-        return asyncio.run(self._generate_many(prompts))
+        return self._run_on_loop(lambda: self._generate_many(prompts))
 
     async def _generate_many(self, prompts: list[str]) -> list[str]:
         async with self._handle_api_call_scope("chat completion batch"):
@@ -123,6 +156,54 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
                 return await self._create(prompt)
 
         return list(await asyncio.gather(*(one(prompt) for prompt in prompts)))
+
+    def close(self) -> None:
+        """Stop the persistent event loop and release its daemon thread.
+
+        Idempotent: a second call is a no-op. Pending tasks are cancelled first
+        so the loop can stop cleanly. After ``close``, further calls on this
+        instance fail fast with a clear :class:`RuntimeError` instead of
+        quietly reusing a closed event loop.
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        # The injected AsyncOpenAI is pool-managed, but its internal httpx
+        # transport is bound to THIS persistent loop (that is how the real
+        # client keeps working across calls). It must therefore be closed here,
+        # while the loop is still alive; the registry's later close_all() then
+        # finds it already closed and becomes a no-op. Fakes without a ``close``
+        # (used by unit tests) are tolerated.
+        client_close = getattr(self._client, "close", None)
+        if client_close is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(client_close(), self._loop).result(
+                    timeout=_LOOP_SHUTDOWN_TIMEOUT
+                )
+            except Exception:
+                pass
+
+        async def _finalize() -> None:
+            current = asyncio.current_task()
+            pending = [t for t in asyncio.all_tasks() if t is not current]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(_finalize(), self._loop)
+            future.result(timeout=_LOOP_SHUTDOWN_TIMEOUT)
+        except Exception:
+            # The loop thread may be mid-request; it is daemon so it cannot hold
+            # the process open. Stop and join anyway.
+            pass
+        finally:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._loop_thread.join(timeout=_LOOP_SHUTDOWN_TIMEOUT)
+        if not self._loop.is_closed():
+            self._loop.close()
 
 
 def _extract_batch_results(data: object, expected: int) -> list[str]:

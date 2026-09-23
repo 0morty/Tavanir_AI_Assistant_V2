@@ -8,6 +8,7 @@ from src.application.interfaces.i_hybrid_embedding_service import (
     IHybridEmbeddingService,
 )
 from src.application.interfaces.i_qdrant_admin_service import IQdrantAdminService
+from src.application.interfaces.i_reranker import IReranker
 from src.application.interfaces.i_skipped_suggestion_repository import (
     ISkippedSuggestionRepository,
 )
@@ -26,4 +27,5 @@ __all__ = [
     "IHybridEmbeddingService",
     "IChunkEmbeddingService",
     "IUnitOfWork",
+    "IReranker",
 ]

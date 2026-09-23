@@ -1,5 +1,7 @@
+import asyncio
 from collections.abc import AsyncGenerator
 
+import httpx
 from dependency_injector import containers, providers
 from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
@@ -9,6 +11,7 @@ from src.application.interfaces import (
     IHistoricalSuggestionExtractor,
     IHybridEmbeddingService,
     IQdrantAdminService,
+    IReranker,
     ISparseEmbedder,
     ITextNormalizer,
     IUnitOfWork,
@@ -33,6 +36,7 @@ from src.infrastructure.configs.settings import (
     historical_ingestion_settings,
     mssql_settings,
     qdrant_settings,
+    reranker_settings,
 )
 from src.infrastructure.db import (
     SqlUnitOfWork,
@@ -56,6 +60,7 @@ from src.infrastructure.services.embeddings.persian_bm25_embedder import (
 from src.infrastructure.services.extractors import MssqlSuggestionExtractor
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
 from src.infrastructure.services.qdrant import QdrantAdminService
+from src.infrastructure.services.reranker import TEIReranker
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
@@ -73,6 +78,25 @@ async def init_embedding_client(
 ) -> AsyncOpenAI:
     """Resolves or creates the AsyncOpenAI client for the embedding provider."""
     return await registry.get_client(provider, timeout=timeout)
+
+
+async def init_reranker_client(
+    connect_timeout: float, read_timeout: float
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Initializes a pooled httpx.AsyncClient for TEI reranker with graceful shutdown."""
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=connect_timeout,
+            read=read_timeout,
+            write=2.0,
+            pool=1.0,
+        ),
+        limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
+    )
+    try:
+        yield client
+    finally:
+        await client.aclose()
 
 
 class Container(containers.DeclarativeContainer):
@@ -255,4 +279,23 @@ class Container(containers.DeclarativeContainer):
     ] = providers.Factory(
         BulkDeleteSuggestionsUseCase,
         delete_use_case=delete_suggestion_use_case,
+    )
+
+    # 17. Reranker Infrastructure & Port
+    reranker_semaphore = providers.Singleton(
+        asyncio.Semaphore,
+        value=reranker_settings.RERANKER_MAX_CONCURRENT_REQUESTS,
+    )
+
+    reranker_client = providers.Resource(
+        init_reranker_client,
+        connect_timeout=reranker_settings.RERANKER_CONNECT_TIMEOUT,
+        read_timeout=reranker_settings.RERANKER_READ_TIMEOUT,
+    )
+
+    reranker: providers.Provider[IReranker] = providers.Singleton(
+        TEIReranker,
+        client=reranker_client,
+        settings=reranker_settings,
+        semaphore=reranker_semaphore,
     )

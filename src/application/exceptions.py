@@ -139,3 +139,55 @@ class TextNormalizationError(ApplicationError):
 
 
 # endregion
+
+
+# region Reranker Exceptions
+class RerankerBaseError(ApplicationError):
+    """Base exception for all reranker failures."""
+
+    pass
+
+
+class RerankerValidationError(RerankerBaseError):
+    """Raised when reranker inputs (e.g. query, top_n) fail validation preconditions."""
+
+    pass
+
+
+class RerankerConfigurationError(RerankerBaseError):
+    """Raised when reranker is misconfigured, unauthorized (401/403), or model identity mismatches."""
+
+    pass
+
+
+class RerankerConnectionError(RerankerBaseError):
+    """Raised on network connection failure, transport timeout, or DNS resolution failure."""
+
+    pass
+
+
+class RerankerOverloadedError(RerankerBaseError, ApplicationAPIError):
+    """Raised when TEI server returns 429 Too Many Requests or is persistently overloaded."""
+
+    pass
+
+
+class RerankerInputLimitError(RerankerBaseError, ApplicationAPIError):
+    """Raised when request payload or token pair length exceeds server capacity (413/422)."""
+
+    pass
+
+
+class RerankerAPIError(RerankerBaseError, ApplicationAPIError):
+    """Raised when the reranker provider returns an unrecoverable 5xx server error."""
+
+    pass
+
+
+class RerankerProtocolError(RerankerBaseError):
+    """Raised when TEI response is malformed, has missing/duplicate indices, or non-finite logits."""
+
+    pass
+
+
+# endregion

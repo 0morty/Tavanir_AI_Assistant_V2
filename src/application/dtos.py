@@ -168,6 +168,31 @@ class HistoricalIngestionResultDTO:
     execution_time_seconds: float
 
 
+@dataclass(frozen=True, slots=True)
+class RerankCandidate:
+    candidate_id: str
+    normalized_text: str
+    retrieval_rank: int
+    retrieval_score: float
+
+    def __post_init__(self) -> None:
+        if not self.candidate_id or not self.candidate_id.strip():
+            raise ValueError("candidate_id must be non-empty.")
+        if not self.normalized_text or not self.normalized_text.strip():
+            raise ValueError("normalized_text must be non-empty.")
+        if self.retrieval_rank <= 0:
+            raise ValueError("retrieval_rank must be positive.")
+
+
+@dataclass(frozen=True, slots=True)
+class RerankedCandidate:
+    candidate_id: str
+    retrieval_rank: int
+    retrieval_score: float
+    rerank_score: float
+    reranked_rank: int
+
+
 __all__ = [
     "AnalyzeSuggestionResponse",
     "CreateSuggestionDTO",
@@ -183,4 +208,6 @@ __all__ = [
     "SkippedRecordDTO",
     "CheckpointData",
     "HistoricalIngestionResultDTO",
+    "RerankCandidate",
+    "RerankedCandidate",
 ]

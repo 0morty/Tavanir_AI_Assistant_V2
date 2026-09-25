@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from src.domain.enums import (
     CommitteeScrutiny,
     SecretariatScrutiny,
+    SuggestionChunkType,
     SuggestionStatus,
 )
 
@@ -21,6 +22,28 @@ class AnalyzeSuggestionResponse:
 
     # 3. Applicable Statutes & Distances
     applied_statute_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AnalyzeSuggestionDTO:
+    title: str
+    problem: str
+    solution: str
+    context_title: str | None = None
+
+
+@dataclass(frozen=True)
+class PooledSuggestionCandidate:
+    suggestion_id: str
+    status: SuggestionStatus
+    winning_chunk_id: str
+    winning_chunk_type: SuggestionChunkType
+    winning_score: float
+    winning_content: str
+    all_matched_chunk_types: tuple[SuggestionChunkType, ...]
+
+
+# Backward-compatible alias
 
 
 @dataclass(frozen=True)
@@ -195,6 +218,8 @@ class RerankedCandidate:
 
 __all__ = [
     "AnalyzeSuggestionResponse",
+    "AnalyzeSuggestionDTO",
+    "PooledSuggestionCandidate",
     "CreateSuggestionDTO",
     "IngestSuggestionResponseDTO",
     "UpdateSuggestionDTO",

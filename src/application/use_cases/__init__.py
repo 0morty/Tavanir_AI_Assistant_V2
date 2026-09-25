@@ -1,3 +1,6 @@
+from src.application.use_cases.analyze_suggestion_use_case import (
+    AnalyzeSuggestionUseCase,
+)
 from src.application.use_cases.bulk_delete_suggestions_use_case import (
     BulkDeleteSuggestionsUseCase,
 )
@@ -15,6 +18,7 @@ from src.application.use_cases.update_suggestion_use_case import (
 )
 
 __all__ = [
+    "AnalyzeSuggestionUseCase",
     "IngestSuggestionUseCase",
     "ExtractAndIngestHistoricalSuggestionsUseCase",
     "UpdateSuggestionUseCase",

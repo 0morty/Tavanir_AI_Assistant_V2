@@ -18,6 +18,7 @@ from src.application.interfaces import (
 )
 from src.application.services import HybridEmbeddingService
 from src.application.use_cases import (
+    AnalyzeSuggestionUseCase,
     BulkDeleteSuggestionsUseCase,
     DeleteSuggestionUseCase,
     ExtractAndIngestHistoricalSuggestionsUseCase,
@@ -37,6 +38,7 @@ from src.infrastructure.configs.settings import (
     mssql_settings,
     qdrant_settings,
     reranker_settings,
+    suggestion_analysis_settings,
 )
 from src.infrastructure.db import (
     SqlUnitOfWork,
@@ -298,4 +300,23 @@ class Container(containers.DeclarativeContainer):
         client=reranker_client,
         settings=reranker_settings,
         semaphore=reranker_semaphore,
+    )
+
+    # 18. Suggestion Analysis Use Case
+    analyze_suggestion_use_case: providers.Provider[AnalyzeSuggestionUseCase] = (
+        providers.Factory(
+            AnalyzeSuggestionUseCase,
+            normalizer=text_normalizer,
+            embedding_service=hybrid_embedding_service,
+            vector_repo=suggestion_vector_repository,
+            reranker=reranker,
+            uow=unit_of_work,
+            solution_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_SOLUTION_LIMIT,
+            problem_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_PROBLEM_LIMIT,
+            title_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_TITLE_LIMIT,
+            positive_probe_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_POSITIVE_PROBE_LIMIT,
+            pending_probe_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_PENDING_PROBE_LIMIT,
+            top_n_per_status=suggestion_analysis_settings.SUGGESTION_ANALYSIS_TOP_N_PER_STATUS,
+            min_score_threshold=suggestion_analysis_settings.SUGGESTION_ANALYSIS_MIN_SCORE_THRESHOLD,
+        )
     )

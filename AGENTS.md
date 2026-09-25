@@ -189,8 +189,8 @@ GenerationInput
 │   ├── title: str
 │   ├── content: str
 │   └── citation: str | None
-└── custom_instructions: str | None
 ```
+
 
 These are starting points. Refine them as implementation progresses. Do not add fields merely because they exist in the source database — include information only when it has a meaningful purpose for generation.
 

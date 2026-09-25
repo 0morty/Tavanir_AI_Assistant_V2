@@ -1,3 +1,10 @@
+from src.presentation.schemas.v1.analyze_suggestion_request import (
+    AnalyzeSuggestionRequest,
+)
+from src.presentation.schemas.v1.analyze_suggestion_response import (
+    AnalyzeSuggestionDataResponse,
+    AnalyzeSuggestionResponseData,
+)
 from src.presentation.schemas.v1.bulk_delete_request import (
     BulkDeleteRequest,
 )
@@ -20,6 +27,9 @@ from src.presentation.schemas.v1.update_suggestion_request import (
 )
 
 __all__ = [
+    "AnalyzeSuggestionRequest",
+    "AnalyzeSuggestionDataResponse",
+    "AnalyzeSuggestionResponseData",
     "IngestSuggestionRequest",
     "IngestSuggestionDataResponse",
     "UpdateSuggestionRequest",

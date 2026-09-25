@@ -17,7 +17,7 @@ For every incoming suggestion, the system performs two fundamentally different r
 1. **Historical suggestion retrieval**
    - Search previous registered suggestions.
    - Find semantically similar suggestions.
-   - Detect potentially duplicated or substantially overlapping proposals.
+   - Detect potentially duplicated or substantially overlapping suggestions.
    - Retrieve historical precedents that may help evaluate the new suggestion.
 
 2. **Regulatory knowledge retrieval**
@@ -143,7 +143,7 @@ Its primary retrieval objectives include:
 - similarity detection;
 - duplicate detection;
 - identification of historical precedent;
-- discovery of related previously evaluated proposals.
+- discovery of related previously evaluated suggestions.
 
 `tavanir_regulatory_knowledge_v1` answers:
 

@@ -201,6 +201,18 @@ class RerankerSettings(BaseSettings):
         return f"http://{self.RERANKER_HOST}:{self.RERANKER_PORT}"
 
 
+class SuggestionAnalysisSettings(BaseSettings):
+    model_config = _base_config
+
+    SUGGESTION_ANALYSIS_SOLUTION_LIMIT: int = 40
+    SUGGESTION_ANALYSIS_PROBLEM_LIMIT: int = 25
+    SUGGESTION_ANALYSIS_TITLE_LIMIT: int = 15
+    SUGGESTION_ANALYSIS_POSITIVE_PROBE_LIMIT: int = 15
+    SUGGESTION_ANALYSIS_PENDING_PROBE_LIMIT: int = 10
+    SUGGESTION_ANALYSIS_TOP_N_PER_STATUS: int = 3
+    SUGGESTION_ANALYSIS_MIN_SCORE_THRESHOLD: float | None = 0.0
+
+
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 embedding_settings = EmbeddingSettings()
@@ -212,3 +224,4 @@ security_settings = SecuritySettings()
 mssql_settings = MssqlSettings()
 historical_ingestion_settings = HistoricalIngestionSettings()
 reranker_settings = RerankerSettings()
+suggestion_analysis_settings = SuggestionAnalysisSettings()

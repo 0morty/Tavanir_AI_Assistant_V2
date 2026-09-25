@@ -139,6 +139,7 @@ async def test_reranker_top_n_non_positive_raises_validation_error():
 @pytest.mark.asyncio
 async def test_reranker_duplicate_candidates_deduplicated_preserving_first_occurrence(
     capsys,
+    caplog,
 ):
     dup_id = str(uuid.uuid4())
     other_id = str(uuid.uuid4())
@@ -184,7 +185,8 @@ async def test_reranker_duplicate_candidates_deduplicated_preserving_first_occur
 
     # 3. Warning log emitted for dropped duplicate
     captured = capsys.readouterr()
-    assert "reranker_duplicate_candidate_dropped" in captured.out
+    combined_log = captured.out + captured.err + caplog.text
+    assert "reranker_duplicate_candidate_dropped" in combined_log
 
 
 @pytest.mark.asyncio
@@ -549,7 +551,7 @@ async def test_reranker_cancelled_error_propagation():
 # 6. Observability & Security (Zero Leakage)
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_reranker_truncation_heuristic_warning(capsys):
+async def test_reranker_truncation_heuristic_warning(capsys, caplog):
     # Threshold is 50 chars; query + text = 60 chars
     settings = make_settings(RERANKER_TRUNCATION_RISK_CHAR_THRESHOLD=50)
     cands = [
@@ -570,13 +572,14 @@ async def test_reranker_truncation_heuristic_warning(capsys):
         await reranker.rerank("عنوان پرسش تستی با طول نسبتا بلند", cands)
 
     captured = capsys.readouterr()
-    assert "reranker_truncation_risk_detected" in captured.out
+    combined_log = captured.out + captured.err + caplog.text
+    assert "reranker_truncation_risk_detected" in combined_log
 
 
 @pytest.mark.asyncio
-async def test_reranker_zero_log_leakage(capsys):
+async def test_reranker_zero_log_leakage(capsys, caplog):
     # Verify that neither query nor document content leaks into log output even on error
-    secret_query = "TOP_SECRET_USER_PROPOSAL_QUERY"
+    secret_query = "TOP_SECRET_USER_SUGGESTION_QUERY"
     secret_chunk = "HIGHLY_CONFIDENTIAL_CHUNK_PAYLOAD"
     cands = [make_candidate(text=secret_chunk)]
 
@@ -594,10 +597,9 @@ async def test_reranker_zero_log_leakage(capsys):
             await reranker.rerank(secret_query, cands)
 
     captured = capsys.readouterr()
-    assert secret_query not in captured.out
-    assert secret_query not in captured.err
-    assert secret_chunk not in captured.out
-    assert secret_chunk not in captured.err
+    combined_log = captured.out + captured.err + caplog.text
+    assert secret_query not in combined_log
+    assert secret_chunk not in combined_log
 
 
 # ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@ class LLMClientRegistry:
         # 2. Synchronized write path
         async with self._lock:
             if cache_key not in self._clients:
-                client = self._client_factory(provider_name, timeout=timeout)
+                client = self._client_factory(provider_name, timeout)
                 self._clients[cache_key] = client
             return self._clients[cache_key]
 

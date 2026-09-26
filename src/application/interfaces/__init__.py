@@ -26,6 +26,9 @@ from src.application.interfaces.i_skipped_suggestion_repository import (
     ISkippedSuggestionRepository,
 )
 from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
+from src.application.interfaces.i_suggestion_prompt_preparer import (
+    ISuggestionPromptPreparer,
+)
 from src.application.interfaces.i_template_validator import ITemplateValidator
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
@@ -44,6 +47,7 @@ __all__ = [
     "IRedistributionAllocator",
     "IReferenceGenerator",
     "ISparseEmbedder",
+    "ISuggestionPromptPreparer",
     "ITemplateValidator",
     "ITextNormalizer",
     "ITextSummarizer",

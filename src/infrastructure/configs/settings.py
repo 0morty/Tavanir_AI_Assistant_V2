@@ -76,7 +76,7 @@ class GenerationSettings(BaseSettings):
     LLM_MAX_TOKENS: int = 4096
 
     # Tokenizer configuration for context overflow handling
-    TOKENIZER_MODEL: str = "google/gemma-2b"
+    TOKENIZER_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
 
 
 class BM25Settings(BaseSettings):

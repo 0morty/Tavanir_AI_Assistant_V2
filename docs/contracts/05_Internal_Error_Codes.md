@@ -56,6 +56,10 @@ Whenever a new capability is added or a new error scenario is defined:
 | `LLM_CONNECTION_FAILED` | 503 | `LLMConnectionError` | network/timeout communicating with the LLM provider |
 | `LLM_API_ERROR` | 502 | `LLMAPIError` | the LLM provider returned an API error |
 | `LLM_AUTH_FAILED` | 401 | `LLMAuthenticationError` | LLM provider authentication failed |
+| `PROMPT_BUDGET_EXCEEDED` | 422 | `PromptBudgetExceededError` | fixed prompt sections (system instruction, user query, output format) exceed token budget |
+| `INSUFFICIENT_EVIDENCE_BUDGET` | 422 | `InsufficientEvidenceBudgetError` | remaining token capacity cannot fit even the highest-ranked similar suggestion |
+| `INVALID_SUGGESTION_CONTENT` | 422 | `InvalidSuggestionContentError` | suggestion title, problem, or solution is empty or non-substantive |
+| `DUPLICATE_EVIDENCE_ID` | 422 | `DuplicateEvidenceIdError` | duplicate similar suggestion ID detected in generation input |
 | `RETRIEVAL_FAILED` | 500 | — | vector retrieval from Qdrant failed **[planned]** |
 | `GENERATION_FAILED` | 500 | — | answer generation by the model failed |
 | `MSSQL_EXTRACTION_FAILED` | 500 | — | error extracting suggestions from legacy MSSQL **[planned]** |

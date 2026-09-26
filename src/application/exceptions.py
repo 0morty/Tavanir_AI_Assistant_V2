@@ -139,6 +139,51 @@ class ChunkSummarizationError(LLMBaseError):
     pass
 
 
+class PromptBudgetExceededError(LLMBaseError):
+    """Raised when fixed prompt sections (system instruction, user query, output format) exceed max_prompt_tokens."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        pointer: str = "/data/maxPromptTokens",
+        field_name: str = "max_prompt_tokens",
+    ) -> None:
+        super().__init__(message)
+        self.pointer = pointer
+        self.field_name = field_name
+
+
+class InsufficientEvidenceBudgetError(LLMBaseError):
+    """Raised when remaining token capacity cannot fit even the highest-ranked similar suggestion."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        pointer: str = "/data/similarSuggestions",
+        field_name: str = "similar_suggestions",
+    ) -> None:
+        super().__init__(message)
+        self.pointer = pointer
+        self.field_name = field_name
+
+
+class DuplicateEvidenceIdError(LLMBaseError):
+    """Raised when duplicate similar suggestion IDs are supplied as generation context."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        pointer: str = "/data/similarSuggestions",
+        field_name: str = "id",
+    ) -> None:
+        super().__init__(message)
+        self.pointer = pointer
+        self.field_name = field_name
+
+
 # endregion
 
 

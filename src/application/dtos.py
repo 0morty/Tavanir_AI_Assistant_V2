@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -7,12 +8,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover
     from src.application.context.allocation.expansion_request import ExpansionRequest
 
+from src.application.exceptions import DuplicateEvidenceIdError
+from src.domain.entities import NOISE_PLACEHOLDERS
 from src.domain.enums import (
     CommitteeScrutiny,
     SecretariatScrutiny,
     SuggestionChunkType,
     SuggestionStatus,
 )
+from src.domain.exceptions import InvalidSuggestionContentError
 
 
 @dataclass
@@ -293,6 +297,121 @@ class RerankedCandidate:
     reranked_rank: int
 
 
+def _validate_suggestion_field(
+    field_name: str, value: str, min_len: int, pointer: str
+) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise InvalidSuggestionContentError(
+            f"Suggestion {field_name} must not be empty.",
+            pointer=pointer,
+            field_name=field_name,
+        )
+    cleaned = value.strip()
+    if len(cleaned) < min_len or cleaned in NOISE_PLACEHOLDERS:
+        raise InvalidSuggestionContentError(
+            f"Suggestion {field_name} must contain substantive content, got '{cleaned}'.",
+            pointer=pointer,
+            field_name=field_name,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentSuggestionInput:
+    title: str
+    problem: str
+    solution: str
+    id: str | None = None
+    status: SuggestionStatus = SuggestionStatus.PENDING
+    context_title: str | None = None
+
+    def __post_init__(self) -> None:
+        _validate_suggestion_field("title", self.title, 5, "/data/currentTitle")
+        _validate_suggestion_field("problem", self.problem, 5, "/data/currentProblem")
+        _validate_suggestion_field(
+            "solution", self.solution, 5, "/data/currentSolution"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SimilarSuggestionInput:
+    id: str
+    status: SuggestionStatus
+    title: str
+    problem: str
+    solution: str
+    similarity: float
+    context_title: str | None = None
+
+    def validate_with_index(self, index: int) -> None:
+        if not self.id or not isinstance(self.id, str) or not self.id.strip():
+            raise InvalidSuggestionContentError(
+                "Similar suggestion id must not be empty.",
+                pointer=f"/data/similarSuggestions/{index}/id",
+                field_name="id",
+            )
+        _validate_suggestion_field(
+            "title", self.title, 5, f"/data/similarSuggestions/{index}/title"
+        )
+        _validate_suggestion_field(
+            "problem", self.problem, 5, f"/data/similarSuggestions/{index}/problem"
+        )
+        _validate_suggestion_field(
+            "solution", self.solution, 5, f"/data/similarSuggestions/{index}/solution"
+        )
+        if (
+            self.similarity is None
+            or not isinstance(self.similarity, (int, float))
+            or math.isnan(self.similarity)
+            or not (0.0 <= self.similarity <= 1.0)
+        ):
+            raise InvalidSuggestionContentError(
+                f"Similar suggestion similarity must be a float between 0.0 and 1.0, got {self.similarity!r}.",
+                pointer=f"/data/similarSuggestions/{index}/similarity",
+                field_name="similarity",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class RegulationInput:
+    id: str
+    title: str
+    content: str
+    citation: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationInput:
+    current_suggestion: CurrentSuggestionInput
+    similar_suggestions: list[SimilarSuggestionInput] = field(default_factory=list)
+    regulations: list[RegulationInput] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.current_suggestion is None or not isinstance(
+            self.current_suggestion, CurrentSuggestionInput
+        ):
+            raise InvalidSuggestionContentError(
+                "current_suggestion must be a valid CurrentSuggestionInput instance.",
+                pointer="/data/currentSuggestion",
+                field_name="current_suggestion",
+            )
+        seen_ids: set[str] = set()
+        for idx, item in enumerate(self.similar_suggestions):
+            if not isinstance(item, SimilarSuggestionInput):
+                raise InvalidSuggestionContentError(
+                    f"Expected SimilarSuggestionInput at index {idx}, got {type(item).__name__}.",
+                    pointer=f"/data/similarSuggestions/{idx}",
+                    field_name="similar_suggestions",
+                )
+            item.validate_with_index(idx)
+            if item.id in seen_ids:
+                raise DuplicateEvidenceIdError(
+                    f"Duplicate similar suggestion id detected: {item.id!r}",
+                    pointer=f"/data/similarSuggestions/{idx}/id",
+                    field_name="id",
+                )
+            seen_ids.add(item.id)
+
+
 __all__ = [
     "AnalyzeSuggestionResponse",
     "SectionOutput",
@@ -317,4 +436,8 @@ __all__ = [
     "HistoricalIngestionResultDTO",
     "RerankCandidate",
     "RerankedCandidate",
+    "CurrentSuggestionInput",
+    "SimilarSuggestionInput",
+    "RegulationInput",
+    "GenerationInput",
 ]

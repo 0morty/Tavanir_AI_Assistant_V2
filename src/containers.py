@@ -29,10 +29,15 @@ from src.application.interfaces import (
     IReferenceGenerator,
     IReranker,
     ISparseEmbedder,
+    ISuggestionPromptPreparer,
     ITemplateValidator,
     ITextNormalizer,
     ITextSummarizer,
     IUnitOfWork,
+)
+from src.application.prompt import (
+    SuggestionAnalysisPromptConfig,
+    SuggestionPromptPreparer,
 )
 from src.application.reference.deterministic_reference_generator import (
     DeterministicReferenceGenerator,
@@ -435,6 +440,21 @@ class Container(containers.DeclarativeContainer):
         tokenizer=tokenizer,
         capacity_allocator=capacity_allocator,
         dispatcher=overflow_strategy_dispatcher,
+    )
+
+    # 17.1 Suggestion Analysis Prompt Config
+    suggestion_analysis_prompt_config = providers.Object(
+        SuggestionAnalysisPromptConfig()
+    )
+
+    # 17.2 Suggestion Prompt Preparer
+    suggestion_prompt_preparer: providers.Provider[ISuggestionPromptPreparer] = (
+        providers.Singleton(
+            SuggestionPromptPreparer,
+            context_builder=context_builder,
+            tokenizer=tokenizer,
+            config=suggestion_analysis_prompt_config,
+        )
     )
 
     # 18. Reranker Infrastructure & Port

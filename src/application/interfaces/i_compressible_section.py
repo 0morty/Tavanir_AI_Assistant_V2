@@ -1,72 +1,40 @@
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
-from src.domain.context.tokenizer import Tokenizer
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.application.dtos import SectionProcessingResult
+    from src.domain.context.tokenizer import Tokenizer
 
 
 class CompressibleSection(ABC):
-    """Contract for Sections whose content can be reduced to consume less space.
-
-    A ``CompressibleSection`` can be truncated, summarized, or partially
-    ignored when its content exceeds its allocated capacity. This abstract
-    class defines the contract only -- it contains no implementation of any
-    operation. The plain-text defaults live on the ``PromptSection`` skeleton;
-    ``ReferencedSection`` inherits the contract for the reference-aware branch
-    and uses those same defaults, while ``ReferencedCollectionSection``
-    overrides the operations according to its own item-aware representation.
-
-    Every operation receives the Section's ``content`` plus the available
-    ``capacity_tokens`` and returns the reduced content, or ``None`` when the
-    operation is not applicable to (or cannot be executed for) this Section --
-    in which case the caller moves on to the next strategy in the Section's
-    overflow stack.
-
-    ``truncate`` is a universal operation: ``text + maximum_allowed_tokens ->
-    truncated text``. It knows nothing about chunks, references, list
-    semantics, or domain models; a Section decides how to apply this universal
-    behavior to its own representation.
-
-    ``summarize`` is completed by the Section's own summarizer. Whether that
-    summarizer exists is a property of the Section itself (injected through the
-    Section's constructor), never a parameter of the operation: ``summarize``
-    returns ``None`` when the Section has no summarizer configured, so the
-    caller can fall through to the next strategy.
-    """
+    """Transform prepared section content without mutating the source section."""
 
     @abstractmethod
     def truncate(
         self,
-        content: str,
+        content: SectionProcessingResult,
         capacity_tokens: int,
         *,
         tokenizer: Tokenizer,
-    ) -> str | None:
-        """Reduce ``content`` to the largest prefix that fits ``capacity_tokens``.
-
-        ``tokenizer`` drives the universal truncation algorithm.
-        """
+    ) -> SectionProcessingResult | None:
+        """Return the section-specific truncated result."""
 
     @abstractmethod
     def summarize(
         self,
-        content: str,
+        content: SectionProcessingResult,
         capacity_tokens: int,
-    ) -> str | None:
-        """Compress ``content`` using the Section's own summarizer.
-
-        Returns ``None`` when the Section has no summarizer configured, so the
-        caller can fall through to the next strategy.
-        """
+    ) -> SectionProcessingResult | None:
+        """Return summarized content, or None when unavailable."""
 
     @abstractmethod
     def ignore(
         self,
-        content: str,
+        content: SectionProcessingResult,
         capacity_tokens: int,
         *,
         tokenizer: Tokenizer,
-    ) -> str | None:
-        """Exclude parts of ``content`` that cannot fit within ``capacity_tokens``.
-
-        Returns ``None`` when there is nothing to drop (e.g. a single plain
-        text), so the caller can fall through to the next strategy.
-        """
+    ) -> SectionProcessingResult | None:
+        """Drop trailing collection items, or return None when inapplicable."""

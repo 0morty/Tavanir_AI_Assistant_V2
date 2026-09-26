@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from src.application.dtos import SectionProcessingResult
 from src.application.interfaces.i_compressible_section import CompressibleSection
 from src.application.interfaces.i_overflow_strategy_dispatcher import (
     IOverflowStrategyDispatcher,
@@ -25,14 +28,14 @@ class OverflowStrategyDispatcher(IOverflowStrategyDispatcher):
         self,
         section: CompressibleSection,
         strategy: OverflowStrategy,
-        content: str,
+        content: SectionProcessingResult,
         capacity_tokens: int,
         *,
         tokenizer: Tokenizer,
-    ) -> str | None:
+    ) -> SectionProcessingResult | None:
         """Invoke the operation for ``strategy`` on ``section``.
 
-        Returns the reduced content as a ``str``, or ``None`` when the strategy
+        Returns the transformed section result, or ``None`` when the strategy
         is not applicable for this Section (e.g. a Section without a configured
         summarizer returns ``None`` from ``summarize``), so the caller can fall
         through to the next strategy in the Section's overflow stack.

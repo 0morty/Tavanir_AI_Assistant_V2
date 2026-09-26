@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:  # pragma: no cover
     from src.application.context.allocation.expansion_request import ExpansionRequest
@@ -26,12 +26,24 @@ class AnalyzeSuggestionResponse:
 
 
 @dataclass(frozen=True)
-class SectionOutput:
-    """Per-section result after budgeting, reference handling, and overflow fitting.
+class SectionProcessingResult:
+    """Immutable prepared or transformed section content.
 
-    history_messages contains fitted chat turns for HISTORY. It is None for
-    other sections and a tuple (possibly empty) for processed history.
+    ``items`` preserves collection boundaries and metadata. ``item_bodies``
+    holds each reference-enriched body for exact prefix rendering; ``item_inputs``
+    holds each complete pre/post-framed input for independent summarization.
+    Single-text sections leave all three as None.
     """
+
+    content: str
+    items: tuple[Any, ...] | None = None
+    item_bodies: tuple[str, ...] | None = None
+    item_inputs: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
+class SectionOutput:
+    """Final section result with token accounting owned by ContextBuilder."""
 
     section_type: str
     content: str
@@ -39,7 +51,13 @@ class SectionOutput:
     capacity_tokens: int
     fitted_tokens: int
     overflowed: bool
-    history_messages: tuple[HistoryMessage, ...] | None = None
+    items: tuple[Any, ...] | None = None
+
+    @property
+    def history_messages(self) -> tuple[HistoryMessage, ...] | None:
+        if self.section_type != "HISTORY":
+            return None
+        return cast("tuple[HistoryMessage, ...] | None", self.items)
 
 
 @dataclass(frozen=True)

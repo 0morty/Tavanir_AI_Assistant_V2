@@ -1,16 +1,12 @@
-import pytest
-
 from src.application.context import OverflowStrategyDispatcher
-from src.application.context.sections import CompressibleSection
-from src.application.context.sections.prompt_section import PromptSection
+from src.application.context.sections import CompressibleSection, PromptSection
+from src.application.dtos import SectionProcessingResult
 from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.enums import OverflowStrategy
 
 
 class FakeTokenizer(Tokenizer):
-    """Char-based tokenizer: every character counts as one token."""
-
     @property
     def supports_offset_mapping(self) -> bool:
         return True
@@ -32,83 +28,51 @@ class RecordingSummarizer(Summarizer):
 
 
 class SpySection(CompressibleSection):
-    """Records which CompressibleSection operations the dispatcher invoked."""
-
     def __init__(self) -> None:
         self.calls: list[str] = []
-        self.truncate_result: str | None = "truncated"
-        self.summarize_result: str | None = "summarized"
-        self.ignore_result: str | None = "ignored"
+        self.truncate_result = SectionProcessingResult("truncated")
+        self.summarize_result = SectionProcessingResult("summarized")
+        self.ignore_result = SectionProcessingResult("ignored")
 
-    def truncate(self, content, capacity_tokens, *, tokenizer) -> str | None:
+    def truncate(self, content, capacity_tokens, *, tokenizer):
         self.calls.append("truncate")
         return self.truncate_result
 
-    def summarize(self, content, capacity_tokens) -> str | None:
+    def summarize(self, content, capacity_tokens):
         self.calls.append("summarize")
         return self.summarize_result
 
-    def ignore(self, content, capacity_tokens, *, tokenizer) -> str | None:
+    def ignore(self, content, capacity_tokens, *, tokenizer):
         self.calls.append("ignore")
         return self.ignore_result
 
 
-def test_dispatcher_maps_truncate_to_section_truncate():
-    section = SpySection()
-    result = OverflowStrategyDispatcher().apply(
-        section,
-        OverflowStrategy.TRUNCATE,
-        "content",
-        10,
-        tokenizer=FakeTokenizer(),
-    )
-    assert result == "truncated"
-    assert section.calls == ["truncate"]
+def test_dispatcher_maps_each_strategy_to_its_section_operation():
+    prepared = SectionProcessingResult("content")
+    for strategy, expected in [
+        (OverflowStrategy.TRUNCATE, "truncate"),
+        (OverflowStrategy.SUMMARIZE, "summarize"),
+        (OverflowStrategy.IGNORE, "ignore"),
+    ]:
+        section = SpySection()
+        result = OverflowStrategyDispatcher().apply(
+            section, strategy, prepared, 10, tokenizer=FakeTokenizer()
+        )
+        assert result.content == {"truncate": "truncated", "summarize": "summarized", "ignore": "ignored"}[expected]
+        assert section.calls == [expected]
 
 
-def test_dispatcher_maps_summarize_to_section_summarize():
-    section = SpySection()
-    result = OverflowStrategyDispatcher().apply(
-        section,
-        OverflowStrategy.SUMMARIZE,
-        "content",
-        10,
-        tokenizer=FakeTokenizer(),
-    )
-    assert result == "summarized"
-    assert section.calls == ["summarize"]
-
-
-def test_dispatcher_maps_ignore_to_section_ignore():
-    section = SpySection()
-    result = OverflowStrategyDispatcher().apply(
-        section,
-        OverflowStrategy.IGNORE,
-        "content",
-        10,
-        tokenizer=FakeTokenizer(),
-    )
-    assert result == "ignored"
-    assert section.calls == ["ignore"]
-
-
-def test_dispatcher_passes_through_none_when_section_summarize_unavailable():
+def test_dispatcher_passes_through_none_when_unavailable():
     section = SpySection()
     section.summarize_result = None
-    result = OverflowStrategyDispatcher().apply(
-        section,
-        OverflowStrategy.SUMMARIZE,
-        "content",
-        10,
+    assert OverflowStrategyDispatcher().apply(
+        section, OverflowStrategy.SUMMARIZE, SectionProcessingResult("content"), 10,
         tokenizer=FakeTokenizer(),
-    )
-    assert result is None
+    ) is None
     assert section.calls == ["summarize"]
 
 
-def test_dispatcher_invokes_domain_strategy_through_plain_section():
-    dispatcher = OverflowStrategyDispatcher()
-
+def test_dispatcher_invokes_plain_section_transformations():
     class Plain(PromptSection):
         @property
         def section_type(self) -> str:
@@ -117,45 +81,32 @@ def test_dispatcher_invokes_domain_strategy_through_plain_section():
         def body(self) -> str:
             return "abcdefghij"
 
-    section = Plain("abcdefghij", summarizer=RecordingSummarizer())
-    assert (
-        dispatcher.apply(
-            section,
-            OverflowStrategy.TRUNCATE,
-            "abcdefghij",
-            3,
-            tokenizer=FakeTokenizer(),
-        )
-        == "abc"
-    )
-    assert (
-        dispatcher.apply(
-            section,
-            OverflowStrategy.SUMMARIZE,
-            "abcdefghij",
-            3,
-            tokenizer=FakeTokenizer(),
-        )
-        == "recorded-summary"
-    )
-    assert (
-        dispatcher.apply(
-            section,
-            OverflowStrategy.IGNORE,
-            "abcdefghij",
-            3,
-            tokenizer=FakeTokenizer(),
-        )
-        is None
-    )
+    summarizer = RecordingSummarizer()
+    section = Plain(summarizer=summarizer)
+    prepared = section.prepare()
+    dispatcher = OverflowStrategyDispatcher()
+    assert dispatcher.apply(
+        section, OverflowStrategy.TRUNCATE, prepared, 3,
+        tokenizer=FakeTokenizer(),
+    ).content == "abc"
+    assert dispatcher.apply(
+        section, OverflowStrategy.SUMMARIZE, prepared, 3,
+        tokenizer=FakeTokenizer(),
+    ).content == "recorded-summary"
+    assert summarizer.received_texts == ["abcdefghij"]
+    assert dispatcher.apply(
+        section, OverflowStrategy.IGNORE, prepared, 3,
+        tokenizer=FakeTokenizer(),
+    ) is None
 
 
 def test_dispatcher_rejects_unknown_strategy():
-    with pytest.raises(ValueError):
+    try:
         OverflowStrategyDispatcher().apply(
-            SpySection(),
-            "unknown",  # type: ignore[arg-type]
-            "content",
-            10,
+            SpySection(), "unknown", SectionProcessingResult("content"), 10,
             tokenizer=FakeTokenizer(),
         )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Unknown strategy must fail")

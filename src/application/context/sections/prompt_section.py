@@ -1,5 +1,7 @@
 from abc import abstractmethod
+from dataclasses import replace
 
+from src.application.dtos import SectionProcessingResult
 from src.application.interfaces.i_compressible_section import CompressibleSection
 from src.application.interfaces.i_prompt_section import IPromptSection
 from src.domain.context.overflow.summarize import SummarizeStrategy
@@ -10,71 +12,13 @@ from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 
 class PromptSection(IPromptSection, CompressibleSection):
-    """A logical section of an LLM prompt.
+    """Base section with tuning, rendering, and single-text transformations.
 
-    ``PromptSection`` implements the
-    :class:`~src.application.interfaces.i_prompt_section.IPromptSection` port
-    and ships the default prompt-section behavior on top of that contract. It
-    is the skeleton developers subclass to build new sections; consumer code
-    (such as the ``PromptBuilder``) can depend on the port alone.
-
-    A ``PromptSection`` is a reusable part of a prompt. The
-    ``PromptBuilder`` composes ``PromptSection`` instances into an ordered
-    prompt, and context construction / token allocation operate on the same
-    abstraction.
-
-    The prompt-section abstraction owns three tuning properties that are
-    part of what a prompt section *is* -- not generic properties of every
-    possible section:
-
-    - ``importance`` -- the intrinsic semantic importance of the section in
-      the range ``[0.0, 1.0]``; used as a weight when redistributing unused
-      token capacity; **not** a token percentage.
-    - ``demand`` -- the section's relative context-capacity demand in the
-      range ``[0.0, 1.0]``; used to calculate the section's initial
-      proportional token capacity.
-    - ``overflow_strategies`` -- an :class:`OverflowStrategyStack`: the
-      ordered list of overflow strategies (lower index means higher priority)
-      plus the restart policy for this section.
-    - ``summarizer`` -- the optional :class:`Summarizer` this Section uses to
-      compress its content under the ``SUMMARIZE`` overflow strategy.
-      ``None`` means ``summarize`` is unavailable for this Section and the
-      strategy falls through to the next one.
-
-    Every section renders as three stacked parts:
-
-    +--------------+
-    | pre-context  |
-    +--------------+
-    |     body     |
-    +--------------+
-    | post-context |
-    +--------------+
-
-    Subclasses own the section's identity and body construction by
-    overriding ``section_type`` and ``body()``; pre/post context framing is
-    optional and defaults to empty strings. Each subclass passes its default
-    ``importance`` and ``demand`` to the base constructor. A section whose
-    ``body()`` is empty renders as an empty string, so unconfigured sections
-    never leak framing or separators.
-
-    Both ``importance`` and ``demand`` of several sections are independent:
-    they do not need to sum to ``1.0``, and a ``PromptSection`` never
-    normalizes them or allocates capacity itself. Normalization and
-    allocation are the responsibility of the context/token-allocation logic.
-
-    ``overflow_strategies`` is the section's overflow policy. ``PromptSection``
-    also implements the :class:`CompressibleSection` contract with the default
-    **plain-text** interpretation of that policy: ``truncate`` applies the
-    universal :class:`TruncateStrategy` to the text, ``summarize`` delegates to
-    the Section's own :class:`Summarizer` when one is configured, and
-    ``ignore`` is not applicable to a single plain text (it returns ``None`` so
-    the caller falls through to the next strategy). Collection-based Sections
-    override these operations for their own representation --
-    ``ReferencedCollectionSection``, for example, makes ``IGNORE`` mean "drop
-    items in order". The dispatch of an ``OverflowStrategy`` to one of these
-    operations is owned by the external :class:`OverflowStrategyDispatcher`,
-    never by this class.
+    ``prepare`` captures the complete rendered input before ContextBuilder
+    allocates tokens. Overflow operations return new SectionProcessingResult
+    values and leave the source section untouched. Reference-aware text
+    sections specialize rendering; collection sections specialize all three
+    overflow operations without inheriting single-text semantics.
     """
 
     def __init__(
@@ -160,47 +104,42 @@ class PromptSection(IPromptSection, CompressibleSection):
 
     def truncate(
         self,
-        content: str,
+        content: SectionProcessingResult,
         capacity_tokens: int,
         *,
         tokenizer: Tokenizer,
-    ) -> str:
-        """Reduce a plain-text ``content`` to a prefix that fits ``capacity_tokens``.
-
-        Applies the universal truncation algorithm (:class:`TruncateStrategy`)
-        to the text as-is. Already-fitting or empty content is returned
-        unchanged by the strategy.
-        """
-        return TruncateStrategy(tokenizer).apply(content, capacity_tokens)
+    ) -> SectionProcessingResult:
+        """Truncate the complete prepared text without changing this section."""
+        return replace(
+            content,
+            content=TruncateStrategy(tokenizer).apply(content.content, capacity_tokens),
+        )
 
     def summarize(
         self,
-        content: str,
+        content: SectionProcessingResult,
         capacity_tokens: int,
-    ) -> str | None:
-        """Compress a plain-text ``content`` through the Section's own summarizer.
-
-        Returns ``None`` when no summarizer is configured, so the caller falls
-        through to the next strategy.
-        """
+    ) -> SectionProcessingResult | None:
+        """Summarize the complete prepared text when a summarizer is present."""
         if self._summarizer is None:
             return None
-        if not content or capacity_tokens <= 0:
-            return ""
-        return SummarizeStrategy(self._summarizer).apply(content, capacity_tokens)
+        if not content.content or capacity_tokens <= 0:
+            return replace(content, content="")
+        return replace(
+            content,
+            content=SummarizeStrategy(self._summarizer).apply(
+                content.content, capacity_tokens
+            ),
+        )
 
     def ignore(
         self,
-        content: str,
+        content: SectionProcessingResult,
         capacity_tokens: int,
         *,
         tokenizer: Tokenizer,
     ) -> None:
-        """``IGNORE`` is not applicable to a single plain text.
-
-        There are no items to drop, so this returns ``None`` to signal the
-        caller to move on to the next strategy in the overflow stack.
-        """
+        """Single text has no trailing items to drop."""
         return None
 
     def _compose(self, body: str) -> str:
@@ -217,3 +156,6 @@ class PromptSection(IPromptSection, CompressibleSection):
     def render(self) -> str:
         """Render the complete section by combining pre-context, body, and post-context."""
         return self._compose(self.body())
+    def prepare(self) -> SectionProcessingResult:
+        """Prepare the full section text, including its configured framing."""
+        return SectionProcessingResult(content=self.render())

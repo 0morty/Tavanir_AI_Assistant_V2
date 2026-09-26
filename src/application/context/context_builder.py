@@ -1,6 +1,9 @@
 from src.application.context.allocation.capacity_allocator import CapacityRequest
-from src.application.context.sections.history_section import HistorySection
-from src.application.dtos import ContextBuilderResult, SectionOutput
+from src.application.dtos import (
+    ContextBuilderResult,
+    SectionOutput,
+    SectionProcessingResult,
+)
 from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
 from src.application.interfaces.i_compressible_section import CompressibleSection
 from src.application.interfaces.i_context_builder import IContextBuilder
@@ -13,30 +16,7 @@ from src.domain.enums import OverflowStrategy
 
 
 class ContextBuilder(IContextBuilder):
-    """Assemble a token-budgeted prompt from a :class:`PromptBuilder`'s sections.
-
-    ``ContextBuilder`` orchestrates context-capacity management. It does not
-    own the allocation policy (that is ``CapacityAllocator``), the section
-    ordering/concatenation (that is ``PromptBuilder``), or content selection
-    (that is the sections). The pipeline is:
-
-    1. **Append sections** -- collect the registered sections (in the
-       builder's order).
-    2. **Calculate each section budget** -- delegate the initial capacity
-       split by ``demand`` and the token-scarcity redistribution by
-       ``importance`` to :class:`CapacityAllocator`.
-    3. **Handle reference** -- render every section; ``ReferencedSection``
-       resolves and composes its reference text into the content, so the
-       reference counts toward the section's tokens.
-    4. **Summarize/Truncate/Ignore** -- a section whose rendered content
-       exceeds its final capacity is fitted by walking its own overflow
-       ``OverflowStrategyStack`` through the
-       :class:`OverflowStrategyDispatcher`; a final truncation safety net
-       keeps the budget guarantee.
-    5. **Output** -- delegate the concatenation to
-       :meth:`PromptBuilder.assemble`; the separator token cost is reserved
-       out of the budget, so the prompt never exceeds ``max_tokens``.
-    """
+    """Prepare, allocate, fit, and account for immutable section results."""
 
     def __init__(
         self,
@@ -54,7 +34,6 @@ class ContextBuilder(IContextBuilder):
         builder: PromptBuilder,
         max_tokens: int,
     ) -> ContextBuilderResult:
-        """Run the pipeline over ``builder``'s sections under ``max_tokens``."""
         if max_tokens < 0:
             raise ValueError("max_tokens must be non-negative")
 
@@ -68,15 +47,12 @@ class ContextBuilder(IContextBuilder):
         )
         usable_budget = max(0, max_tokens - separator_reservation)
 
-        # Steps 1 + 3: append + render (reference handled inside render()).
-        rendered: dict[str, str] = {}
-        needed: dict[str, int] = {}
-        for section in sections:
-            content = section.render()
-            rendered[section.section_type] = content
-            needed[section.section_type] = self._tokenizer.count_tokens(content)
-
-        # Steps 2 + 4: budget by demand, token scarcity by importance.
+        # References and pre/post context are prepared before token accounting.
+        prepared = {section.section_type: section.prepare() for section in sections}
+        needed = {
+            section_type: self._tokenizer.count_tokens(result.content)
+            for section_type, result in prepared.items()
+        }
         requests = [
             CapacityRequest(
                 key=section.section_type,
@@ -90,32 +66,26 @@ class ContextBuilder(IContextBuilder):
             self._capacity_allocator.allocate(requests, usable_budget).capacities
         )
 
-        # Step 5: overflow per section.
         outputs: list[SectionOutput] = []
         for section in sections:
             section_type = section.section_type
             share = capacity[section_type]
             overflowed = needed[section_type] > share
-            content = rendered[section_type]
+            result = prepared[section_type]
             if overflowed:
-                content = self._fit(section, content, share)
+                result = self._fit(section, result, share)
             outputs.append(
                 SectionOutput(
                     section_type=section_type,
-                    content=content,
+                    content=result.content,
                     requested_tokens=needed[section_type],
                     capacity_tokens=share,
-                    fitted_tokens=self._tokenizer.count_tokens(content),
+                    fitted_tokens=self._tokenizer.count_tokens(result.content),
                     overflowed=overflowed,
-                    history_messages=(
-                        section.fitted_messages
-                        if isinstance(section, HistorySection)
-                        else None
-                    ),
+                    items=result.items,
                 )
             )
 
-        # Step 6: output -- delegate ordering + concatenation to the builder.
         prompt = builder.assemble(
             {output.section_type: output.content for output in outputs}
         )
@@ -130,27 +100,11 @@ class ContextBuilder(IContextBuilder):
     def _fit(
         self,
         section: CompressibleSection,
-        content: str,
+        content: SectionProcessingResult,
         capacity: int,
-    ) -> str:
-        """Fit ``content`` through the section's overflow chain.
-
-        Walks the section's ``OverflowStrategyStack`` in priority order
-        (honouring the restart policy), invoking each strategy through the
-        :class:`OverflowStrategyDispatcher` and returning the first result that
-        fits ``capacity``. ``_fit`` owns only the orchestration -- the strategy
-        selection and the loop -- never the reduction itself. Mapping an
-        ``OverflowStrategy`` to its ``Section`` operation
-        (``truncate``/``summarize``/``ignore``) is the dispatcher's job, and
-        the Section owns the actual reduction, so no strategy is ever executed
-        or instantiated here directly. A final ``TRUNCATE`` safety net
-        guarantees the fitted content never exceeds the capacity, even when
-        the chosen strategy returns an over-capacity result (e.g. an
-        ``IGNORE``-only stack); that safety net is also dispatched
-        (``TRUNCATE -> section.truncate``), never executed locally.
-        """
+    ) -> SectionProcessingResult:
+        """Select the first fitting transformation; enforce the section budget."""
         stack = section.overflow_strategies
-        best = content
         passes = range(stack.max_restarts + 1) if stack.restart else (0,)
         for _ in passes:
             for strategy in stack.strategies:
@@ -161,19 +115,19 @@ class ContextBuilder(IContextBuilder):
                     capacity,
                     tokenizer=self._tokenizer,
                 )
-                if result is None:
-                    continue
-                best = result
-                if self._tokenizer.count_tokens(result) <= capacity:
+                if result is not None and self._tokenizer.count_tokens(result.content) <= capacity:
                     return result
-        if best and self._tokenizer.count_tokens(best) > capacity:
-            truncated = self._dispatcher.apply(
-                section,
-                OverflowStrategy.TRUNCATE,
-                best,
-                capacity,
-                tokenizer=self._tokenizer,
-            )
-            if truncated is not None:
-                best = truncated
-        return best
+
+        # A collection's TRUNCATE is explicitly a no-op. Its capacity safety
+        # net removes whole trailing items; single text uses real truncation.
+        fallback = (
+            OverflowStrategy.IGNORE
+            if content.items is not None
+            else OverflowStrategy.TRUNCATE
+        )
+        result = self._dispatcher.apply(
+            section, fallback, content, capacity, tokenizer=self._tokenizer
+        )
+        if result is None or self._tokenizer.count_tokens(result.content) > capacity:
+            raise ValueError(f"Section {section.section_type} cannot fit capacity")
+        return result

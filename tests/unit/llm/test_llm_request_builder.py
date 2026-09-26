@@ -37,7 +37,7 @@ def _output(
         capacity_tokens=capacity,
         fitted_tokens=fitted,
         overflowed=overflowed,
-        history_messages=history_messages,
+        items=history_messages,
     )
 
 

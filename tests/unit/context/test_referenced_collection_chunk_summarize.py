@@ -1,4 +1,4 @@
-from src.application.context import ContextBuilder, OverflowStrategyDispatcher
+from src.application.context import OverflowStrategyDispatcher
 from src.application.context.sections.chunks_section import ChunksSection
 from src.application.context.sections.history_section import HistorySection
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
@@ -10,8 +10,6 @@ CAPACITY = 400
 
 
 class RecordingChunkSummarizer(ITextSummarizer):
-    """Records chunk/capacity pairs and returns one summary per chunk in order."""
-
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], int]] = []
 
@@ -19,112 +17,91 @@ class RecordingChunkSummarizer(ITextSummarizer):
         return "llm-summary"
 
     def summarize_chunks(self, chunks: list[str], *, capacity_tokens: int) -> list[str]:
-        self.calls.append((chunks, capacity_tokens))
+        self.calls.append((list(chunks), capacity_tokens))
         return [f"summary-{i + 1}" for i in range(len(chunks))]
 
 
 def chunks_section_with_seam(summarizer=None):
-    chunks = [
-        GenerationChunk(chunk_id="1", content="one"),
-        GenerationChunk(chunk_id="2", content="two"),
-    ]
-    return ChunksSection(chunks, chunk_summarizer=summarizer)
+    return ChunksSection(
+        [GenerationChunk("1", "one"), GenerationChunk("2", "two")],
+        chunk_summarizer=summarizer,
+    )
 
 
 def test_chunks_section_uses_injected_chunk_summarizer():
     summarizer = RecordingChunkSummarizer()
     section = chunks_section_with_seam(summarizer)
-
-    result = section.summarize("some content", CAPACITY)
-
-    assert result == "summary-1\n\nsummary-2"
+    result = section.summarize(section.prepare(), CAPACITY)
+    assert [item.content for item in result.items] == ["summary-1", "summary-2"]
     assert summarizer.calls == [
-        (["Chunk 1:\none", "Chunk 2:\ntwo"], CAPACITY)
+        (["Relevant context chunks:\n\nChunk 1:\none", "Relevant context chunks:\n\nChunk 2:\ntwo"], CAPACITY)
     ]
 
 
 def test_chunks_section_without_chunk_summarizer_uses_plain_default():
-    section = ChunksSection(
-        [GenerationChunk(chunk_id="1", content="one")],
-        summarizer=FakeSummarizer(),
-    )
-
-    result = section.summarize("some content", CAPACITY)
-
-    assert result == FAKE_SUMMARY_TEXT
+    section = ChunksSection([GenerationChunk("1", "one")], summarizer=FakeSummarizer())
+    result = section.summarize(section.prepare(), CAPACITY)
+    assert result.items[0].content == FAKE_SUMMARY_TEXT
 
 
 def test_chunks_section_without_any_summarizer_falls_through():
-    section = ChunksSection([GenerationChunk(chunk_id="1", content="one")])
-
-    assert section.summarize("some content", CAPACITY) is None
+    section = ChunksSection([GenerationChunk("1", "one")])
+    assert section.summarize(section.prepare(), CAPACITY) is None
 
 
 def test_chunks_section_skips_zero_capacity_for_chunk_summarizer():
     summarizer = RecordingChunkSummarizer()
     section = chunks_section_with_seam(summarizer)
-
-    assert section.summarize("some content", 0) == ""
+    result = section.summarize(section.prepare(), 0)
+    assert result.content == "" and result.items == ()
     assert summarizer.calls == []
 
 
-def test_chunks_section_is_item_driven_ignoring_content_param():
+def test_chunks_section_is_prepared_item_driven():
     summarizer = RecordingChunkSummarizer()
     section = chunks_section_with_seam(summarizer)
-
-    result = section.summarize("", CAPACITY)
-
-    assert result == "summary-1\n\nsummary-2"
-    assert summarizer.calls == [
-        (["Chunk 1:\none", "Chunk 2:\ntwo"], CAPACITY)
-    ]
+    prepared = section.prepare()
+    result = section.summarize(prepared, CAPACITY)
+    assert [item.content for item in result.items] == ["summary-1", "summary-2"]
+    assert len(summarizer.calls[0][0]) == 2
 
 
-def test_chunks_section_skips_empty_items_for_chunk_summarizer():
+def test_chunks_section_skips_empty_collection():
     summarizer = RecordingChunkSummarizer()
-
     section = ChunksSection([], chunk_summarizer=summarizer)
-
-    assert section.summarize("some content", CAPACITY) == ""
+    assert section.summarize(section.prepare(), CAPACITY).items == ()
     assert summarizer.calls == []
 
 
 def test_chunks_section_flows_through_dispatcher():
     summarizer = RecordingChunkSummarizer()
     section = chunks_section_with_seam(summarizer)
-
     result = OverflowStrategyDispatcher().apply(
-        section,
-        OverflowStrategy.SUMMARIZE,
-        "some content",
-        CAPACITY,
+        section, OverflowStrategy.SUMMARIZE, section.prepare(), CAPACITY,
         tokenizer=None,
     )
-
-    assert result == "summary-1\n\nsummary-2"
-    assert summarizer.calls == [
-        (["Chunk 1:\none", "Chunk 2:\ntwo"], CAPACITY)
-    ]
+    assert [item.content for item in result.items] == ["summary-1", "summary-2"]
+    assert len(summarizer.calls) == 1
 
 
 def test_chunk_summarizer_is_injected_not_instantiated_in_section():
     summarizer = RecordingChunkSummarizer()
     section = chunks_section_with_seam(summarizer)
-
     assert section._chunk_summarizer is summarizer
 
 
-def test_history_section_forwards_chunk_summarizer():
+def test_history_section_uses_same_batch_mapping_and_retains_roles():
     summarizer = RecordingChunkSummarizer()
     section = HistorySection(
         [
-            HistoryMessage(role=HistoryRole.USER, content="hi"),
-            HistoryMessage(role=HistoryRole.ASSISTANT, content="hello"),
+            HistoryMessage(HistoryRole.USER, "hi"),
+            HistoryMessage(HistoryRole.ASSISTANT, "hello"),
         ],
         chunk_summarizer=summarizer,
     )
-
-    result = section.summarize("some content", CAPACITY)
-
-    assert result == "user: summary-1\n\nassistant: summary-2"
-    assert section._chunk_summarizer is summarizer
+    result = section.summarize(section.prepare(), CAPACITY)
+    assert [(item.role, item.content) for item in result.items] == [
+        (HistoryRole.USER, "summary-1"),
+        (HistoryRole.ASSISTANT, "summary-2"),
+    ]
+    assert section.items[0].content == "hi"

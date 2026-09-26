@@ -3,6 +3,8 @@ from typing import Any
 from src.application.context.sections.referenced_collection_section import (
     ReferencedCollectionSection,
 )
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
+from src.domain.context.summarizer import Summarizer
 from src.domain.entities import GenerationChunk
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
@@ -24,6 +26,8 @@ class ChunksSection(ReferencedCollectionSection):
         importance: float | None = None,
         demand: float | None = None,
         overflow_strategies: OverflowStrategyStack | None = None,
+        summarizer: Summarizer | None = None,
+        chunk_summarizer: ITextSummarizer | None = None,
     ) -> None:
         super().__init__(
             items=chunks,
@@ -33,6 +37,8 @@ class ChunksSection(ReferencedCollectionSection):
             default_importance=0.4,
             default_demand=0.5,
             overflow_strategies=overflow_strategies,
+            summarizer=summarizer,
+            chunk_summarizer=chunk_summarizer,
         )
 
     @property

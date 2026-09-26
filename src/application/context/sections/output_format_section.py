@@ -1,5 +1,7 @@
 from src.application.context.sections.referenced_section import ReferencedSection
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
+from src.domain.context.summarizer import Summarizer
 from src.domain.entities import Reference
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
@@ -16,6 +18,8 @@ class OutputFormatSection(ReferencedSection):
         importance: float | None = None,
         demand: float | None = None,
         overflow_strategies: OverflowStrategyStack | None = None,
+        summarizer: Summarizer | None = None,
+        llm_summarizer: ITextSummarizer | None = None,
     ) -> None:
         super().__init__(
             reference=reference,
@@ -25,6 +29,8 @@ class OutputFormatSection(ReferencedSection):
             default_importance=0.1,
             default_demand=0.2,
             overflow_strategies=overflow_strategies,
+            summarizer=summarizer,
+            llm_summarizer=llm_summarizer,
         )
         self._content = content
 

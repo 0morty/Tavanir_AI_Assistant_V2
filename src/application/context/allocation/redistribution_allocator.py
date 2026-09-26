@@ -3,9 +3,12 @@ from dataclasses import replace
 
 from src.application.context.allocation.expansion_request import ExpansionRequest
 from src.application.dtos import RedistributionResult
+from src.application.interfaces.i_redistribution_allocator import (
+    IRedistributionAllocator,
+)
 
 
-class RedistributionAllocator:
+class RedistributionAllocator(IRedistributionAllocator):
     """Iteratively distribute free capacity among expansion requests by weight.
 
     Implements ``dynamic_section_capacity_allocation.md``:

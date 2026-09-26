@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 
-from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
 
 
@@ -25,6 +24,12 @@ class CompressibleSection(ABC):
     truncated text``. It knows nothing about chunks, references, list
     semantics, or domain models; a Section decides how to apply this universal
     behavior to its own representation.
+
+    ``summarize`` is completed by the Section's own summarizer. Whether that
+    summarizer exists is a property of the Section itself (injected through the
+    Section's constructor), never a parameter of the operation: ``summarize``
+    returns ``None`` when the Section has no summarizer configured, so the
+    caller can fall through to the next strategy.
     """
 
     @abstractmethod
@@ -45,10 +50,12 @@ class CompressibleSection(ABC):
         self,
         content: str,
         capacity_tokens: int,
-        *,
-        summarizer: Summarizer,
     ) -> str | None:
-        """Compress ``content`` through ``summarizer`` to reduce its token usage."""
+        """Compress ``content`` using the Section's own summarizer.
+
+        Returns ``None`` when the Section has no summarizer configured, so the
+        caller can fall through to the next strategy.
+        """
 
     @abstractmethod
     def ignore(

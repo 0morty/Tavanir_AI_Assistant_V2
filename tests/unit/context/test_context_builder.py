@@ -2,10 +2,16 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.application.context import ContextBuilder
+from src.application.context import ContextBuilder, OverflowStrategyDispatcher
+from src.application.context.allocation import (
+    CapacityAllocator,
+    DemandAllocator,
+    RedistributionAllocator,
+)
 from src.application.context.sections import PromptSection, ReferencedSection
 from src.application.prompt import PromptBuilder
 from src.domain.context.overflow.summarize import SummarizeStrategy
+from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.entities import Reference
 from src.domain.enums import OverflowStrategy
@@ -50,6 +56,7 @@ class TextSection(PromptSection):
         default_importance: float = 0.5,
         default_demand: float = 0.5,
         overflow_strategies: OverflowStrategyStack | None = None,
+        summarizer: Summarizer | None = None,
     ) -> None:
         super().__init__(
             importance=importance,
@@ -57,6 +64,7 @@ class TextSection(PromptSection):
             default_importance=default_importance,
             default_demand=default_demand,
             overflow_strategies=overflow_strategies,
+            summarizer=summarizer,
         )
         self._name = name
         self._content = content
@@ -104,8 +112,16 @@ def make_builder(*sections) -> PromptBuilder:
     return builder
 
 
+def make_context_builder() -> ContextBuilder:
+    return ContextBuilder(
+        tokenizer=FakeTokenizer(),
+        capacity_allocator=CapacityAllocator(DemandAllocator(), RedistributionAllocator()),
+        dispatcher=OverflowStrategyDispatcher(),
+    )
+
+
 def test_build_returns_empty_prompt_without_sections():
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(
+    result = make_context_builder().build(
         make_builder(), max_tokens=100
     )
     assert result.prompt == ""
@@ -115,7 +131,7 @@ def test_build_returns_empty_prompt_without_sections():
 
 def test_build_rejects_negative_max_tokens():
     with pytest.raises(ValueError):
-        ContextBuilder(tokenizer=FakeTokenizer()).build(make_builder(), max_tokens=-1)
+        make_context_builder().build(make_builder(), max_tokens=-1)
 
 
 def test_initial_budget_is_proportional_to_demand():
@@ -123,7 +139,7 @@ def test_initial_budget_is_proportional_to_demand():
         TextSection("A", "x" * 49, demand=0.5),
         TextSection("B", "y" * 49, demand=0.5),
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=100)
+    result = make_context_builder().build(builder, max_tokens=100)
 
     assert [output.capacity_tokens for output in result.sections] == [49, 49]
     assert [output.overflowed for output in result.sections] == [False, False]
@@ -135,7 +151,7 @@ def test_content_within_its_share_is_kept_unchanged():
         TextSection("A", "abc", demand=0.5),
         TextSection("B", "defghijklm", demand=0.5),
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=100)
+    result = make_context_builder().build(builder, max_tokens=100)
 
     assert [output.content for output in result.sections] == ["abc", "defghijklm"]
     assert [output.capacity_tokens for output in result.sections] == [3, 10]
@@ -146,7 +162,7 @@ def test_empty_section_is_excluded_from_prompt_but_reported():
         TextSection("A", "abc", demand=0.5),
         TextSection("EMPTY", "", demand=0.5),
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=100)
+    result = make_context_builder().build(builder, max_tokens=100)
 
     assert result.prompt == "abc"
     assert result.sections[1].content == ""
@@ -158,7 +174,7 @@ def test_reference_text_resolved_into_content_and_counts_toward_capacity():
         ReferencedTextSection("A", "abc", FluentReference(), demand=0.5),
         TextSection("B", "q" * 40, demand=0.5),
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=100)
+    result = make_context_builder().build(builder, max_tokens=100)
 
     section_a = result.sections[0]
     assert section_a.content == "REF:\nabc"
@@ -171,7 +187,7 @@ def test_missing_reference_leaves_content_unchanged():
     builder = make_builder(
         ReferencedTextSection("A", "abc", None, demand=0.5),
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=100)
+    result = make_context_builder().build(builder, max_tokens=100)
 
     assert result.sections[0].content == "abc"
     assert "REF:" not in result.prompt
@@ -182,7 +198,7 @@ def test_scarcity_redistributes_free_capacity_by_importance():
         TextSection("UNDER", "abc", demand=0.9, default_demand=0.9),
         TextSection("OVER", "q" * 90, demand=0.1, default_demand=0.1, importance=1.0),
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=200)
+    result = make_context_builder().build(builder, max_tokens=200)
 
     under = next(o for o in result.sections if o.section_type == "UNDER")
     over = next(o for o in result.sections if o.section_type == "OVER")
@@ -194,7 +210,7 @@ def test_scarcity_redistributes_free_capacity_by_importance():
 
 def test_default_overflow_truncates_to_capacity():
     builder = make_builder(TextSection("A", "x" * 100))
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=50)
+    result = make_context_builder().build(builder, max_tokens=50)
 
     section = result.sections[0]
     assert section.overflowed is True
@@ -209,12 +225,11 @@ def test_summarize_overflow_with_injected_summarizer():
         TextSection(
             "A",
             "x" * 100,
+            summarizer=summarizer,
             overflow_strategies=OverflowStrategyStack([OverflowStrategy.SUMMARIZE]),
         )
     )
-    result = ContextBuilder(
-        tokenizer=FakeTokenizer(), summarizer=summarizer
-    ).build(builder, max_tokens=10)
+    result = make_context_builder().build(builder, max_tokens=10)
 
     section = result.sections[0]
     assert section.overflowed is True
@@ -230,7 +245,7 @@ def test_ignore_only_stack_falls_back_to_truncate_safety_net():
             overflow_strategies=OverflowStrategyStack([OverflowStrategy.IGNORE]),
         )
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=5)
+    result = make_context_builder().build(builder, max_tokens=5)
 
     section = result.sections[0]
     assert section.overflowed is True
@@ -243,7 +258,7 @@ def test_output_never_exceeds_budget():
         TextSection("B", "b" * 30, demand=0.3, default_demand=0.3),
         TextSection("C", "c" * 100, demand=0.1, default_demand=0.1),
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=120)
+    result = make_context_builder().build(builder, max_tokens=120)
 
     assert result.total_tokens <= result.budget_tokens
     assert result.total_tokens == FakeTokenizer().count_tokens(result.prompt)
@@ -259,7 +274,7 @@ def test_sections_preserve_registration_order():
         TextSection("SECOND", "b" * 5),
         TextSection("THIRD", "c" * 5),
     )
-    result = ContextBuilder(tokenizer=FakeTokenizer()).build(builder, max_tokens=100)
+    result = make_context_builder().build(builder, max_tokens=100)
 
     assert [output.section_type for output in result.sections] == [
         "FIRST",

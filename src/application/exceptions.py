@@ -128,6 +128,17 @@ class LLMAuthenticationError(LLMBaseError):
     pass
 
 
+class ChunkSummarizationError(LLMBaseError):
+    """Raised when batched LLM chunk summarization cannot produce a strict 1:1 mapping.
+
+    The model response could not be split back into exactly one summary per
+    input chunk (in order) even after the configured retry attempts, so the
+    caller must not continue with a partially-summarized collection.
+    """
+
+    pass
+
+
 # endregion
 
 

@@ -1,10 +1,12 @@
 from collections.abc import Mapping
 from typing import TypeVar
 
+from src.application.interfaces.i_demand_allocator import IDemandAllocator
+
 K = TypeVar("K")
 
 
-class DemandAllocator:
+class DemandAllocator(IDemandAllocator):
     """Split a token budget into initial proportional capacities by demand.
 
     The initial capacity of every Section is proportional to its ``demand``,

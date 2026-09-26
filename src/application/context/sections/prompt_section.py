@@ -36,6 +36,10 @@ class PromptSection(IPromptSection, CompressibleSection):
     - ``overflow_strategies`` -- an :class:`OverflowStrategyStack`: the
       ordered list of overflow strategies (lower index means higher priority)
       plus the restart policy for this section.
+    - ``summarizer`` -- the optional :class:`Summarizer` this Section uses to
+      compress its content under the ``SUMMARIZE`` overflow strategy.
+      ``None`` means ``summarize`` is unavailable for this Section and the
+      strategy falls through to the next one.
 
     Every section renders as three stacked parts:
 
@@ -63,13 +67,14 @@ class PromptSection(IPromptSection, CompressibleSection):
     also implements the :class:`CompressibleSection` contract with the default
     **plain-text** interpretation of that policy: ``truncate`` applies the
     universal :class:`TruncateStrategy` to the text, ``summarize`` delegates to
-    an injected :class:`Summarizer`, and ``ignore`` is not applicable to a
-    single plain text (it returns ``None`` so the caller falls through to the
-    next strategy). Collection-based Sections override these operations for
-    their own representation -- ``ReferencedCollectionSection``, for example,
-    makes ``IGNORE`` mean "drop items in order". The dispatch of an
-    ``OverflowStrategy`` to one of these operations is owned by the external
-    :class:`OverflowStrategyDispatcher`, never by this class.
+    the Section's own :class:`Summarizer` when one is configured, and
+    ``ignore`` is not applicable to a single plain text (it returns ``None`` so
+    the caller falls through to the next strategy). Collection-based Sections
+    override these operations for their own representation --
+    ``ReferencedCollectionSection``, for example, makes ``IGNORE`` mean "drop
+    items in order". The dispatch of an ``OverflowStrategy`` to one of these
+    operations is owned by the external :class:`OverflowStrategyDispatcher`,
+    never by this class.
     """
 
     def __init__(
@@ -81,8 +86,10 @@ class PromptSection(IPromptSection, CompressibleSection):
         default_demand: float = 0.5,
         overflow_strategies: OverflowStrategyStack | None = None,
         default_overflow_strategies: OverflowStrategyStack | None = None,
+        summarizer: Summarizer | None = None,
     ) -> None:
         self.separator = separator
+        self._summarizer = summarizer
         self.importance = default_importance if importance is None else importance
         self.demand = default_demand if demand is None else demand
         resolved_default = (
@@ -170,13 +177,17 @@ class PromptSection(IPromptSection, CompressibleSection):
         self,
         content: str,
         capacity_tokens: int,
-        *,
-        summarizer: Summarizer,
-    ) -> str:
-        """Compress a plain-text ``content`` through the injected ``summarizer``."""
+    ) -> str | None:
+        """Compress a plain-text ``content`` through the Section's own summarizer.
+
+        Returns ``None`` when no summarizer is configured, so the caller falls
+        through to the next strategy.
+        """
+        if self._summarizer is None:
+            return None
         if not content or capacity_tokens <= 0:
             return ""
-        return SummarizeStrategy(summarizer).apply(content, capacity_tokens)
+        return SummarizeStrategy(self._summarizer).apply(content, capacity_tokens)
 
     def ignore(
         self,

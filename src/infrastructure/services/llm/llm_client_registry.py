@@ -1,8 +1,7 @@
 import asyncio
+from collections.abc import Callable
 
 from openai import AsyncOpenAI
-
-from src.infrastructure.configs.llm_provider_configs import AsyncOpenAIClientFactory
 
 
 class LLMClientRegistry:
@@ -12,7 +11,11 @@ class LLMClientRegistry:
     ensuring thread-safety and graceful teardown upon application shutdown.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        client_factory: Callable[[str, float], AsyncOpenAI],
+    ) -> None:
+        self._client_factory = client_factory
         self._clients: dict[tuple[str, float], AsyncOpenAI] = {}
         self._lock = asyncio.Lock()
 
@@ -26,9 +29,7 @@ class LLMClientRegistry:
         # 2. Synchronized write path
         async with self._lock:
             if cache_key not in self._clients:
-                client = AsyncOpenAIClientFactory.create_client(
-                    provider_name, timeout=timeout
-                )
+                client = self._client_factory(provider_name, timeout=timeout)
                 self._clients[cache_key] = client
             return self._clients[cache_key]
 

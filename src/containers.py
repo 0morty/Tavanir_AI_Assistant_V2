@@ -1,9 +1,18 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 from dependency_injector import containers, providers
 from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
 
+from src.application.context.allocation import (
+    CapacityAllocator,
+    DemandAllocator,
+    RedistributionAllocator,
+)
+from src.application.context.context_builder import ContextBuilder
+from src.application.context.overflow_strategy_dispatcher import (
+    OverflowStrategyDispatcher,
+)
 from src.application.interfaces import (
     IDenseEmbedder,
     IHistoricalSuggestionExtractor,
@@ -13,6 +22,27 @@ from src.application.interfaces import (
     ITextNormalizer,
     IUnitOfWork,
 )
+from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
+from src.application.interfaces.i_context_builder import IContextBuilder
+from src.application.interfaces.i_demand_allocator import IDemandAllocator
+from src.application.interfaces.i_dense_embedder import IDenseEmbedder
+from src.application.interfaces.i_llm_client import ILLMClient
+from src.application.interfaces.i_overflow_strategy_dispatcher import (
+    IOverflowStrategyDispatcher,
+)
+from src.application.interfaces.i_redistribution_allocator import (
+    IRedistributionAllocator,
+)
+from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
+from src.application.interfaces.i_template_validator import ITemplateValidator
+from src.application.interfaces.i_text_normalizer import ITextNormalizer
+from src.application.interfaces.i_text_summarizer import ITextSummarizer
+from src.application.reference.deterministic_reference_generator import (
+    DeterministicReferenceGenerator,
+)
+from src.application.reference.reference_cache import ReferenceCache
+from src.application.reference.template_validator import TemplateValidator
 from src.application.services import HybridEmbeddingService
 from src.application.use_cases import (
     BulkDeleteSuggestionsUseCase,
@@ -21,15 +51,18 @@ from src.application.use_cases import (
     IngestSuggestionUseCase,
     UpdateSuggestionUseCase,
 )
+from src.domain.context.tokenizer import Tokenizer
 from src.domain.interfaces import (
     IRegulatoryVectorRepository,
     ISuggestionChunker,
     ISuggestionVectorRepository,
 )
+from src.infrastructure.configs.llm_provider_configs import AsyncOpenAIClientFactory
 from src.infrastructure.configs.settings import (
     bm25_settings,
     db_settings,
     embedding_settings,
+    generation_settings,
     historical_ingestion_settings,
     mssql_settings,
     qdrant_settings,
@@ -54,16 +87,21 @@ from src.infrastructure.services.embeddings.persian_bm25_embedder import (
     PersianBm25Embedder,
 )
 from src.infrastructure.services.extractors import MssqlSuggestionExtractor
+from src.infrastructure.services.llm import OpenAILLMClient
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
 from src.infrastructure.services.qdrant import QdrantAdminService
+from src.infrastructure.services.summarizers import LLMChunkSummarizer, LLMSummarizer
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
+from src.infrastructure.services.tokenizers.gemma_tokenizer import GemmaTokenizer
 
 
-async def init_client_registry() -> AsyncGenerator[LLMClientRegistry, None]:
+async def init_client_registry(
+    client_factory: Callable[[str, float], AsyncOpenAI],
+) -> AsyncGenerator[LLMClientRegistry, None]:
     """Initializes the LLMClientRegistry and guarantees graceful teardown."""
-    registry = LLMClientRegistry()
+    registry = LLMClientRegistry(client_factory=client_factory)
     yield registry
     await registry.close_all()
 
@@ -75,13 +113,66 @@ async def init_embedding_client(
     return await registry.get_client(provider, timeout=timeout)
 
 
+async def init_generation_client(
+    registry: LLMClientRegistry, provider: str, timeout: float
+) -> AsyncOpenAI:
+    """Resolves or creates the AsyncOpenAI client for the Generation provider."""
+    return await registry.get_client(provider, timeout=timeout)
+
+
+async def init_llm_client(
+    client: AsyncOpenAI,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+) -> AsyncGenerator[OpenAILLMClient, None]:
+    """Builds the Generation OpenAILLMClient on the pooled provider client and
+    guarantees its persistent event loop is shut down on teardown.
+
+    The OpenAILLMClient owns a long-lived event loop (daemon thread) which must
+    be closed explicitly; wrapping the client in a Resource makes that teardown
+    part of :meth:`Container.init_resources`/``shutdown_resources`` instead of
+    leaking the loop thread for the whole process lifetime.
+    """
+    llm_client = OpenAILLMClient(
+        client=client,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    yield llm_client
+    llm_client.close()
+
+
+async def init_tokenizer() -> GemmaTokenizer:
+    """Initialize the Hugging Face tokenizer for context overflow handling."""
+    from transformers import AutoTokenizer
+
+    try:
+        raw = AutoTokenizer.from_pretrained(
+            generation_settings.TOKENIZER_MODEL, use_fast=True
+        )
+    except Exception as err:
+        raise RuntimeError(
+            f"Failed to load tokenizer {generation_settings.TOKENIZER_MODEL!r}: {err}"
+        ) from err
+    if raw is None:
+        raise RuntimeError(
+            f"Tokenizer {generation_settings.TOKENIZER_MODEL!r} could not be loaded."
+        )
+    return GemmaTokenizer(raw)
+
+
 class Container(containers.DeclarativeContainer):
     wiring_config = containers.WiringConfiguration(
         packages=["src.presentation.routers"],
     )
 
     # 1. Centralized Registry (Shared across Embedding and future LLM services)
-    client_registry = providers.Resource(init_client_registry)
+    client_registry = providers.Resource(
+        init_client_registry,
+        client_factory=providers.Object(AsyncOpenAIClientFactory.create_client),
+    )
 
     # 2. Embedding Client Resolution
     embedding_client = providers.Resource(
@@ -255,4 +346,74 @@ class Container(containers.DeclarativeContainer):
     ] = providers.Factory(
         BulkDeleteSuggestionsUseCase,
         delete_use_case=delete_suggestion_use_case,
+    )
+
+    # 9. Generation Context Allocation Engine
+    demand_allocator: providers.Provider[IDemandAllocator] = providers.Singleton(
+        DemandAllocator
+    )
+    redistribution_allocator: providers.Provider[IRedistributionAllocator] = (
+        providers.Singleton(RedistributionAllocator)
+    )
+    capacity_allocator: providers.Provider[ICapacityAllocator] = providers.Singleton(
+        CapacityAllocator,
+        demand_allocator=demand_allocator,
+        redistribution_allocator=redistribution_allocator,
+    )
+
+    # 10. Generation Overflow Strategy Dispatch
+    overflow_strategy_dispatcher: providers.Provider[IOverflowStrategyDispatcher] = (
+        providers.Singleton(OverflowStrategyDispatcher)
+    )
+
+    # 11. Generation Reference-Template Building Blocks
+    deterministic_reference_generator: providers.Provider[IReferenceGenerator] = (
+        providers.Singleton(DeterministicReferenceGenerator)
+    )
+    template_validator: providers.Provider[ITemplateValidator] = providers.Singleton(
+        TemplateValidator
+    )
+
+    # 12. Generation Reference Template Cache
+    reference_cache: providers.Provider[ReferenceCache] = providers.Singleton(
+        ReferenceCache,
+        cache_dir=providers.Object(".cache/references"),
+    )
+
+    # 13. Generation LLM Client (OpenAI-compatible, connection-pooled)
+    generation_client = providers.Resource(
+        init_generation_client,
+        registry=client_registry,
+        provider=generation_settings.LLM_PROVIDER,
+        timeout=generation_settings.LLM_TIMEOUT,
+    )
+    llm_client: providers.Provider[ILLMClient] = providers.Resource(
+        init_llm_client,
+        client=generation_client,
+        model=generation_settings.LLM_MODEL,
+        temperature=generation_settings.LLM_TEMPERATURE,
+        max_tokens=generation_settings.LLM_MAX_TOKENS,
+    )
+
+    # 14. Generation LLM Summarizer (Context overflow SUMMARIZE strategy)
+    llm_summarizer: providers.Provider[ITextSummarizer] = providers.Singleton(
+        LLMSummarizer,
+        llm_client=llm_client,
+    )
+
+    # 15. Generation LLM Chunk Summarizer (batch inference, one prompt per chunk)
+    chunk_summarizer: providers.Provider[ITextSummarizer] = providers.Singleton(
+        LLMChunkSummarizer,
+        llm_client=llm_client,
+    )
+
+    # 16. Tokenizer for context overflow handling
+    tokenizer: providers.Provider[Tokenizer] = providers.Resource(init_tokenizer)
+
+    # 17. Generation Context Builder
+    context_builder: providers.Provider[IContextBuilder] = providers.Singleton(
+        ContextBuilder,
+        tokenizer=tokenizer,
+        capacity_allocator=capacity_allocator,
+        dispatcher=overflow_strategy_dispatcher,
     )

@@ -1,6 +1,15 @@
 from src.application.reference.deterministic_reference_generator import (
     DeterministicReferenceGenerator,
 )
+from src.application.reference.llm_base_reference_generator import (
+    LLMBaseReferenceGenerator,
+    ReferenceGenerationPrompts,
+)
+from src.application.reference.reference_cache import ReferenceCache
+from src.application.reference.template_filler import (
+    fill_with_fallback,
+    substitute_placeholders,
+)
 from src.application.reference.template_validator import (
     TemplateValidationResult,
     TemplateValidator,
@@ -9,7 +18,12 @@ from src.application.reference.template_validator import (
 
 __all__ = [
     "DeterministicReferenceGenerator",
+    "LLMBaseReferenceGenerator",
+    "ReferenceCache",
+    "ReferenceGenerationPrompts",
     "TemplateValidationResult",
     "TemplateValidator",
     "extract_placeholders",
+    "fill_with_fallback",
+    "substitute_placeholders",
 ]

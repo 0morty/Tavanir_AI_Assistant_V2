@@ -6,7 +6,7 @@ Early-stage FastAPI project (Tavanir AI Assistant V2) on a Clean Architecture sc
 - Docs (`docs/architecture/clean_architecture.md`, `docs/architecture/high_level_architecture.md`, `docs/index.md`) describe the **target** design and name the domain "JadooChatRAG". Do not assume they match the code — most referenced files are empty placeholders. `high_level_architecture.md` marks each part `[implemented]`/`[planned]`; `docs/planning/v2_unimplemented_features.md` is the authoritative backlog.
 - API wire contracts live in `docs/contracts/` (JSON:API envelope, camelCase external / snake_case internal mapping, internal error-code dictionary, API-key auth). Follow them when building the HTTP layer; auth is a **target** contract only — `src/presentation/security.py` is empty. Error codes map to real exceptions in `src/application/exceptions.py` / `src/domain/exceptions.py`.
 - `docs/technology-stacks.md` lists verified deps (`[pinned]`/`[gap]`/`[planned]` legend) and confirms the `requirements.txt` gaps below. Docs are English; Persian domain terms (suggestion statuses, context titles) appear inline where the code uses them.
-- Implemented so far: domain entities/enums/exceptions (`src/domain/`), application DTOs/exceptions + `IDenseEmbedder` port + section/context architecture (`src/application/context/` for the `IPromptSection` port, the `PromptSection` skeleton, the predefined sections, the `CompressibleSection` Section overflow capability, the `OverflowStrategyDispatcher`, the allocation engine `DemandAllocator`/`RedistributionAllocator`/`CapacityAllocator`, and the `ContextBuilder` token-budget pipeline; `src/application/prompt/` for `PromptBuilder`, which owns section ordering + concatenation only), and infrastructure: settings + TEI/vLLM OpenAI-compatible client config, `BaseOpenAIService`, `OpenAIDenseEmbedder`, `LLMClientRegistry`, and DI wiring in `src/containers.py`.
+- Implemented so far: domain entities/enums/exceptions (`src/domain/`), application DTOs/exceptions + `IDenseEmbedder` port + section/context architecture (`src/application/context/` for the `IPromptSection` port, the `PromptSection` skeleton, the predefined sections, the `CompressibleSection` Section overflow capability, the `OverflowStrategyDispatcher`, the allocation engine `DemandAllocator`/`RedistributionAllocator`/`CapacityAllocator`, and the `ContextBuilder` token-budget pipeline; `src/application/prompt/` for `PromptBuilder`, which owns section ordering + concatenation only; `src/application/reference/` for the reference-enrichment architecture — `Reference`/`ReferenceDetails` entities, `DeterministicReferenceGenerator`, `TemplateValidator`, `LLMBaseReferenceGenerator` with retry, and the `ReferenceCache` shape-hash template cache), and infrastructure: settings + TEI/vLLM OpenAI-compatible client config, `BaseOpenAIService`, `OpenAIDenseEmbedder`, `LLMClientRegistry`, and DI wiring in `src/containers.py`.
 - Empty/unwired placeholders: `src/main.py`, `src/worker.py`, everything under `src/presentation/` (lifespan, security, routers, schemas), `src/infrastructure/db/`, repositories, use cases, all `tests/`. There is no runnable entrypoint yet — `uvicorn src.main:app` cannot work.
 - `docs/planning/v2_unimplemented_features.md` is the authoritative backlog of what still needs building.
 
@@ -23,8 +23,50 @@ Early-stage FastAPI project (Tavanir AI Assistant V2) on a Clean Architecture sc
 
 ## Conventions
 - Clean Architecture dependency rule: `src/domain/` must stay pure stdlib (no FastAPI, SQLAlchemy, Pydantic); outer layers depend inward through ports under `src/domain/interfaces/` and `src/application/interfaces/`.
+- The project must use Dependency Injection (DI) as a core architectural principle. **Follow the Dependency Injection policy below for every component you add or touch.**
 - Domain uses Persian suggestion statuses: `SuggestionStatus` in `src/domain/enums.py` converts legacy `status_id` ints and Persian titles via `from_id()`/`from_string()`.
 - **Commit messages: always generate short and meaningful commits** (Conventional Commits, per `docs/contracts/02_Git_Commit_Convention.md`); add a body only when extra description is genuinely needed.
+
+### Dependency Injection policy
+
+The project follows a .NET-style DI procedure: components are **composed**, never assembled by themselves. Every component receives its collaborators through its constructor, depends on an abstraction where a seam is warranted, and is registered in the single composition root (`src/containers.py`). There are four mandatory steps for any dependency, in order: **define → inject → compose → test**.
+
+#### 1. Define — where dependencies are declared as abstractions
+- Application-layer ports live in `src/application/interfaces/` as `I<Capability>` ABCs. Existing ones (all exported from `src/application/interfaces/__init__.py` via `__all__`): `ICapacityAllocator`, `IDemandAllocator`, `IRedistributionAllocator`, `IOverflowStrategyDispatcher`, `IContextBuilder`, `ITemplateValidator`, `IReferenceGenerator`, `ILLMClient`, `IPromptSection`, `ICompressibleSection` (marker `CompressibleSection`), `IDenseEmbedder`, `ISparseEmbedder`, `ITextNormalizer`, `ITokenizer`.
+- Domain-boundary ports live in `src/domain/interfaces/` (`IUnitOfWork`, `ISuggestionVectorRepository`, `IRegulatoryVectorRepository`, `IVectorRepository`, `ISuggestionRepository`). Domain-owned capabilities that Generation consumes are abstractions under `src/domain/context/` (`Tokenizer`, `Summarizer`).
+- A concrete class implements its interface explicitly — `class CapacityAllocator(ICapacityAllocator)`, `class TemplateValidator(ITemplateValidator)` — and lives in the layer it belongs to (application implementation or infrastructure adapter).
+- Interfaces must stay dependency-light: import only what is needed at runtime; reference heavier sibling types under `TYPE_CHECKING` with `from __future__ import annotations` (see `src/application/interfaces/i_context_builder.py`).
+- Do **not** invent an interface for pure data (DTOs in `src/application/dtos.py`), configuration dataclasses (`ReferenceGenerationPrompts`, settings), or third-party libraries. Interfaces are for swappable/injected collaborators at architectural boundaries.
+
+#### 2. Inject — how collaborators enter a component
+- **Constructor injection only.** No service locators, no hidden global singletons, no module-level mutable instances (settings singletons are the allowed exception).
+- Swappable collaborators are constructor parameters typed against the interface and **required** — never `= None` followed by an internal `else Concrete()` fallback. Examples already in the codebase:
+  - `ContextBuilder(*, tokenizer: Tokenizer, capacity_allocator: ICapacityAllocator, dispatcher: IOverflowStrategyDispatcher)`
+  - `CapacityAllocator(demand_allocator: IDemandAllocator, redistribution_allocator: IRedistributionAllocator)`
+  - `LLMBaseReferenceGenerator(llm_client, *, validator: ITemplateValidator, context_builder: IContextBuilder, cache: ReferenceCache, max_attempts=3, max_tokens=2048)`
+  - `LLMClientRegistry(client_factory: Callable[[str, float], AsyncOpenAI])`
+- Store the injected reference on `self._<name>` and never re-instantiate or default it later.
+- The ONLY permitted internal instantiations are (a) immutable configuration data (`ReferenceGenerationPrompts()`, settings) and (b) documented default strategies behind an explicit injection seam (the `reference_generator: IReferenceGenerator | None` default on `ReferencedSection`, the default `OverflowStrategyStack`s on `PromptSection`). **If you add a new collaborator, add it as a required constructor parameter — do not add another fallback default.**
+- A component must never import or instantiate a concrete implementation from an outer layer (`src/application` must never import `src.infrastructure`).
+
+#### 3. Compose — how the graph is assembled
+- `src/containers.py` (`class Container(containers.DeclarativeContainer)`) is the **single composition root**. Every runtime dependency is resolvable from here.
+- Register each dependency by name with the interface as the provider type, passing the concrete class and its wired dependencies to the provider: `provider_name: providers.Provider[IInterface] = providers.Singleton(Concrete, dep=other_provider, ...)` (example: `capacity_allocator: providers.Provider[ICapacityAllocator] = providers.Singleton(CapacityAllocator, demand_allocator=..., redistribution_allocator=...)`).
+- Wire providers reference other providers by attribute name; pass static values/factories with `providers.Object`/`providers.Callable`; manage lifecycle with `providers.Resource` (`client_registry`, `embedding_client`); use `providers.Factory` for per-call construction (`unit_of_work`).
+- The container is booted exactly once, in `src/presentation/lifespan.py`: `container = Container()`, `await container.init_resources()`, `container.wire(packages=["src.presentation.routers"])`, stored on `app.state.container`. `Container()` must never be constructed inside a service, router, or use case, and `app.state.container` is never used to manually resolve dependencies in application code.
+- Known gap: `context_builder` and a concrete Generation LLM client cannot be fully wired yet because no runnable `Tokenizer` adapter is installed (`GemmaTokenizer` needs `transformers`). Their injection seams exist and are test-covered; complete the wiring in `containers.py` once a tokenizer adapter exists (do not add it outside the composition root).
+
+#### 4. Test DI behavior
+- Unit tests construct components with test doubles that implement the relevant interface — recording subclasses (`RecordingCapacityAllocator(CapacityAllocator)`, `RecordingDispatcher(OverflowStrategyDispatcher)`, `StrictValidator(TemplateValidator)`) or fakes (`FakeTokenizer(Tokenizer)`, `CallingContextBuilder`). Do not build the real container in unit tests.
+- Changing a constructor signature requires updating every call site, including tests. Add a guard test so a required collaborator rejects its absence (expect `TypeError`), and prefer injection tests that prove the injected fake (not a default) is used.
+
+#### 5. Anti-patterns (must not appear)
+- `def __init__(self, dep: X | None = None)` followed by `self._dep = dep if dep is not None else X()`.
+- Instantiating collaborators inline in methods (service-locator style).
+- Importing a concrete infrastructure/implementation class into an application piece just to construct it.
+- Resolving dependencies manually from `app.state.container` inside a service/router/use case.
+- Module-level mutable singletons other than settings.
+- Heavy runtime imports used only for type annotations (use `TYPE_CHECKING`).
 
 ---
 

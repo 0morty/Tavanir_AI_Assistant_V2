@@ -46,16 +46,13 @@ class PlainTextSection(PromptSection):
 
 
 def test_skeleton_implements_compressible_plain_text_defaults():
-    section = PlainTextSection("abcdefghij")
+    section = PlainTextSection("abcdefghij", summarizer=FakeSummarizer())
     assert isinstance(section, PromptSection)
     assert isinstance(section, IPromptSection)
     assert isinstance(section, CompressibleSection)
     assert section.truncate("abcdefghij", 100, tokenizer=FakeTokenizer()) == "abcdefghij"
     assert section.truncate("abcdefghij", 3, tokenizer=FakeTokenizer()) == "abc"
-    assert (
-        section.summarize("abcdefghij", 3, summarizer=FakeSummarizer())
-        == "[fake-summarizer-output]"
-    )
+    assert section.summarize("abcdefghij", 3) == "[fake-summarizer-output]"
     assert section.ignore("abcdefghij", 3, tokenizer=FakeTokenizer()) is None
 
 

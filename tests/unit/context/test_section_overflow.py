@@ -119,12 +119,12 @@ def test_collection_truncate_zero_capacity_returns_empty_string():
     assert section.truncate("ab", 0, tokenizer=FakeTokenizer()) == ""
 
 
-def test_collection_summarize_compresses_joined_text():
+def test_collection_summarize_processes_items_independently():
     section = PlainCollectionSection(
         _chunks("ab", "cd"), summarizer=FakeSummarizer()
     )
     result = section.summarize("ab\n\ncd", 30)
-    assert result == "[fake-summarizer-output]"
+    assert result == "[fake-summarizer-output]\n\n[fake-summarizer-output]"
 
 
 def test_collection_ignore_keeps_items_that_fit_in_order():

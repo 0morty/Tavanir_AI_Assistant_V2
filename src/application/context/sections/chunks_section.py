@@ -42,6 +42,12 @@ class ChunksSection(ReferencedCollectionSection):
         )
 
     @property
+    def chunks(self) -> tuple[GenerationChunk, ...]:
+        """Summarized chunks when available, otherwise the source chunks."""
+        items = self.summarized_items
+        return tuple(self.items) if items is None else items
+
+    @property
     def section_type(self) -> str:
         return "CHUNKS"
 

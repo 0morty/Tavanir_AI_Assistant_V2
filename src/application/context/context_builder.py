@@ -1,4 +1,5 @@
 from src.application.context.allocation.capacity_allocator import CapacityRequest
+from src.application.context.sections.history_section import HistorySection
 from src.application.dtos import ContextBuilderResult, SectionOutput
 from src.application.interfaces.i_capacity_allocator import ICapacityAllocator
 from src.application.interfaces.i_compressible_section import CompressibleSection
@@ -106,6 +107,11 @@ class ContextBuilder(IContextBuilder):
                     capacity_tokens=share,
                     fitted_tokens=self._tokenizer.count_tokens(content),
                     overflowed=overflowed,
+                    history_messages=(
+                        section.fitted_messages
+                        if isinstance(section, HistorySection)
+                        else None
+                    ),
                 )
             )
 
@@ -118,6 +124,7 @@ class ContextBuilder(IContextBuilder):
             sections=tuple(outputs),
             budget_tokens=max_tokens,
             total_tokens=self._tokenizer.count_tokens(prompt),
+            section_separator=separator,
         )
 
     def _fit(

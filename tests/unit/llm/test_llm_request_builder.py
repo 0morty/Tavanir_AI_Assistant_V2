@@ -1,11 +1,10 @@
-"""Unit tests for LLMRequestBuilder (ContextBuilderResult -> chat messages).
+"""Unit tests for serializing processed context into chat messages.
 
-Import order note: this project has a pre-existing import cycle when
-``src.application.prompt`` or ``src.application.context.sections`` are
-imported before the allocation chain; load ``expansion_request`` first.
+Importing the allocation chain first avoids the repository's existing
+package-import cycle when PromptBuilder is imported directly.
 """
 
-import src.application.context.allocation.expansion_request  # noqa: F401,PLC0415  (cycle guard)
+import src.application.context.allocation.expansion_request  # noqa: F401,PLC0415
 
 from src.application.context.sections.history_section import HistorySection
 from src.application.dtos import ContextBuilderResult, SectionOutput
@@ -25,6 +24,7 @@ def _output(
     section_type: str,
     content: str,
     *,
+    history_messages: tuple[HistoryMessage, ...] | None = None,
     requested: int = 1,
     capacity: int = 1,
     fitted: int = 1,
@@ -37,15 +37,19 @@ def _output(
         capacity_tokens=capacity,
         fitted_tokens=fitted,
         overflowed=overflowed,
+        history_messages=history_messages,
     )
 
 
-def _result(*outputs: SectionOutput) -> ContextBuilderResult:
+def _result(
+    *outputs: SectionOutput, section_separator: str = "\n\n"
+) -> ContextBuilderResult:
     return ContextBuilderResult(
         prompt="MUST-NOT-BE-USED",
         sections=outputs,
         budget_tokens=100,
         total_tokens=0,
+        section_separator=section_separator,
     )
 
 
@@ -56,124 +60,132 @@ def _builder_with_history() -> PromptBuilder:
 
 
 def test_history_becomes_separate_messages_in_order():
-    builder = _builder_with_history()
     result = _result(
         _output("ROLE", "You are an analyst."),
+        _output(
+            "HISTORY",
+            "user: سلام وقت بخیر\n\nassistant: سلام، من دستیار هوشمند هستم",
+            history_messages=tuple(HISTORY_TURNS),
+        ),
         _output("SYSTEM-INPUT", "Base on the material only."),
     )
 
-    messages = LLMRequestBuilder().build_messages(result, builder)
+    messages = LLMRequestBuilder().build_messages(result)
 
     assert [m["role"] for m in messages] == [
-        "system",
-        "user",
-        "assistant",
-        "user",
+        "system", "user", "assistant", "user"
     ]
     assert [m["content"] for m in messages[1:]] == [
-        h.content for h in HISTORY_TURNS
+        turn.content for turn in HISTORY_TURNS
     ]
 
 
 def test_assistant_role_spelling_is_correct():
     assert HistoryRole.ASSISTANT.value == "assistant"
-    builder = _builder_with_history()
-    messages = LLMRequestBuilder().build_messages(
-        _result(_output("ROLE", "You are an analyst.")), builder
+    result = _result(
+        _output("ROLE", "You are an analyst."),
+        _output("HISTORY", "fitted history", history_messages=tuple(HISTORY_TURNS)),
     )
-    roles = [m["role"] for m in messages]
+
+    roles = [m["role"] for m in LLMRequestBuilder().build_messages(result)]
+
     assert "assistant" in roles
     assert "assistance" not in roles
 
 
 def test_history_is_not_merged_into_system_message():
-    builder = _builder_with_history()
     result = _result(
         _output("ROLE", "You are an analyst."),
-        _output("HISTORY", "user: سلام وقت بخیر\n\nassistant: سلام، من دستیار هوشمند هستم"),
+        _output(
+            "HISTORY",
+            "user: سلام وقت بخیر\n\nassistant: سلام، من دستیار هوشمند هستم",
+            history_messages=tuple(HISTORY_TURNS),
+        ),
     )
 
-    messages = LLMRequestBuilder().build_messages(result, builder)
+    messages = LLMRequestBuilder().build_messages(result)
 
-    system_content = messages[0]["content"]
-    assert "سلام وقت بخیر" not in system_content
-    assert "user:" not in system_content
+    assert "سلام وقت بخیر" not in messages[0]["content"]
+    assert "user:" not in messages[0]["content"]
     assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
 
 
 def test_non_history_sections_use_fitted_content_not_raw_rerender():
-    builder = PromptBuilder()
-    builder.set_role("RAW ROLE TEXT")
-    builder.set_system_input("RAW SYSTEM INPUT")
-
     result = _result(
         _output("ROLE", "FITTED-ROLE"),
         _output("SYSTEM-INPUT", "FITTED-SYSTEM-INPUT"),
     )
 
-    messages = LLMRequestBuilder().build_messages(result, builder)
+    messages = LLMRequestBuilder().build_messages(result)
 
-    assert len(messages) == 1
-    system_content = messages[0]["content"]
-    assert system_content == "FITTED-ROLE\n\nFITTED-SYSTEM-INPUT"
-    assert "RAW ROLE TEXT" not in system_content
-    assert "RAW SYSTEM INPUT" not in system_content
+    assert messages == [
+        {"role": "system", "content": "FITTED-ROLE\n\nFITTED-SYSTEM-INPUT"}
+    ]
 
 
 def test_context_builder_result_prompt_is_never_used():
-    builder = _builder_with_history()
     result = _result(
         _output("ROLE", "You are an analyst."),
-        _output("HISTORY", "user: سلام وقت بخیر"),
+        _output(
+            "HISTORY",
+            "user: سلام وقت بخیر",
+            history_messages=(HISTORY_TURNS[0],),
+        ),
     )
+
+    flattened = "\n".join(
+        message["content"] for message in LLMRequestBuilder().build_messages(result)
+    )
+
     assert result.prompt == "MUST-NOT-BE-USED"
-
-    messages = LLMRequestBuilder().build_messages(result, builder)
-
-    flattened = "\n".join(m["content"] for m in messages)
     assert "MUST-NOT-BE-USED" not in flattened
 
 
-def test_registration_order_is_preserved_for_non_history_sections():
-    builder = PromptBuilder()
-    builder.set_role("R")
-    builder.set_system_input("S")
-    builder.set_output_format("O")
-
+def test_result_order_is_preserved_for_non_history_sections():
     result = _result(
-        _output("OUTPUT-FORMAT", "O"),
         _output("ROLE", "R"),
         _output("SYSTEM-INPUT", "S"),
+        _output("OUTPUT-FORMAT", "O"),
     )
 
-    messages = LLMRequestBuilder().build_messages(result, builder)
+    messages = LLMRequestBuilder().build_messages(result)
 
     assert messages[0]["content"] == "R\n\nS\n\nO"
 
 
-def test_no_history_yields_only_system_message():
-    builder = PromptBuilder()
-    builder.set_role("You are an analyst.")
-
-    messages = LLMRequestBuilder().build_messages(
-        _result(_output("ROLE", "You are an analyst.")), builder
+def test_result_separator_is_used_for_non_history_sections():
+    result = _result(
+        _output("ROLE", "R"),
+        _output("SYSTEM-INPUT", "S"),
+        section_separator="\n--\n",
     )
 
-    assert messages == [{"role": "system", "content": "You are an analyst."}]
+    assert LLMRequestBuilder().build_messages(result) == [
+        {"role": "system", "content": "R\n--\nS"}
+    ]
+
+
+def test_no_history_yields_only_system_message():
+    result = _result(_output("ROLE", "You are an analyst."))
+
+    assert LLMRequestBuilder().build_messages(result) == [
+        {"role": "system", "content": "You are an analyst."}
+    ]
 
 
 def test_every_batch_item_is_independent():
-    builder_a = PromptBuilder()
-    builder_a.set_role("Analyst A")
-    builder_b = PromptBuilder()
-    builder_b.set_role("Analyst B")
-    builder_b.set_history(HISTORY_TURNS[:1])
-
     a = LLMRequestBuilder().build_messages(
-        _result(_output("ROLE", "Analyst A")), builder_a
+        _result(_output("ROLE", "Analyst A"))
     )
     b = LLMRequestBuilder().build_messages(
-        _result(_output("ROLE", "Analyst B")), builder_b
+        _result(
+            _output("ROLE", "Analyst B"),
+            _output(
+                "HISTORY",
+                "user: سلام وقت بخیر",
+                history_messages=(HISTORY_TURNS[0],),
+            ),
+        )
     )
 
     assert a == [{"role": "system", "content": "Analyst A"}]
@@ -182,12 +194,13 @@ def test_every_batch_item_is_independent():
 
 
 def test_build_returns_full_openai_compatible_body():
-    builder = _builder_with_history()
-    result = _result(_output("ROLE", "You are an analyst."))
+    result = _result(
+        _output("ROLE", "You are an analyst."),
+        _output("HISTORY", "fitted history", history_messages=tuple(HISTORY_TURNS)),
+    )
 
     body = LLMRequestBuilder().build(
         result,
-        builder,
         model="/models/LLM",
         temperature=0.2,
         max_tokens=1024,
@@ -207,15 +220,32 @@ def test_build_returns_full_openai_compatible_body():
 
 
 def test_history_system_role_uses_system_value():
-    builder = PromptBuilder()
-    builder.set_history([HistoryMessage(role=HistoryRole.SYSTEM, content="note")])
-
-    messages = LLMRequestBuilder().build_messages(
-        _result(_output("ROLE", "You are an analyst.")), builder
+    result = _result(
+        _output("ROLE", "You are an analyst."),
+        _output(
+            "HISTORY",
+            "system: note",
+            history_messages=(
+                HistoryMessage(role=HistoryRole.SYSTEM, content="note"),
+            ),
+        ),
     )
+
+    messages = LLMRequestBuilder().build_messages(result)
 
     assert [m["role"] for m in messages] == ["system", "system"]
     assert messages[1] == {"role": "system", "content": "note"}
+
+
+def test_processed_history_metadata_is_required():
+    result = _result(_output("HISTORY", "user: fitted"))
+
+    try:
+        LLMRequestBuilder().build_messages(result)
+    except ValueError as exc:
+        assert "processed HISTORY" in str(exc) or "Processed HISTORY" in str(exc)
+    else:
+        raise AssertionError("Missing processed history must be rejected")
 
 
 def test_history_section_received_is_the_same_object():
@@ -223,5 +253,5 @@ def test_history_section_received_is_the_same_object():
     history = builder.get_section("HISTORY")
     assert isinstance(history, HistorySection)
     assert [item.content for item in history.items] == [
-        h.content for h in HISTORY_TURNS
+        turn.content for turn in HISTORY_TURNS
     ]

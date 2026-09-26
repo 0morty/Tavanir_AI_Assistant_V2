@@ -1,4 +1,6 @@
 from collections.abc import Sequence
+from copy import copy
+from dataclasses import is_dataclass, replace
 from typing import Any
 
 from src.application.context.sections.referenced_section import ReferencedSection
@@ -33,11 +35,10 @@ class ReferencedCollectionSection(ReferencedSection):
     :class:`ReferencedSection`; this class overrides the three overflow
     operations for its collection representation, keeping the collection's
     internal shape a private concern. ``ignore`` keeps items in order while
-    they fit and drops the rest; ``truncate`` and ``summarize`` apply the
-    universal algorithms to the collection's joined (reference-enriched) text.
-    When a :class:`ITextSummarizer` is injected, ``summarize`` runs its
-    batched 1:1 chunk summarization instead, mapping every item to its own
-    summary.
+    they fit and drops the rest; ``truncate`` applies the universal algorithm
+    to the joined (reference-enriched) text. ``summarize`` processes each item
+    independently, using batched 1:1 summarization when an
+    :class:`ITextSummarizer` is injected.
     """
 
     def __init__(
@@ -72,11 +73,17 @@ class ReferencedCollectionSection(ReferencedSection):
         self.item_separator = item_separator
         self._items = list(items)
         self._chunk_summarizer = chunk_summarizer
+        self._summarized_items: tuple[Any, ...] | None = None
 
     @property
     def items(self) -> Sequence[Any]:
         """The collection of reference-bearing items held by this Section."""
         return self._items
+
+    @property
+    def summarized_items(self) -> tuple[Any, ...] | None:
+        """Copies of the source items with summaries in corresponding positions."""
+        return self._summarized_items
 
     def item_content(self, item: Any) -> str:
         """The base content of a single collection item.
@@ -132,6 +139,7 @@ class ReferencedCollectionSection(ReferencedSection):
         :class:`TruncateStrategy` reduces that joined text to a prefix that
         fits ``capacity_tokens``.
         """
+        self._summarized_items = None
         if not self._items or capacity_tokens <= 0:
             return ""
         joined = self.item_separator.join(self._enriched_item_texts())
@@ -144,31 +152,56 @@ class ReferencedCollectionSection(ReferencedSection):
         content: str,
         capacity_tokens: int,
     ) -> str | None:
-        """Compress the collection's joined text through the Section's own summarizer.
+        """Batch independent item texts and map each summary to its source item.
 
-        Returns ``None`` when no summarizer is configured, so the caller falls
-        through to the next strategy. When an :class:`ITextSummarizer` is
-        injected, each item is summarized independently (strict 1:1 mapping)
-        and the summaries are joined with ``item_separator``.
+        Source items remain unchanged so a later overflow strategy can still
+        fit the original content if the summaries exceed capacity.
         """
+        self._summarized_items = None
+        if self._chunk_summarizer is None and self._summarizer is None:
+            return None
+        if not self._items or capacity_tokens <= 0:
+            self._summarized_items = ()
+            return ""
+
+        texts = [self._summary_input(item) for item in self._items]
         if self._chunk_summarizer is not None:
-            if not self._items or capacity_tokens <= 0:
-                return ""
-            texts = self._enriched_item_texts()
-            if not texts:
-                return ""
             summaries = self._chunk_summarizer.summarize_chunks(
                 texts, capacity_tokens=capacity_tokens
             )
-            return self.item_separator.join(summaries)
-        if self._summarizer is None:
-            return None
-        if not self._items or capacity_tokens <= 0:
-            return ""
-        joined = self.item_separator.join(self._enriched_item_texts())
-        if not joined.strip():
-            return ""
-        return SummarizeStrategy(self._summarizer).apply(joined, capacity_tokens)
+        else:
+            strategy = SummarizeStrategy(self._summarizer)
+            summaries = [strategy.apply(text, capacity_tokens) for text in texts]
+
+        if len(summaries) != len(self._items):
+            raise ValueError("Collection summarizer must return one result per item")
+        self._summarized_items = tuple(
+            self._copy_with_content(item, summary)
+            for item, summary in zip(self._items, summaries)
+        )
+        return self.item_separator.join(summaries)
+
+    def _summary_input(self, item: Any) -> str:
+        """Render one item with its own reference, without joining neighbors."""
+        text = self.item_content(item)
+        reference = getattr(item, "reference", None)
+        if reference is None or not text.strip():
+            return text
+        reference_text = self._resolve_reference_text(reference)
+        return (
+            self.compose_referenced_content(reference_text, text)
+            if reference_text
+            else text
+        )
+
+    @staticmethod
+    def _copy_with_content(item: Any, content: str) -> Any:
+        """Keep each item's metadata while replacing only its content."""
+        if is_dataclass(item):
+            return replace(item, content=content)
+        result = copy(item)
+        result.content = content
+        return result
 
     def ignore(
         self,
@@ -178,6 +211,7 @@ class ReferencedCollectionSection(ReferencedSection):
         tokenizer: Tokenizer,
     ) -> str:
         """Keep items in order while they fit; drop the items that would overflow."""
+        self._summarized_items = None
         if not self._items or capacity_tokens <= 0:
             return ""
         return self._include_fitting_items(
@@ -205,4 +239,5 @@ class ReferencedCollectionSection(ReferencedSection):
 
     def body(self) -> str:
         """Build the Section content as the collection of enriched items."""
+        self._summarized_items = None
         return self.append_references()

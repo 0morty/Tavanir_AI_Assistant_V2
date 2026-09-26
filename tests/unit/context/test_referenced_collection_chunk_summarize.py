@@ -126,5 +126,5 @@ def test_history_section_forwards_chunk_summarizer():
 
     result = section.summarize("some content", CAPACITY)
 
-    assert result == "summary-1\n\nsummary-2"
+    assert result == "user: summary-1\n\nassistant: summary-2"
     assert section._chunk_summarizer is summarizer

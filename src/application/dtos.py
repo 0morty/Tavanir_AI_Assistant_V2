@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     from src.application.context.allocation.expansion_request import ExpansionRequest
+    from src.domain.entities import HistoryMessage
 
 
 @dataclass
@@ -26,7 +27,11 @@ class AnalyzeSuggestionResponse:
 
 @dataclass(frozen=True)
 class SectionOutput:
-    """Per-section result after budgeting, reference handling, and overflow fitting."""
+    """Per-section result after budgeting, reference handling, and overflow fitting.
+
+    history_messages contains fitted chat turns for HISTORY. It is None for
+    other sections and a tuple (possibly empty) for processed history.
+    """
 
     section_type: str
     content: str
@@ -34,16 +39,18 @@ class SectionOutput:
     capacity_tokens: int
     fitted_tokens: int
     overflowed: bool
+    history_messages: tuple[HistoryMessage, ...] | None = None
 
 
 @dataclass(frozen=True)
 class ContextBuilderResult:
-    """Final rendered prompt plus per-section accounting."""
+    """Final rendered prompt, per-section accounting, and assembly separator."""
 
     prompt: str
     sections: tuple[SectionOutput, ...]
     budget_tokens: int
     total_tokens: int
+    section_separator: str = "\n\n"
 
 
 @dataclass(frozen=True)

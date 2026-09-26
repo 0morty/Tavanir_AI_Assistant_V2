@@ -19,6 +19,7 @@ from src.application.exceptions import (
     AggregateApplicationError,
     ApplicationAPIError,
     ApplicationError,
+    ChunkSummarizationError,
     EmbedderAPIError,
     EmbedderAuthenticationError,
     EmbedderBaseError,
@@ -29,8 +30,17 @@ from src.application.exceptions import (
     LLMBaseError,
     LLMConfigurationError,
     LLMConnectionError,
+    RerankerAPIError,
+    RerankerBaseError,
+    RerankerConfigurationError,
+    RerankerConnectionError,
+    RerankerInputLimitError,
+    RerankerOverloadedError,
+    RerankerProtocolError,
+    RerankerValidationError,
     SparseEmbedderError,
     TextNormalizationError,
+    TokenizerError,
 )
 from src.domain.exceptions import (
     ChunkingError,
@@ -230,6 +240,57 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         code="TEXT_NORMALIZATION_FAILED",
         default_pointer="/data",
+    ),
+    ChunkSummarizationError: ErrorSpec(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        code="LLM_SUMMARIZATION_FAILED",
+        default_pointer=None,
+    ),
+    TokenizerError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="TOKENIZATION_FAILED",
+        default_pointer=None,
+    ),
+    # --- Reranker Exceptions ---
+    RerankerValidationError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="VALIDATION_ERROR",
+        default_pointer="/data",
+    ),
+    RerankerInputLimitError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="RERANKER_INPUT_LIMIT_EXCEEDED",
+        default_pointer="/data",
+    ),
+    RerankerOverloadedError: ErrorSpec(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        code="RATE_LIMITED",
+        default_pointer=None,
+    ),
+    RerankerConnectionError: ErrorSpec(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        code="RERANKER_CONNECTION_FAILED",
+        default_pointer=None,
+    ),
+    RerankerConfigurationError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="RERANKER_CONFIGURATION_ERROR",
+        default_pointer=None,
+    ),
+    RerankerAPIError: ErrorSpec(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        code="RERANKER_API_ERROR",
+        default_pointer=None,
+    ),
+    RerankerProtocolError: ErrorSpec(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        code="RERANKER_PROTOCOL_ERROR",
+        default_pointer=None,
+    ),
+    RerankerBaseError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="RERANKER_FAILED",
+        default_pointer=None,
     ),
 }
 
@@ -431,7 +492,7 @@ async def http_exception_handler(
 ) -> JSONResponse:
     """Intercepts standard HTTP exceptions (404, 405, etc.) and wraps them in JSON:API envelope."""
     if hasattr(exc, "code"):
-        code = getattr(exc, "code")
+        code = exc.code
         pointer = getattr(exc, "pointer", None)
     else:
         status_to_code = {

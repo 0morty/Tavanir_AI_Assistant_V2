@@ -10,6 +10,7 @@ if TYPE_CHECKING:  # pragma: no cover
 from src.domain.enums import (
     CommitteeScrutiny,
     SecretariatScrutiny,
+    SuggestionChunkType,
     SuggestionStatus,
 )
 
@@ -103,6 +104,26 @@ class RedistributionResult:
     unused_capacity: int
 
 
+@dataclass(frozen=True)
+class AnalyzeSuggestionDTO:
+    title: str
+    problem: str
+    solution: str
+    context_title: str | None = None
+
+
+@dataclass(frozen=True)
+class PooledSuggestionCandidate:
+    suggestion_id: str
+    status: SuggestionStatus
+    winning_chunk_id: str
+    winning_chunk_type: SuggestionChunkType
+    winning_score: float
+    winning_content: str
+    all_matched_chunk_types: tuple[SuggestionChunkType, ...]
+
+
+@dataclass(frozen=True)
 class CreateSuggestionDTO:
     suggestion_id: str
     title: str
@@ -247,8 +268,40 @@ class HistoricalIngestionResultDTO:
     execution_time_seconds: float
 
 
+@dataclass(frozen=True, slots=True)
+class RerankCandidate:
+    candidate_id: str
+    normalized_text: str
+    retrieval_rank: int
+    retrieval_score: float
+
+    def __post_init__(self) -> None:
+        if not self.candidate_id or not self.candidate_id.strip():
+            raise ValueError("candidate_id must be non-empty.")
+        if not self.normalized_text or not self.normalized_text.strip():
+            raise ValueError("normalized_text must be non-empty.")
+        if self.retrieval_rank <= 0:
+            raise ValueError("retrieval_rank must be positive.")
+
+
+@dataclass(frozen=True, slots=True)
+class RerankedCandidate:
+    candidate_id: str
+    retrieval_rank: int
+    retrieval_score: float
+    rerank_score: float
+    reranked_rank: int
+
+
 __all__ = [
     "AnalyzeSuggestionResponse",
+    "SectionOutput",
+    "ContextBuilderResult",
+    "CapacityRequest",
+    "CapacityAllocation",
+    "RedistributionResult",
+    "AnalyzeSuggestionDTO",
+    "PooledSuggestionCandidate",
     "CreateSuggestionDTO",
     "IngestSuggestionResponseDTO",
     "UpdateSuggestionDTO",
@@ -262,4 +315,6 @@ __all__ = [
     "SkippedRecordDTO",
     "CheckpointData",
     "HistoricalIngestionResultDTO",
+    "RerankCandidate",
+    "RerankedCandidate",
 ]

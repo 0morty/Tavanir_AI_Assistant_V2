@@ -185,6 +185,48 @@ class HistoricalIngestionSettings(BaseSettings):
     AUTO_SWITCH_ALIAS: bool = True
 
 
+class RerankerSettings(BaseSettings):
+    model_config = _base_config
+
+    RERANKER_HOST: str = "localhost"
+    RERANKER_PORT: int = 8081
+    RERANKER_API_KEY: str = "EMPTY"
+    RERANKER_EXPECTED_MODEL_ID: str = "BAAI/bge-reranker-v2-m3"
+
+    # Runtime parameters
+    RERANKER_CLIENT_BATCH_SIZE: int = 32
+    RERANKER_MAX_CONCURRENT_REQUESTS: int = 4
+    RERANKER_RAW_SCORES: bool = True
+    RERANKER_TRUNCATE: bool = True
+    RERANKER_TRUNCATION_DIRECTION: str = "Left"
+
+    # Latency SLA & Timeouts
+    RERANKER_CONNECT_TIMEOUT: float = 1.0
+    RERANKER_READ_TIMEOUT: float = 3.0
+    RERANKER_MAX_RETRIES: int = 1
+    RERANKER_RETRY_BASE_DELAY: float = 0.1
+    RERANKER_RETRY_MAX_DELAY: float = 0.5
+
+    # Observability & Truncation Risk
+    RERANKER_TRUNCATION_RISK_CHAR_THRESHOLD: int = 2000
+
+    @property
+    def RERANKER_BASE_URL(self) -> str:  # noqa: N802
+        return f"http://{self.RERANKER_HOST}:{self.RERANKER_PORT}"
+
+
+class SuggestionAnalysisSettings(BaseSettings):
+    model_config = _base_config
+
+    SUGGESTION_ANALYSIS_SOLUTION_LIMIT: int = 40
+    SUGGESTION_ANALYSIS_PROBLEM_LIMIT: int = 25
+    SUGGESTION_ANALYSIS_TITLE_LIMIT: int = 15
+    SUGGESTION_ANALYSIS_POSITIVE_PROBE_LIMIT: int = 15
+    SUGGESTION_ANALYSIS_PENDING_PROBE_LIMIT: int = 10
+    SUGGESTION_ANALYSIS_TOP_N_PER_STATUS: int = 3
+    SUGGESTION_ANALYSIS_MIN_SCORE_THRESHOLD: float | None = 0.0
+
+
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 generation_settings = GenerationSettings()
@@ -196,3 +238,5 @@ logging_settings = LoggingSettings()
 security_settings = SecuritySettings()
 mssql_settings = MssqlSettings()
 historical_ingestion_settings = HistoricalIngestionSettings()
+reranker_settings = RerankerSettings()
+suggestion_analysis_settings = SuggestionAnalysisSettings()

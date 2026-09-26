@@ -21,6 +21,7 @@ from src.application.interfaces.i_redistribution_allocator import (
     IRedistributionAllocator,
 )
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
+from src.application.interfaces.i_reranker import IReranker
 from src.application.interfaces.i_skipped_suggestion_repository import (
     ISkippedSuggestionRepository,
 )
@@ -54,4 +55,5 @@ __all__ = [
     "IHybridEmbeddingService",
     "IChunkEmbeddingService",
     "IUnitOfWork",
+    "IReranker",
 ]

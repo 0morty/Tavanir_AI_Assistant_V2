@@ -83,7 +83,7 @@ This document outlines all features and infrastructure components from the legac
 ### 2.2 Application DTOs & Commands / Queries
 * **Target Directory**: `src/application/dtos/`
 * **Requirements**:
-  * `AnalyzeSuggestionDTO`: Input payload (`title`, `current_problem`, `solution`, `context_title`, optional custom instructions).
+  * `AnalyzeSuggestionDTO`: Input payload (`title`, `current_problem`, `solution`, `context_title`).
   * `SuggestionAnalysisResultDTO`: Output structured recommendation, matched positive/negative precedents, and statute references.
   * `IngestSuggestionDTO`: Real-time ingestion payload for a single suggestion.
   * `DeleteSuggestionDTO`: Payload for single or bulk suggestion deletion.
@@ -127,7 +127,7 @@ This document outlines all features and infrastructure components from the legac
     1. *Incoming Suggestion Data*: Title, Current Problem, Solution, Context.
     2. *Organizational Rules & Statutes*: Top-$k$ retrieved legal articles.
     3. *Positive Precedents*: Executed / Approved historical suggestions (flagging potential duplicates or previous implementations).
-    4. *Negative Precedents*: Rejected suggestions (preventing recurring flawed proposals).
+    4. *Negative Precedents*: Rejected suggestions (preventing recurring flawed suggestions).
     5. *Pending Suggestions*: In-review submissions.
     6. *Output Schema*: Strict structured output (Recommendation, Duplicate Analysis, Compliance Verdict, Justification).
 

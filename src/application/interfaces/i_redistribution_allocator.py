@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from src.application.context.allocation.expansion_request import ExpansionRequest
 from src.application.dtos import RedistributionResult
+
+if TYPE_CHECKING:
+    from src.application.context.allocation.expansion_request import ExpansionRequest
 
 
 class IRedistributionAllocator(ABC):

@@ -13,12 +13,15 @@ from src.presentation.schemas.responses import (
 )
 
 from src.application.use_cases import (
+    AnalyzeSuggestionUseCase,
     BulkDeleteSuggestionsUseCase,
     DeleteSuggestionUseCase,
     IngestSuggestionUseCase,
     UpdateSuggestionUseCase,
 )
 from src.presentation.schemas.v1 import (
+    AnalyzeSuggestionDataResponse,
+    AnalyzeSuggestionRequest,
     BulkDeleteRequest,
     DeleteSuggestionDataResponse,
     IngestSuggestionDataResponse,
@@ -29,6 +32,37 @@ from src.presentation.schemas.v1 import (
 )
 
 router = APIRouter(tags=["Suggestions"])
+
+
+@router.post(
+    "/suggestions/analyze",
+    status_code=status.HTTP_200_OK,
+    summary="Analyze an incoming employee suggestion against historical suggestions",
+    description=(
+        "Synchronously executes Tri-Track hybrid Qdrant retrieval, candidate deduplication, "
+        "cross-encoder reranking, Max-Passage pooling, and PostgreSQL hydration to return partitioned similar suggestion IDs."
+    ),
+)
+@inject
+async def analyze_suggestion(
+    request: AnalyzeSuggestionRequest,
+    use_case: Annotated[
+        AnalyzeSuggestionUseCase,
+        Depends(Provide[Container.analyze_suggestion_use_case]),
+    ],
+) -> SuccessResponse[AnalyzeSuggestionDataResponse]:
+    dto = request.to_dto()
+    result = await use_case.execute(dto)
+    response_data = AnalyzeSuggestionDataResponse(
+        analysis=result.analysis,
+        similar_executed_ids=result.similar_executed_ids,
+        similar_approved_ids=result.similar_approved_ids,
+        similar_pending_ids=result.similar_pending_ids,
+        similar_rejected_ids=result.similar_rejected_ids,
+        similar_not_accepted_ids=result.similar_not_accepted_ids,
+        applied_statute_ids=result.applied_statute_ids,
+    )
+    return SuccessResponse.create(data=response_data, status=status.HTTP_200_OK)
 
 
 @router.post(

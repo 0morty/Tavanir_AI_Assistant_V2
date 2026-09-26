@@ -5,6 +5,7 @@
 All data exchanged between the upstream Tavanir suggestion system (caller) and the **Tavanir AI Assistant V2** service (RAG backend) must use **`camelCase`**, consistently, everywhere.
 
 This requirement covers all data that moves on the path between caller and service:
+
 - `request payload`
 - `response`
 - `query string`
@@ -39,17 +40,18 @@ HTTP headers (standard and custom) follow **`Title-Case`** style:
 ### 1. Body — Analyze Suggestion Request
 
 **Correct:**
+
 ```json
 {
   "title": "عدم پرداخت مابه‌التفاوت افزایش حقوق",
   "currentProblem": "وضعیت فعلی ...",
   "solution": "راهکار پیشنهادی ...",
-  "contextTitle": "امور مالی",
-  "customInstructions": "تمرکز بر سوابق اجرا شده"
+  "contextTitle": "امور مالی"
 }
 ```
 
 **Incorrect:**
+
 ```json
 {
   "title": "عدم پرداخت مابه‌التفاوت افزایش حقوق",
@@ -64,6 +66,7 @@ HTTP headers (standard and custom) follow **`Title-Case`** style:
 Maps directly from `AnalyzeSuggestionResponse` (`src/application/dtos.py`):
 
 **Correct:**
+
 ```json
 {
   "analysis": "## توصیه نهایی ...",
@@ -79,6 +82,7 @@ Maps directly from `AnalyzeSuggestionResponse` (`src/application/dtos.py`):
 ### 3. Body — Real-time Ingestion (single suggestion)
 
 **Correct:**
+
 ```json
 {
   "suggestionId": "sug-42",
@@ -95,6 +99,7 @@ Status values are the canonical `SuggestionStatus` member names (see mapping bel
 ### 4. Body — Suggestion Deletion (bulk)
 
 **Correct:**
+
 ```json
 {
   "suggestionIds": ["sug-1", "sug-2", "sug-3"]
@@ -104,11 +109,13 @@ Status values are the canonical `SuggestionStatus` member names (see mapping bel
 ### 5. Query String
 
 **Correct:**
+
 ```http
 GET /analyze-suggestion/status?includeRetry=true
 ```
 
 **Incorrect:**
+
 ```http
 GET /analyze-suggestion/status?include_retry=true
 ```
@@ -116,9 +123,11 @@ GET /analyze-suggestion/status?include_retry=true
 ### 6. Path Params
 
 **Correct:**
+
 ```http
 GET /analyze-suggestion/{suggestionId}
 ```
+
 ```text
 const { suggestionId } = req.params;
 ```
@@ -137,12 +146,12 @@ X-Request-Id: 123e4567-e89b-12d3-a456-426614174000
 The `SuggestionStatus` enum (`src/domain/enums.py`) defines the five statuses. The **member name** is the stable wire identifier; the Persian title is the presentation-layer display string:
 
 | Wire code (`name`) | Persian title (`title_fa`) | Legacy `status_id` |
-|---|---|---|
-| `NOT_ACCEPTED` | عدم پذیرش | 1 |
-| `REJECTED` | رد | 2 |
-| `APPROVED` | مصوب | 3 |
-| `PENDING` | در حال اجرا | 4 |
-| `EXECUTED` | اجرا شده | 5 |
+| ------------------ | -------------------------- | ------------------ |
+| `NOT_ACCEPTED`     | عدم پذیرش                  | 1                  |
+| `REJECTED`         | رد                         | 2                  |
+| `APPROVED`         | مصوب                       | 3                  |
+| `PENDING`          | در حال اجرا                | 4                  |
+| `EXECUTED`         | اجرا شده                   | 5                  |
 
 ---
 

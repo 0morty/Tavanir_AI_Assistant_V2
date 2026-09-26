@@ -485,6 +485,7 @@ class Container(containers.DeclarativeContainer):
             vector_repo=suggestion_vector_repository,
             reranker=reranker,
             uow=unit_of_work,
+            prompt_preparer=suggestion_prompt_preparer,
             solution_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_SOLUTION_LIMIT,
             problem_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_PROBLEM_LIMIT,
             title_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_TITLE_LIMIT,
@@ -492,5 +493,6 @@ class Container(containers.DeclarativeContainer):
             pending_probe_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_PENDING_PROBE_LIMIT,
             top_n_per_status=suggestion_analysis_settings.SUGGESTION_ANALYSIS_TOP_N_PER_STATUS,
             min_score_threshold=suggestion_analysis_settings.SUGGESTION_ANALYSIS_MIN_SCORE_THRESHOLD,
+            max_prompt_tokens=suggestion_analysis_settings.SUGGESTION_ANALYSIS_MAX_PROMPT_TOKENS,
         )
     )

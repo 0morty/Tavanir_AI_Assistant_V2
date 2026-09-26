@@ -360,12 +360,13 @@ class SimilarSuggestionInput:
         )
         if (
             self.similarity is None
+            or isinstance(self.similarity, bool)
             or not isinstance(self.similarity, (int, float))
             or math.isnan(self.similarity)
-            or not (0.0 <= self.similarity <= 1.0)
+            or math.isinf(self.similarity)
         ):
             raise InvalidSuggestionContentError(
-                f"Similar suggestion similarity must be a float between 0.0 and 1.0, got {self.similarity!r}.",
+                f"Similar suggestion similarity must be a finite float, got {self.similarity!r}.",
                 pointer=f"/data/similarSuggestions/{index}/similarity",
                 field_name="similarity",
             )

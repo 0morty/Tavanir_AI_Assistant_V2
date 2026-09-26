@@ -225,6 +225,7 @@ class SuggestionAnalysisSettings(BaseSettings):
     SUGGESTION_ANALYSIS_PENDING_PROBE_LIMIT: int = 10
     SUGGESTION_ANALYSIS_TOP_N_PER_STATUS: int = 3
     SUGGESTION_ANALYSIS_MIN_SCORE_THRESHOLD: float | None = 0.0
+    SUGGESTION_ANALYSIS_MAX_PROMPT_TOKENS: int = 4096
 
 
 core_settings = CoreSettings()

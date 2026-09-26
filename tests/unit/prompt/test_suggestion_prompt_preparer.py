@@ -231,26 +231,89 @@ def test_current_suggestion_non_string_field():
     assert exc_info.value.pointer == "/data/currentTitle"
 
 
-def test_similar_suggestion_invalid_similarity_negative():
-    item = _make_similar("sug-1", similarity=-0.1)
+def test_similar_suggestion_positive_unconstrained_logit():
+    item1 = _make_similar("sug-1", similarity=2.45)
+    item1.validate_with_index(0)  # should not raise
+    item2 = _make_similar("sug-2", similarity=12.8)
+    item2.validate_with_index(1)  # should not raise
+
+
+def test_similar_suggestion_negative_unconstrained_logit():
+    item1 = _make_similar("sug-1", similarity=-0.85)
+    item1.validate_with_index(0)  # should not raise
+    item2 = _make_similar("sug-2", similarity=-7.3)
+    item2.validate_with_index(1)  # should not raise
+
+
+def test_similar_suggestion_neutral_and_extreme_logits():
+    item_zero = _make_similar("sug-1", similarity=0.0)
+    item_zero.validate_with_index(0)
+    item_neg_zero = _make_similar("sug-2", similarity=-0.0)
+    item_neg_zero.validate_with_index(1)
+    item_large_pos = _make_similar("sug-3", similarity=1e6)
+    item_large_pos.validate_with_index(2)
+    item_large_neg = _make_similar("sug-4", similarity=-1e6)
+    item_large_neg.validate_with_index(3)
+
+
+def test_similar_suggestion_integer_similarity():
+    item1 = _make_similar("sug-1", similarity=1)
+    item1.validate_with_index(0)
+    item2 = _make_similar("sug-2", similarity=-2)
+    item2.validate_with_index(1)
+
+
+def test_similar_suggestion_rejects_boolean_similarity():
+    item_true = _make_similar("sug-1", similarity=cast(Any, True))
+    with pytest.raises(InvalidSuggestionContentError) as exc_true:
+        item_true.validate_with_index(0)
+    assert exc_true.value.pointer == "/data/similarSuggestions/0/similarity"
+    assert exc_true.value.field_name == "similarity"
+
+    item_false = _make_similar("sug-2", similarity=cast(Any, False))
+    with pytest.raises(InvalidSuggestionContentError) as exc_false:
+        item_false.validate_with_index(1)
+    assert exc_false.value.pointer == "/data/similarSuggestions/1/similarity"
+
+
+def test_similar_suggestion_rejects_nan():
+    item = _make_similar("sug-1", similarity=float("nan"))
+    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+        item.validate_with_index(1)
+    assert exc_info.value.pointer == "/data/similarSuggestions/1/similarity"
+    assert exc_info.value.field_name == "similarity"
+
+
+def test_similar_suggestion_rejects_positive_inf():
+    item = _make_similar("sug-1", similarity=float("inf"))
+    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+        item.validate_with_index(2)
+    assert exc_info.value.pointer == "/data/similarSuggestions/2/similarity"
+    assert exc_info.value.field_name == "similarity"
+
+
+def test_similar_suggestion_rejects_negative_inf():
+    item = _make_similar("sug-1", similarity=float("-inf"))
+    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+        item.validate_with_index(3)
+    assert exc_info.value.pointer == "/data/similarSuggestions/3/similarity"
+    assert exc_info.value.field_name == "similarity"
+
+
+def test_similar_suggestion_rejects_none():
+    item = _make_similar("sug-1", similarity=cast(Any, None))
     with pytest.raises(InvalidSuggestionContentError) as exc_info:
         item.validate_with_index(0)
     assert exc_info.value.pointer == "/data/similarSuggestions/0/similarity"
     assert exc_info.value.field_name == "similarity"
 
 
-def test_similar_suggestion_invalid_similarity_greater_than_one():
-    item = _make_similar("sug-1", similarity=1.05)
+def test_similar_suggestion_rejects_string():
+    item = _make_similar("sug-1", similarity=cast(Any, "0.95"))
     with pytest.raises(InvalidSuggestionContentError) as exc_info:
-        item.validate_with_index(3)
-    assert exc_info.value.pointer == "/data/similarSuggestions/3/similarity"
-
-
-def test_similar_suggestion_invalid_similarity_nan():
-    item = _make_similar("sug-1", similarity=float("nan"))
-    with pytest.raises(InvalidSuggestionContentError) as exc_info:
-        item.validate_with_index(1)
-    assert exc_info.value.pointer == "/data/similarSuggestions/1/similarity"
+        item.validate_with_index(0)
+    assert exc_info.value.pointer == "/data/similarSuggestions/0/similarity"
+    assert exc_info.value.field_name == "similarity"
 
 
 def test_generation_input_none_current_suggestion():

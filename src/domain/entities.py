@@ -4,7 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Generic, TypeAlias, TypeVar
+from typing import ClassVar, Generic, TypeAlias, TypeVar, get_origin, get_type_hints
 
 from src.domain.enums import (
     AuthorityLevel,
@@ -279,24 +279,54 @@ class ReferenceDetails:
     """
     Structural description of the currently available properties of a Reference.
 
-    Describes the property *shape* (name and runtime type of each available
-    property), not the runtime values. Properties whose value is `None` are
-    excluded, so different instances of the same Reference class may produce
-    different `ReferenceDetails`.
+    Describes the property *shape* (name and declared type of each available
+    property), not the runtime values. Properties whose value is `None` or
+    unset are excluded, so different instances of the same Reference class
+    may produce different `ReferenceDetails`.
     """
 
     properties: tuple[tuple[str, str], ...] = field(default_factory=tuple)
 
     @classmethod
     def from_instance(cls, reference: "Reference") -> "ReferenceDetails":
-        if not dataclasses.is_dataclass(reference):
+        declared: dict[str, object] = {}
+        for base in reversed(type(reference).__mro__):
+            if base is Reference or not issubclass(base, Reference):
+                continue
+            declared.update(base.__dict__.get("__annotations__", {}))
+
+        if not declared:
             return cls()
+
+        try:
+            resolved = get_type_hints(type(reference))
+        except (AttributeError, NameError, TypeError):
+            # Locally scoped forward references may not be resolvable here.
+            # Their declared text can still describe an available property.
+            resolved = {}
+
         available: list[tuple[str, str]] = []
-        for dataclass_field in dataclasses.fields(reference):
-            value = getattr(reference, dataclass_field.name)
+        for name, raw_type in declared.items():
+            declared_type = resolved.get(name, raw_type)
+            if get_origin(declared_type) is ClassVar or isinstance(
+                declared_type, dataclasses.InitVar
+            ):
+                continue
+            if isinstance(declared_type, str) and declared_type.split("[")[0] in {
+                "ClassVar", "typing.ClassVar", "InitVar", "dataclasses.InitVar"
+            }:
+                continue
+            try:
+                value = getattr(reference, name)
+            except AttributeError:
+                continue
             if value is None:
                 continue
-            available.append((dataclass_field.name, type(value).__name__))
+            if isinstance(declared_type, type):
+                type_name = declared_type.__name__
+            else:
+                type_name = str(declared_type).removeprefix("typing.")
+            available.append((name, type_name))
         return cls(properties=tuple(available))
 
     def canonical(self) -> str:

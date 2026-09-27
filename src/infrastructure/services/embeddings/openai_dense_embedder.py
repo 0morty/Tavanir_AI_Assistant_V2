@@ -2,12 +2,12 @@ from collections.abc import Sequence
 from typing import Any
 
 from openai import AsyncOpenAI
-from src.application.interfaces.i_dense_embedder import IDenseEmbedder
 
 from src.application.exceptions import (
     EmbedderAPIError,
     EmbedderConnectionError,
 )
+from src.application.interfaces.i_dense_embedder import IDenseEmbedder
 from src.infrastructure.services.base_openai_service import BaseOpenAIService
 
 

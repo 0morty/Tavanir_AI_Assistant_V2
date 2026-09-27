@@ -1,0 +1,22 @@
+services:
+  historical_ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.historical_ingest
+    container_name: tavanir_historical_ingest
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=tavanir_postgres
+      - POSTGRES_PORT=5432
+      - QDRANT_HOST=tavanir_qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_GRPC_PORT=6334
+    networks:
+      - tavanir_network
+    command: ["--resume"]
+
+networks:
+  tavanir_network:
+    external: true

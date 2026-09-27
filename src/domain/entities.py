@@ -4,19 +4,22 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeAlias, TypeVar
+from typing import Generic, TypeAlias, TypeVar
 
 from src.domain.enums import (
     AuthorityLevel,
     ChunkStatus,
+    CommitteeScrutiny,
     HistoryRole,
     RegulatoryDocumentType,
+    SecretariatScrutiny,
     SuggestionChunkType,
     SuggestionStatus,
 )
 from src.domain.exceptions import (
     InvalidShamsiDateFormatError,
     InvalidSparseVectorError,
+    InvalidSuggestionContentError,
     VectorPayloadValidationError,
 )
 
@@ -24,6 +27,24 @@ TMetadata = TypeVar("TMetadata")
 
 # Semantic type alias for dense embedding vectors
 DenseVector: TypeAlias = Sequence[float]
+
+
+NOISE_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "-",
+        "--",
+        "---",
+        ".",
+        "..",
+        "...",
+        "ندارد",
+        "بدون شرح",
+        "هیچ",
+        "ثبت نشده",
+        "موردی ندارد",
+        "عدم وجود",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -47,15 +68,50 @@ class ShamsiDate:
 @dataclass(frozen=True)
 class SuggestionContent:
     title: str
-    problem: str | None
-    solution: str | None
+    problem: str
+    solution: str
+
+    def __post_init__(self):
+        self._validate_field("title", self.title, min_len=5, pointer="/data/title")
+        self._validate_field(
+            "problem", self.problem, min_len=5, pointer="/data/problem"
+        )
+        self._validate_field(
+            "solution", self.solution, min_len=5, pointer="/data/solution"
+        )
+
+    @staticmethod
+    def _validate_field(
+        field_name: str, value: str, min_len: int, pointer: str
+    ) -> None:
+        if not value or not value.strip():
+            raise InvalidSuggestionContentError(
+                f"Suggestion {field_name} must not be empty.",
+                pointer=pointer,
+                field_name=field_name,
+            )
+        cleaned = value.strip()
+        if len(cleaned) < min_len or cleaned in NOISE_PLACEHOLDERS:
+            raise InvalidSuggestionContentError(
+                f"Suggestion {field_name} must contain substantive content, got '{cleaned}'.",
+                pointer=pointer,
+                field_name=field_name,
+            )
+
+
+@dataclass(frozen=True)
+class SecretariatEvaluation:
+    scrutiny: SecretariatScrutiny | None = None
+    comment: str | None = None
+    scrutiny_id: int | None = None
 
 
 @dataclass(frozen=True)
 class CommitteeEvaluation:
     status: SuggestionStatus
-    scrutiny: str | None
-    description: str | None
+    scrutiny: CommitteeScrutiny | None = None
+    description: str | None = None
+    scrutiny_id: int | None = None
 
 
 @dataclass
@@ -63,8 +119,23 @@ class Suggestion:
     id: str
     content: SuggestionContent
     evaluation: CommitteeEvaluation
-    date: ShamsiDate | None
-    context_title: str | None
+    date: ShamsiDate | None = None
+    context_title: str | None = None
+    secretariat_evaluation: SecretariatEvaluation | None = None
+    is_deleted: bool = False
+    version: int = 1
+
+    def mark_deleted(self) -> None:
+        """Mark suggestion as soft-deleted."""
+        self.is_deleted = True
+
+    def restore(self) -> None:
+        """Restore soft-deleted suggestion back to active state."""
+        self.is_deleted = False
+
+    def increment_version(self) -> None:
+        """Advance optimistic concurrency version token."""
+        self.version += 1
 
 
 # endregion
@@ -114,9 +185,14 @@ class SuggestionChunkMetadata:
     """Filterable, strongly-typed metadata payload for suggestion child chunks (ADR-002)."""
 
     chunk_type: SuggestionChunkType
+    sub_index: int = 0
     status: SuggestionStatus | None = None
     context_title: str | None = None
     date: ShamsiDate | None = None
+    committee_scrutiny: CommitteeScrutiny | None = None
+    committee_scrutiny_id: int | None = None
+    secretariat_scrutiny: SecretariatScrutiny | None = None
+    secretariat_scrutiny_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -166,8 +242,8 @@ class Chunk(Generic[TMetadata]):
 
 
 # Type aliases for explicit domain consumption
-SuggestionChunk = Chunk[SuggestionChunkMetadata]
-RegulatoryChunk = Chunk[RegulatoryChunkMetadata]
+SuggestionChunk: TypeAlias = Chunk[SuggestionChunkMetadata]
+RegulatoryChunk: TypeAlias = Chunk[RegulatoryChunkMetadata]
 
 
 @dataclass(frozen=True)
@@ -192,8 +268,8 @@ class SearchResultChunk(Generic[TMetadata]):
         return self.chunk.parent_id
 
 
-SuggestionSearchResult = SearchResultChunk[SuggestionChunkMetadata]
-RegulatorySearchResult = SearchResultChunk[RegulatoryChunkMetadata]
+SuggestionSearchResult: TypeAlias = SearchResultChunk[SuggestionChunkMetadata]
+RegulatorySearchResult: TypeAlias = SearchResultChunk[RegulatoryChunkMetadata]
 # endregion
 
 
@@ -226,8 +302,7 @@ class ReferenceDetails:
     def canonical(self) -> str:
         """Deterministically sorted canonical descriptor: `name|type,name|type,...`."""
         descriptors = sorted(
-            f"{name}|{property_type}"
-            for name, property_type in self.properties
+            f"{name}|{property_type}" for name, property_type in self.properties
         )
         return ",".join(descriptors)
 
@@ -267,6 +342,7 @@ class Reference(ABC):
 
 
 # endregion
+
 
 @dataclass(frozen=True)
 class HistoryMessage:
@@ -309,5 +385,6 @@ __all__ = [
     "ReferenceDetails",
     "Reference",
     "GenerationChunk",
-    "HistoryMessage"
+    "HistoryMessage",
+    "NOISE_PLACEHOLDERS",
 ]

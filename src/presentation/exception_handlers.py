@@ -19,26 +19,49 @@ from src.application.exceptions import (
     AggregateApplicationError,
     ApplicationAPIError,
     ApplicationError,
+    ChunkSummarizationError,
+    DuplicateEvidenceIdError,
     EmbedderAPIError,
     EmbedderAuthenticationError,
     EmbedderBaseError,
     EmbedderConnectionError,
     EmbedderContextLengthError,
+    InsufficientEvidenceBudgetError,
     LLMAPIError,
     LLMAuthenticationError,
     LLMBaseError,
     LLMConfigurationError,
     LLMConnectionError,
+    PromptBudgetExceededError,
+    RerankerAPIError,
+    RerankerBaseError,
+    RerankerConfigurationError,
+    RerankerConnectionError,
+    RerankerInputLimitError,
+    RerankerOverloadedError,
+    RerankerProtocolError,
+    RerankerValidationError,
     SparseEmbedderError,
     TextNormalizationError,
+    TokenizerError,
 )
 from src.domain.exceptions import (
+    ChunkingError,
     DomainError,
     EntityNotFoundError,
+    InvalidCommitteeScrutinyError,
+    InvalidSecretariatScrutinyError,
     InvalidShamsiDateFormatError,
     InvalidSparseVectorError,
+    InvalidSuggestionContentError,
     InvalidSuggestionStatusError,
     ParentChildIntegrityError,
+    RegulatoryChunkingError,
+    SuggestionAlreadyExistsError,
+    SuggestionChunkingError,
+    SuggestionNotFoundError,
+    SuggestionPayloadValidationError,
+    SuggestionProcessingConflictError,
     VectorCollectionProvisioningError,
     VectorPayloadValidationError,
     VectorSearchError,
@@ -60,6 +83,16 @@ class ErrorSpec:
 # Declarative registry mapping concrete exceptions to their contract specifications
 ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
     # --- Domain Exceptions ---
+    InvalidSuggestionContentError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="INVALID_SUGGESTION_CONTENT",
+        default_pointer="/data",
+    ),
+    SuggestionAlreadyExistsError: ErrorSpec(
+        status_code=status.HTTP_409_CONFLICT,
+        code="SUGGESTION_ALREADY_EXISTS",
+        default_pointer="/data/suggestionId",
+    ),
     InvalidShamsiDateFormatError: ErrorSpec(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         code="INVALID_SHAMSI_DATE",
@@ -69,6 +102,16 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         code="INVALID_SUGGESTION_STATUS",
         default_pointer="/data/status",
+    ),
+    InvalidCommitteeScrutinyError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="INVALID_COMMITTEE_SCRUTINY",
+        default_pointer="/data/committeeScrutiny",
+    ),
+    InvalidSecretariatScrutinyError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="INVALID_SECRETARIAT_SCRUTINY",
+        default_pointer="/data/secretariatScrutiny",
     ),
     InvalidSparseVectorError: ErrorSpec(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -90,6 +133,21 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         code="SUGGESTION_NOT_FOUND",
         default_pointer=None,
     ),
+    SuggestionNotFoundError: ErrorSpec(
+        status_code=status.HTTP_404_NOT_FOUND,
+        code="SUGGESTION_NOT_FOUND",
+        default_pointer=None,
+    ),
+    SuggestionProcessingConflictError: ErrorSpec(
+        status_code=status.HTTP_409_CONFLICT,
+        code="SUGGESTION_IN_PROCESSING",
+        default_pointer=None,
+    ),
+    SuggestionPayloadValidationError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="VALIDATION_ERROR",
+        default_pointer="/data",
+    ),
     VectorStorageError: ErrorSpec(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         code="RETRIEVAL_FAILED",
@@ -104,6 +162,21 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         code="RETRIEVAL_FAILED",
         default_pointer=None,
+    ),
+    ChunkingError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="CHUNKING_FAILED",
+        default_pointer="/data",
+    ),
+    SuggestionChunkingError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="CHUNKING_FAILED",
+        default_pointer="/data",
+    ),
+    RegulatoryChunkingError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="CHUNKING_FAILED",
+        default_pointer="/data",
     ),
     # --- Application Exceptions ---
     EmbedderConnectionError: ErrorSpec(
@@ -161,6 +234,21 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         code="LLM_CONFIGURATION_ERROR",
         default_pointer=None,
     ),
+    PromptBudgetExceededError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="PROMPT_BUDGET_EXCEEDED",
+        default_pointer="/data/maxPromptTokens",
+    ),
+    InsufficientEvidenceBudgetError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="INSUFFICIENT_EVIDENCE_BUDGET",
+        default_pointer="/data/similarSuggestions",
+    ),
+    DuplicateEvidenceIdError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="DUPLICATE_EVIDENCE_ID",
+        default_pointer="/data/similarSuggestions",
+    ),
     ApplicationAPIError: ErrorSpec(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         code="INTERNAL_ERROR",
@@ -170,6 +258,57 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         code="TEXT_NORMALIZATION_FAILED",
         default_pointer="/data",
+    ),
+    ChunkSummarizationError: ErrorSpec(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        code="LLM_SUMMARIZATION_FAILED",
+        default_pointer=None,
+    ),
+    TokenizerError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="TOKENIZATION_FAILED",
+        default_pointer=None,
+    ),
+    # --- Reranker Exceptions ---
+    RerankerValidationError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="VALIDATION_ERROR",
+        default_pointer="/data",
+    ),
+    RerankerInputLimitError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="RERANKER_INPUT_LIMIT_EXCEEDED",
+        default_pointer="/data",
+    ),
+    RerankerOverloadedError: ErrorSpec(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        code="RATE_LIMITED",
+        default_pointer=None,
+    ),
+    RerankerConnectionError: ErrorSpec(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        code="RERANKER_CONNECTION_FAILED",
+        default_pointer=None,
+    ),
+    RerankerConfigurationError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="RERANKER_CONFIGURATION_ERROR",
+        default_pointer=None,
+    ),
+    RerankerAPIError: ErrorSpec(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        code="RERANKER_API_ERROR",
+        default_pointer=None,
+    ),
+    RerankerProtocolError: ErrorSpec(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        code="RERANKER_PROTOCOL_ERROR",
+        default_pointer=None,
+    ),
+    RerankerBaseError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="RERANKER_FAILED",
+        default_pointer=None,
     ),
 }
 

@@ -65,6 +65,7 @@ class PromptBuilder:
         for section in sections or []:
             self.set_section(section.section_type, section)
 
+
     def set_section(self, name: str, value: IPromptSection) -> None:
         """Register a section under ``name``.
 

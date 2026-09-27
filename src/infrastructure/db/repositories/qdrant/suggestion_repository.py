@@ -83,6 +83,10 @@ class QdrantSuggestionRepository(
             "chunk_status": models.PayloadSchemaType.KEYWORD,
             "chunk_type": models.PayloadSchemaType.KEYWORD,
             "status": models.PayloadSchemaType.KEYWORD,
+            "committee_scrutiny": models.PayloadSchemaType.KEYWORD,
+            "committee_scrutiny_id": models.PayloadSchemaType.INTEGER,
+            "secretariat_scrutiny": models.PayloadSchemaType.KEYWORD,
+            "secretariat_scrutiny_id": models.PayloadSchemaType.INTEGER,
         }
 
     async def search_suggestions(
@@ -106,11 +110,23 @@ class QdrantSuggestionRepository(
                 )
             ]
 
-            if chunk_types:
+            effective_chunk_types = (
+                chunk_types
+                if chunk_types is not None
+                else [
+                    SuggestionChunkType.TITLE,
+                    SuggestionChunkType.PROBLEM,
+                    SuggestionChunkType.SOLUTION,
+                ]
+            )
+
+            if effective_chunk_types:
                 conditions.append(
                     models.FieldCondition(
                         key="chunk_type",
-                        match=models.MatchAny(any=[t.value for t in chunk_types]),
+                        match=models.MatchAny(
+                            any=[t.value for t in effective_chunk_types]
+                        ),
                     )
                 )
 

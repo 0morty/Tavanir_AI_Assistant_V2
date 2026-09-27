@@ -158,6 +158,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+tavanir-ai-assistant-v2.code-workspace
 
 # Spyder project settings
 .spyderproject

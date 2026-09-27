@@ -1,6 +1,7 @@
 import pytest
 
 from src.domain.interfaces import (
+    IChunkingStrategy,
     IRegulatoryVectorRepository,
     ISuggestionRepository,
     ISuggestionVectorRepository,
@@ -20,3 +21,6 @@ def test_interfaces_cannot_be_instantiated_directly():
 
     with pytest.raises(TypeError):
         ISuggestionRepository()  # type: ignore
+
+    with pytest.raises(TypeError):
+        IChunkingStrategy()  # type: ignore

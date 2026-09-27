@@ -130,7 +130,7 @@ async def test_provision_collection_when_collection_not_exists(
     assert (
         mock_qdrant_client.create_collection.call_args.kwargs["on_disk_payload"] is True
     )
-    assert mock_qdrant_client.create_payload_index.await_count == 4
+    assert mock_qdrant_client.create_payload_index.await_count == 8
 
 
 async def test_provision_collection_raises_domain_error_on_fatal_failure(
@@ -244,6 +244,42 @@ async def test_delete_chunks_by_parent_id(
     cond = filter_selector.filter.must[0]
     assert cond.key == "parent_id"
     assert cond.match.value == "parent-xyz"
+
+
+async def test_delete_chunks_by_parent_ids(
+    suggestion_repo: QdrantSuggestionRepository, mock_qdrant_client: AsyncMock
+) -> None:
+    await suggestion_repo.delete_chunks_by_parent_ids(["parent-1", "parent-2"])
+
+    mock_qdrant_client.delete.assert_awaited_once()
+    filter_selector = mock_qdrant_client.delete.call_args.kwargs["points_selector"]
+    cond = filter_selector.filter.must[0]
+    assert cond.key == "parent_id"
+    assert cond.match.any == ["parent-1", "parent-2"]
+
+
+async def test_activate_staging_chunks_batch(
+    suggestion_repo: QdrantSuggestionRepository, mock_qdrant_client: AsyncMock
+) -> None:
+    await suggestion_repo.activate_staging_chunks_batch(["parent-1", "parent-2"])
+
+    assert mock_qdrant_client.set_payload.await_count == 2
+
+    # Step 1: Demote ACTIVE to DEPRECATED
+    first_call = mock_qdrant_client.set_payload.call_args_list[0].kwargs
+    assert first_call["payload"]["chunk_status"] == "deprecated"
+    assert first_call["points"].must[0].key == "parent_id"
+    assert first_call["points"].must[0].match.any == ["parent-1", "parent-2"]
+    assert first_call["points"].must[1].key == "chunk_status"
+    assert first_call["points"].must[1].match.value == "active"
+
+    # Step 2: Promote STAGING to ACTIVE
+    second_call = mock_qdrant_client.set_payload.call_args_list[1].kwargs
+    assert second_call["payload"]["chunk_status"] == "active"
+    assert second_call["points"].must[0].key == "parent_id"
+    assert second_call["points"].must[0].match.any == ["parent-1", "parent-2"]
+    assert second_call["points"].must[1].key == "chunk_status"
+    assert second_call["points"].must[1].match.value == "staging"
 
 
 async def test_delete_staging_chunks(
@@ -361,9 +397,35 @@ async def test_search_suggestions_filter_construction_and_result_mapping(
     assert hit.parent_id == "sugg-parent-001"
     assert hit.chunk.chunk_id == "sugg-chunk-001"
     assert hit.chunk.content == "راهکار پیشنهادی بهینه‌سازی بار"
-    assert hit.chunk.metadata.chunk_type == SuggestionChunkType.SOLUTION
-    assert hit.chunk.metadata.status == SuggestionStatus.APPROVED
-    assert str(hit.chunk.metadata.date) == "1403/10/20"
+    meta = hit.chunk.metadata
+    assert isinstance(meta, SuggestionChunkMetadata)
+    assert meta.chunk_type == SuggestionChunkType.SOLUTION
+    assert meta.status == SuggestionStatus.APPROVED
+    assert str(meta.date) == "1403/10/20"
+
+
+async def test_search_suggestions_defaults_to_content_chunk_types_excluding_evaluation(
+    suggestion_repo: QdrantSuggestionRepository, mock_qdrant_client: AsyncMock
+) -> None:
+    mock_qdrant_client.query_points.return_value = MagicMock(points=[])
+
+    # Calling search_suggestions with chunk_types=None
+    await suggestion_repo.search_suggestions(
+        dense_vector=[0.05] * 768,
+        sparse_vector=SparseVector(indices=[10], values=[1.5]),
+        limit=5,
+        chunk_types=None,  # Should default to [TITLE, PROBLEM, SOLUTION]
+    )
+
+    call_kwargs = mock_qdrant_client.query_points.call_args.kwargs
+    prefetch = call_kwargs["prefetch"]
+    q_filter = prefetch[0].filter
+    field_conds = {c.key: c.match for c in q_filter.must}
+
+    # Verify that default chunk_types filters out 'evaluation' chunks
+    assert "chunk_type" in field_conds
+    assert set(field_conds["chunk_type"].any) == {"title", "problem", "solution"}
+    assert "evaluation" not in field_conds["chunk_type"].any
 
 
 async def test_search_suggestions_wraps_error(
@@ -439,9 +501,11 @@ async def test_search_regulatory_documents_filters_exclusion_and_parent_content(
     assert hit.score == 0.028
     assert hit.parent_id == "reg-parent-001"
     assert hit.chunk.parent_content == "| پله مصرف | تعرفه ریال |\n| ۰ تا ۱۰۰ | ۱۵۰۰ |"
-    assert hit.chunk.metadata.document_type == RegulatoryDocumentType.REGULATION
-    assert hit.chunk.metadata.authority_level == AuthorityLevel.BINDING
-    assert hit.chunk.metadata.is_binding is True
+    reg_meta = hit.chunk.metadata
+    assert isinstance(reg_meta, RegulatoryChunkMetadata)
+    assert reg_meta.document_type == RegulatoryDocumentType.REGULATION
+    assert reg_meta.authority_level == AuthorityLevel.BINDING
+    assert reg_meta.is_binding is True
 
 
 async def test_search_regulatory_documents_wraps_error(
@@ -453,6 +517,20 @@ async def test_search_regulatory_documents_wraps_error(
             dense_vector=[0.01] * 768,
             sparse_vector=SparseVector(indices=[1], values=[1.0]),
         )
+
+
+async def test_suggestion_repository_payload_schema_definitions(
+    suggestion_repo: QdrantSuggestionRepository,
+):
+    indexes = suggestion_repo._get_payload_schema_definitions()
+    assert indexes["parent_id"] == models.PayloadSchemaType.KEYWORD
+    assert indexes["chunk_status"] == models.PayloadSchemaType.KEYWORD
+    assert indexes["chunk_type"] == models.PayloadSchemaType.KEYWORD
+    assert indexes["status"] == models.PayloadSchemaType.KEYWORD
+    assert indexes["committee_scrutiny"] == models.PayloadSchemaType.KEYWORD
+    assert indexes["committee_scrutiny_id"] == models.PayloadSchemaType.INTEGER
+    assert indexes["secretariat_scrutiny"] == models.PayloadSchemaType.KEYWORD
+    assert indexes["secretariat_scrutiny_id"] == models.PayloadSchemaType.INTEGER
 
 
 # endregion

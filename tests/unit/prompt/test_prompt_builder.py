@@ -1,8 +1,10 @@
-from src.domain.entities import GenerationChunk, HistoryMessage
-from src.domain.enums import HistoryRole
 from src.application.context.sections import PromptSection
+from src.application.context.sections.prompt_section import PromptSection
 from src.application.context.sections.role_section import RoleSection
 from src.application.prompt.prompt_builder import PromptBuilder
+
+from src.domain.entities import Chunk, GenerationChunk, HistoryMessage
+from src.domain.enums import HistoryRole
 
 
 class RegulationSection(PromptSection):
@@ -57,6 +59,9 @@ def test_typed_setters_configure_default_sections():
     builder.set_role("You are an assistant.")
     builder.set_history([HistoryMessage(role=HistoryRole.USER, content="Hello")])
     builder.set_chunks([GenerationChunk(chunk_id="1", content="chunk content")])
+    builder.set_chunks(
+        [Chunk(chunk_id="1", parent_id="p1", content="chunk content", metadata={})]
+    )
     builder.set_system_input("system input")
     builder.set_output_format("Markdown")
 
@@ -86,8 +91,13 @@ def test_typed_setters_replace_in_place_keeping_order():
         "OUTPUT-FORMAT",
         "REGULATION",
     ]
-    assert builder.get_section("ROLE").body() == "second role"
-    assert builder.get_section("REGULATION").body() == "content two"
+    role_sec = builder.get_section("ROLE")
+    assert role_sec is not None
+    assert role_sec.body() == "second role"
+
+    reg_sec = builder.get_section("REGULATION")
+    assert reg_sec is not None
+    assert reg_sec.body() == "content two"
 
 
 def test_set_section_rejects_non_section_value():
@@ -104,7 +114,9 @@ def test_set_section_accepts_custom_section_instance():
     builder = PromptBuilder()
     builder.set_section("REGULATION", RegulationSection())
 
-    assert builder.get_section("REGULATION").body() == "Relevant regulations."
+    sec = builder.get_section("REGULATION")
+    assert sec is not None
+    assert sec.body() == "Relevant regulations."
     assert "Relevant regulations." in builder.render()
 
 
@@ -157,7 +169,9 @@ def test_custom_sections_coexist_with_defaults():
     builder.set_section("INSTRUCTIONS", InstructionsSection("Be concise."))
 
     rendered = builder.render()
-    assert rendered.index("You are a legal analyst.") < rendered.index("Regulation 1 content")
+    assert rendered.index("You are a legal analyst.") < rendered.index(
+        "Regulation 1 content"
+    )
     assert rendered.index("Regulation 1 content") < rendered.index("Be concise.")
 
 
@@ -179,7 +193,9 @@ def test_assemble_joins_rendered_content_in_registration_order():
     builder.add_section(RegulationSection())
     builder.add_section(InstructionsSection("Be concise."))
 
-    prompt = builder.assemble({"REGULATION": "[regulation]", "INSTRUCTIONS": "[instructions]"})
+    prompt = builder.assemble(
+        {"REGULATION": "[regulation]", "INSTRUCTIONS": "[instructions]"}
+    )
     assert prompt == "[regulation]\n\n[instructions]"
 
 
@@ -188,7 +204,9 @@ def test_assemble_ignores_mapping_ordering():
     builder.add_section(RegulationSection())
     builder.add_section(InstructionsSection("Be concise."))
 
-    prompt = builder.assemble({"INSTRUCTIONS": "[instructions]", "REGULATION": "[regulation]"})
+    prompt = builder.assemble(
+        {"INSTRUCTIONS": "[instructions]", "REGULATION": "[regulation]"}
+    )
     assert prompt == "[regulation]\n\n[instructions]"
 
 

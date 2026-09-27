@@ -1,0 +1,1068 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Tavanir AI Assistant V2",
+    "description": "Enterprise RAG & Suggestion Committee Assistant Service (MOCK MODE)",
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/api/v1/suggestions/analyze": {
+      "post": {
+        "tags": [
+          "v1",
+          "Suggestions"
+        ],
+        "summary": "Analyze an incoming employee suggestion against historical suggestions",
+        "description": "Synchronously executes Tri-Track hybrid Qdrant retrieval, candidate deduplication, cross-encoder reranking, Max-Passage pooling, and PostgreSQL hydration to return partitioned similar suggestion IDs.",
+        "operationId": "analyze_suggestion_api_v1_suggestions_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeSuggestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_AnalyzeSuggestionDataResponse_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API Key"
+          },
+          "422": {
+            "description": "Validation error or domain rule violation"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/api/v1/suggestions/ingest": {
+      "post": {
+        "tags": [
+          "v1",
+          "Suggestions"
+        ],
+        "summary": "Ingest a historical or newly submitted employee suggestion",
+        "description": "Synchronously normalizes, chunks, embeds, and stores the suggestion in PostgreSQL and Qdrant vector store.",
+        "operationId": "ingest_suggestion_api_v1_suggestions_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestSuggestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_IngestSuggestionDataResponse_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API Key"
+          },
+          "422": {
+            "description": "Validation error or domain rule violation"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/api/v1/suggestions/{suggestionId}": {
+      "put": {
+        "tags": [
+          "v1",
+          "Suggestions"
+        ],
+        "summary": "Full replacement update for an employee suggestion",
+        "description": "Synchronously replaces all core fields of an existing suggestion or restores a soft-deleted suggestion with two-phase concurrency control.",
+        "operationId": "update_suggestion_api_v1_suggestions__suggestionId__put",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "suggestionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Unique suggestion identifier",
+              "title": "Suggestionid"
+            },
+            "description": "Unique suggestion identifier"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSuggestionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_UpdateSuggestionDataResponse_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API Key"
+          },
+          "422": {
+            "description": "Validation error or domain rule violation"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "v1",
+          "Suggestions"
+        ],
+        "summary": "Partial update for an employee suggestion",
+        "description": "Synchronously overlays non-null fields onto an active suggestion with two-phase concurrency control. Soft-deleted suggestions cannot be patched.",
+        "operationId": "patch_suggestion_api_v1_suggestions__suggestionId__patch",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "suggestionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Unique suggestion identifier",
+              "title": "Suggestionid"
+            },
+            "description": "Unique suggestion identifier"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchSuggestionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_UpdateSuggestionDataResponse_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API Key"
+          },
+          "422": {
+            "description": "Validation error or domain rule violation"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "v1",
+          "Suggestions"
+        ],
+        "summary": "Soft delete a suggestion and purge its vector chunks",
+        "description": "Guards against race conditions via advisory locking, sets is_deleted=True in PostgreSQL, and physically purges vector chunks from Qdrant.",
+        "operationId": "delete_suggestion_api_v1_suggestions__suggestionId__delete",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "suggestionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Unique suggestion identifier",
+              "title": "Suggestionid"
+            },
+            "description": "Unique suggestion identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_DeleteSuggestionDataResponse_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API Key"
+          },
+          "422": {
+            "description": "Validation error or domain rule violation"
+          }
+        }
+      }
+    },
+    "/api/v1/suggestions/bulk-delete": {
+      "post": {
+        "tags": [
+          "v1",
+          "Suggestions"
+        ],
+        "summary": "Bulk soft-delete suggestions",
+        "description": "Sequentially soft-deletes up to 100 suggestions with per-item error isolation. Returns 200 OK if all succeed, 207 Multi-Status on partial success, or 400 Bad Request if all fail.",
+        "operationId": "bulk_delete_suggestions_api_v1_suggestions_bulk_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API Key"
+          },
+          "422": {
+            "description": "Validation error or domain rule violation"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/api/v1/mock/reset": {
+      "post": {
+        "tags": [
+          "Mock Administration"
+        ],
+        "summary": "Reset in-memory mock repository to initial seed state",
+        "description": "Clears all mutated suggestion data and repopulates the store with baseline realistic Persian suggestions.",
+        "operationId": "reset_mock_state_api_v1_mock_reset_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_MockResetResponseData_"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/": {
+      "get": {
+        "tags": [
+          "Root"
+        ],
+        "summary": "Root",
+        "description": "Root metadata endpoint.",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Health",
+        "description": "Health check endpoint verifying service liveness.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalyzeSuggestionDataResponse": {
+        "properties": {
+          "analysis": {
+            "type": "string",
+            "title": "Analysis",
+            "description": "Markdown analysis and decision-support summary text"
+          },
+          "similarExecutedIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Similarexecutedids",
+            "description": "IDs of historical executed suggestions matching the suggestion"
+          },
+          "similarApprovedIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Similarapprovedids",
+            "description": "IDs of historical approved suggestions matching the suggestion"
+          },
+          "similarPendingIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Similarpendingids",
+            "description": "IDs of ongoing pending suggestions matching the suggestion"
+          },
+          "similarRejectedIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Similarrejectedids",
+            "description": "IDs of historical rejected suggestions matching the suggestion"
+          },
+          "similarNotAcceptedIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Similarnotacceptedids",
+            "description": "IDs of historical not-accepted suggestions matching the suggestion"
+          },
+          "appliedStatuteIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Appliedstatuteids",
+            "description": "IDs of applicable statutory documents and regulatory articles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "analysis"
+        ],
+        "title": "AnalyzeSuggestionDataResponse",
+        "description": "Response payload for suggestion analysis containing provenance IDs across all 5 status partitions\nconforming to 03_Naming_And_Data_Exchange.md."
+      },
+      "AnalyzeSuggestionRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 5,
+            "title": "Title",
+            "description": "Title of the suggestion under evaluation"
+          },
+          "currentProblem": {
+            "type": "string",
+            "minLength": 5,
+            "title": "Currentproblem",
+            "description": "Description of the organizational problem or gap"
+          },
+          "solution": {
+            "type": "string",
+            "minLength": 5,
+            "title": "Solution",
+            "description": "Proposed engineering, operational, or software method"
+          },
+          "contextTitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contexttitle",
+            "description": "Organizational department or technical context"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "currentProblem",
+          "solution"
+        ],
+        "title": "AnalyzeSuggestionRequest",
+        "description": "Inbound request schema for suggestion analysis (ADR-002, 03_Naming_And_Data_Exchange.md).\nAccepts camelCase fields from API clients while binding to internal Python fields."
+      },
+      "BulkDeleteRequest": {
+        "properties": {
+          "suggestionIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Suggestionids",
+            "description": "Bounded list of unique suggestion IDs to delete (1-100 items)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "suggestionIds"
+        ],
+        "title": "BulkDeleteRequest",
+        "description": "Inbound request schema for bulk soft deletion (POST /api/v1/suggestions/bulk-delete).\nStrictly bounded to 1-100 items; duplicates are rejected."
+      },
+      "DeleteSuggestionDataResponse": {
+        "properties": {
+          "suggestionId": {
+            "type": "string",
+            "title": "Suggestionid",
+            "description": "Business identifier of the soft-deleted suggestion"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Deletion status",
+            "default": "DELETED"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suggestionId"
+        ],
+        "title": "DeleteSuggestionDataResponse",
+        "description": "Payload data model for successful single suggestion soft deletion."
+      },
+      "IngestSuggestionDataResponse": {
+        "properties": {
+          "suggestionId": {
+            "type": "string",
+            "title": "Suggestionid",
+            "description": "Business identifier of the persisted suggestion"
+          },
+          "chunksCount": {
+            "type": "integer",
+            "title": "Chunkscount",
+            "description": "Number of discrete vector chunks indexed into Qdrant"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Ingestion processing status",
+            "default": "CREATED"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suggestionId",
+          "chunksCount"
+        ],
+        "title": "IngestSuggestionDataResponse",
+        "description": "Payload data model for successful suggestion ingestion."
+      },
+      "IngestSuggestionRequest": {
+        "properties": {
+          "suggestionId": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Suggestionid",
+            "description": "Unique business identifier of the suggestion"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title",
+            "description": "Title of the suggestion"
+          },
+          "problem": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Problem",
+            "description": "Description of the organizational problem/gap"
+          },
+          "solution": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Solution",
+            "description": "Proposed solution or improvement"
+          },
+          "status": {
+            "title": "Status",
+            "description": "Evaluation status (Persian string e.g. 'مصوب', ID int, or enum name)"
+          },
+          "committeeScrutiny": {
+            "title": "Committeescrutiny",
+            "description": "Expert committee review/scrutiny (Persian title, code int, or string)"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Final resolution or execution commentary"
+          },
+          "shamsiDate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shamsidate",
+            "description": "Submission or evaluation date in Shamsi format (YYYY/MM/DD)"
+          },
+          "contextTitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contexttitle",
+            "description": "Organizational department or domain context"
+          },
+          "secretariatScrutiny": {
+            "title": "Secretariatscrutiny",
+            "description": "Secretariat primary scrutiny (Persian title, code int, or string)"
+          },
+          "secretariatComment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secretariatcomment",
+            "description": "Secretariat review rationale or commentary"
+          },
+          "tributaryScrutiny": {
+            "title": "Tributaryscrutiny",
+            "description": "Legacy alias for secretariat scrutiny"
+          },
+          "tributaryComment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tributarycomment",
+            "description": "Legacy alias for secretariat commentary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "suggestionId",
+          "title",
+          "problem",
+          "solution",
+          "status"
+        ],
+        "title": "IngestSuggestionRequest",
+        "description": "Inbound request schema for single suggestion ingestion.\nAccepts camelCase fields from API clients while binding to snake_case internally\nvia BaseRequestModel's alias_generator=to_camel and populate_by_name=True."
+      },
+      "MockResetResponseData": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Confirmation message"
+          },
+          "seededItems": {
+            "type": "integer",
+            "title": "Seededitems",
+            "description": "Total items seeded in memory"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "seededItems"
+        ],
+        "title": "MockResetResponseData"
+      },
+      "PatchSuggestionRequest": {
+        "properties": {
+          "suggestionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestionid",
+            "description": "Immutable identifier; must not be supplied in PATCH body."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Updated title of the suggestion"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem",
+            "description": "Updated description of the organizational problem/gap"
+          },
+          "solution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solution",
+            "description": "Updated proposed solution or improvement"
+          },
+          "status": {
+            "title": "Status",
+            "description": "Evaluation status (Persian string e.g. 'مصوب', ID int, or enum name)"
+          },
+          "committeeScrutiny": {
+            "title": "Committeescrutiny",
+            "description": "Expert committee review/scrutiny (Persian title, code int, or string)"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Final resolution or execution commentary"
+          },
+          "shamsiDate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shamsidate",
+            "description": "Submission or evaluation date in Shamsi format (YYYY/MM/DD)"
+          },
+          "contextTitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contexttitle",
+            "description": "Organizational department or domain context"
+          },
+          "secretariatScrutiny": {
+            "title": "Secretariatscrutiny",
+            "description": "Secretariat primary scrutiny (Persian title, code int, or string)"
+          },
+          "secretariatComment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secretariatcomment",
+            "description": "Secretariat review rationale or commentary"
+          },
+          "tributaryScrutiny": {
+            "title": "Tributaryscrutiny",
+            "description": "Legacy alias for secretariat scrutiny"
+          },
+          "tributaryComment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tributarycomment",
+            "description": "Legacy alias for secretariat commentary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PatchSuggestionRequest",
+        "description": "Inbound request schema for partial update (PATCH /api/v1/suggestions/{suggestionId}).\nAll fields are optional; omitted or null fields are ignored (treated as unchanged).\nMust contain at least one non-null field. Reject if suggestionId is in body."
+      },
+      "SuccessResponse_AnalyzeSuggestionDataResponse_": {
+        "properties": {
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "HTTP status code.",
+            "default": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/AnalyzeSuggestionDataResponse",
+            "description": "Response payload data."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[AnalyzeSuggestionDataResponse]"
+      },
+      "SuccessResponse_DeleteSuggestionDataResponse_": {
+        "properties": {
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "HTTP status code.",
+            "default": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/DeleteSuggestionDataResponse",
+            "description": "Response payload data."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[DeleteSuggestionDataResponse]"
+      },
+      "SuccessResponse_IngestSuggestionDataResponse_": {
+        "properties": {
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "HTTP status code.",
+            "default": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/IngestSuggestionDataResponse",
+            "description": "Response payload data."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[IngestSuggestionDataResponse]"
+      },
+      "SuccessResponse_MockResetResponseData_": {
+        "properties": {
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "HTTP status code.",
+            "default": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/MockResetResponseData",
+            "description": "Response payload data."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[MockResetResponseData]"
+      },
+      "SuccessResponse_UpdateSuggestionDataResponse_": {
+        "properties": {
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "HTTP status code.",
+            "default": 200
+          },
+          "data": {
+            "$ref": "#/components/schemas/UpdateSuggestionDataResponse",
+            "description": "Response payload data."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[UpdateSuggestionDataResponse]"
+      },
+      "UpdateSuggestionDataResponse": {
+        "properties": {
+          "suggestionId": {
+            "type": "string",
+            "title": "Suggestionid",
+            "description": "Business identifier of the updated suggestion"
+          },
+          "chunksCount": {
+            "type": "integer",
+            "title": "Chunkscount",
+            "description": "Number of discrete vector chunks indexed into Qdrant"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Updated optimistic concurrency version number"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Mutation status",
+            "default": "UPDATED"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suggestionId",
+          "chunksCount",
+          "version"
+        ],
+        "title": "UpdateSuggestionDataResponse",
+        "description": "Payload data model for successful suggestion update or patch."
+      },
+      "UpdateSuggestionRequest": {
+        "properties": {
+          "suggestionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestionid",
+            "description": "Optional ID in body. If provided, must match the URL path parameter exactly."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title",
+            "description": "Updated title of the suggestion"
+          },
+          "problem": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Problem",
+            "description": "Updated description of the organizational problem/gap"
+          },
+          "solution": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Solution",
+            "description": "Updated proposed solution or improvement"
+          },
+          "status": {
+            "title": "Status",
+            "description": "Evaluation status (Persian string e.g. 'مصوب', ID int, or enum name)"
+          },
+          "committeeScrutiny": {
+            "title": "Committeescrutiny",
+            "description": "Expert committee review/scrutiny (Persian title, code int, or string)"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Final resolution or execution commentary"
+          },
+          "shamsiDate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shamsidate",
+            "description": "Submission or evaluation date in Shamsi format (YYYY/MM/DD)"
+          },
+          "contextTitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contexttitle",
+            "description": "Organizational department or domain context"
+          },
+          "secretariatScrutiny": {
+            "title": "Secretariatscrutiny",
+            "description": "Secretariat primary scrutiny (Persian title, code int, or string)"
+          },
+          "secretariatComment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secretariatcomment",
+            "description": "Secretariat review rationale or commentary"
+          },
+          "tributaryScrutiny": {
+            "title": "Tributaryscrutiny",
+            "description": "Legacy alias for secretariat scrutiny"
+          },
+          "tributaryComment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tributarycomment",
+            "description": "Legacy alias for secretariat commentary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "problem",
+          "solution",
+          "status"
+        ],
+        "title": "UpdateSuggestionRequest",
+        "description": "Inbound request schema for full replacement update (PUT /api/v1/suggestions/{suggestionId}).\nAll core fields (title, problem, solution, status) are mandatory."
+      }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    }
+  }
+}

@@ -26,6 +26,7 @@ class CoreSettings(BaseSettings):
     model_config = _base_config
     STATIC_DIRECTORY: str = str(_find_static_directory())
     STORAGE_BACKEND: str = "local"  # "s3" or "local"
+    IS_MOCK: bool = False
 
 
 class LLMSettings(BaseSettings):

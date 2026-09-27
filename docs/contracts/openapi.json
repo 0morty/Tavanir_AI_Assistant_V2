@@ -36,11 +36,65 @@
               }
             }
           },
+          "400": {
+            "description": "Bad Request - Malformed syntax, invalid parameters, or payload violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
-            "description": "Missing or invalid API Key"
+            "description": "Missing or invalid API Key in header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Target resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Resource already exists or concurrent edit collision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
-            "description": "Validation error or domain rule violation"
+            "description": "Validation error or domain business rule violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -80,11 +134,65 @@
               }
             }
           },
+          "400": {
+            "description": "Bad Request - Malformed syntax, invalid parameters, or payload violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
-            "description": "Missing or invalid API Key"
+            "description": "Missing or invalid API Key in header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Target resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Resource already exists or concurrent edit collision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
-            "description": "Validation error or domain rule violation"
+            "description": "Validation error or domain business rule violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -143,11 +251,65 @@
               }
             }
           },
+          "400": {
+            "description": "Bad Request - Malformed syntax, invalid parameters, or payload violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
-            "description": "Missing or invalid API Key"
+            "description": "Missing or invalid API Key in header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Target resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Resource already exists or concurrent edit collision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
-            "description": "Validation error or domain rule violation"
+            "description": "Validation error or domain business rule violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -199,11 +361,65 @@
               }
             }
           },
+          "400": {
+            "description": "Bad Request - Malformed syntax, invalid parameters, or payload violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
-            "description": "Missing or invalid API Key"
+            "description": "Missing or invalid API Key in header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Target resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Resource already exists or concurrent edit collision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
-            "description": "Validation error or domain rule violation"
+            "description": "Validation error or domain business rule violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -245,11 +461,65 @@
               }
             }
           },
+          "400": {
+            "description": "Bad Request - Malformed syntax, invalid parameters, or payload violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
-            "description": "Missing or invalid API Key"
+            "description": "Missing or invalid API Key in header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Target resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Resource already exists or concurrent edit collision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
-            "description": "Validation error or domain rule violation"
+            "description": "Validation error or domain business rule violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -275,18 +545,84 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "All requested suggestions were successfully soft-deleted.",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_list_DeleteSuggestionDataResponse__"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "All requested items failed to delete or input list violated constraints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
           "401": {
-            "description": "Missing or invalid API Key"
+            "description": "Missing or invalid API Key in header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Target resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Resource already exists or concurrent edit collision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
-            "description": "Validation error or domain rule violation"
+            "description": "Validation error or domain business rule violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Partial success: some suggestions were deleted while others failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartialSuccessResponse_DeleteSuggestionDataResponse_"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -311,6 +647,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessResponse_MockResetResponseData_"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Malformed syntax, invalid parameters, or payload violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API Key in header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Target resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Resource already exists or concurrent edit collision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error or domain business rule violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -493,6 +889,45 @@
         "title": "BulkDeleteRequest",
         "description": "Inbound request schema for bulk soft deletion (POST /api/v1/suggestions/bulk-delete).\nStrictly bounded to 1-100 items; duplicates are rejected."
       },
+      "DebugInfo": {
+        "properties": {
+          "exception": {
+            "type": "string",
+            "title": "Exception",
+            "description": "Exception class name."
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause",
+            "description": "Underlying root cause message."
+          },
+          "stackTrace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stacktrace",
+            "description": "Formatted Python stack trace."
+          }
+        },
+        "type": "object",
+        "required": [
+          "exception"
+        ],
+        "title": "DebugInfo",
+        "description": "Detailed exception metadata for development/staging diagnostics. Omitted in production."
+      },
       "DeleteSuggestionDataResponse": {
         "properties": {
           "suggestionId": {
@@ -513,6 +948,82 @@
         ],
         "title": "DeleteSuggestionDataResponse",
         "description": "Payload data model for successful single suggestion soft deletion."
+      },
+      "ErrorItem": {
+        "properties": {
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "HTTP status code corresponding to this error."
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Authoritative machine-readable error code in SCREAMING_SNAKE_CASE."
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source coordinate pointing to the offending field. Omitted for single internal errors."
+          },
+          "debug": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DebugInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Debug details, present only in non-production environments."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "code"
+        ],
+        "title": "ErrorItem",
+        "description": "Represents a single discrete error adhering to JSON:API specification."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorItem"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "List of errors associated with the request failure."
+          }
+        },
+        "type": "object",
+        "required": [
+          "errors"
+        ],
+        "title": "ErrorResponse",
+        "description": "The canonical top-level JSON:API error envelope."
+      },
+      "ErrorSource": {
+        "properties": {
+          "pointer": {
+            "type": "string",
+            "title": "Pointer",
+            "description": "RFC 6901 JSON pointer to the offending field or resource (e.g., '/data/title')."
+          }
+        },
+        "type": "object",
+        "required": [
+          "pointer"
+        ],
+        "title": "ErrorSource",
+        "description": "Identifies the exact location of the error in the request payload, headers, or parameters."
       },
       "IngestSuggestionDataResponse": {
         "properties": {
@@ -675,6 +1186,34 @@
           "seededItems"
         ],
         "title": "MockResetResponseData"
+      },
+      "PartialSuccessResponse_DeleteSuggestionDataResponse_": {
+        "properties": {
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "HTTP status code (207 Multi-Status).",
+            "default": 207
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DeleteSuggestionDataResponse"
+            },
+            "type": "array",
+            "title": "Data",
+            "description": "List of successfully processed items."
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorItem"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "List of discrete errors for failed items."
+          }
+        },
+        "type": "object",
+        "title": "PartialSuccessResponse[DeleteSuggestionDataResponse]"
       },
       "PatchSuggestionRequest": {
         "properties": {
@@ -902,6 +1441,29 @@
           "data"
         ],
         "title": "SuccessResponse[UpdateSuggestionDataResponse]"
+      },
+      "SuccessResponse_list_DeleteSuggestionDataResponse__": {
+        "properties": {
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "description": "HTTP status code.",
+            "default": 200
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DeleteSuggestionDataResponse"
+            },
+            "type": "array",
+            "title": "Data",
+            "description": "Response payload data."
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[list[DeleteSuggestionDataResponse]]"
       },
       "UpdateSuggestionDataResponse": {
         "properties": {

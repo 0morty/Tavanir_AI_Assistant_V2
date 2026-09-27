@@ -192,6 +192,20 @@ async def delete_suggestion(
         "Returns 200 OK if all succeed, 207 Multi-Status on partial success, "
         "or 400 Bad Request if all fail."
     ),
+    responses={
+        status.HTTP_200_OK: {
+            "model": SuccessResponse[list[DeleteSuggestionDataResponse]],
+            "description": "All requested suggestions were successfully soft-deleted.",
+        },
+        status.HTTP_207_MULTI_STATUS: {
+            "model": PartialSuccessResponse[DeleteSuggestionDataResponse],
+            "description": "Partial success: some suggestions were deleted while others failed.",
+        },
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ErrorResponse,
+            "description": "All requested items failed to delete or input list violated constraints.",
+        },
+    },
 )
 @inject
 async def bulk_delete_suggestions(

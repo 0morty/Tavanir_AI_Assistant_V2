@@ -2,12 +2,14 @@ from fastapi import APIRouter, Depends, Request, status
 from pydantic import Field
 from src.presentation.schemas.responses import BaseResponseModel, SuccessResponse
 
+from src.presentation.routers.router import COMMON_ERROR_RESPONSES
 from src.presentation.security import get_api_key
 
 router = APIRouter(
     prefix="/mock",
     tags=["Mock Administration"],
     dependencies=[Depends(get_api_key)],
+    responses=COMMON_ERROR_RESPONSES,
 )
 
 

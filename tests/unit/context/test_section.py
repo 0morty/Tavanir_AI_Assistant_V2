@@ -276,7 +276,8 @@ def test_prompt_builder_behavior_remains_intact():
         "OUTPUT-FORMAT",
     ]
     assert rendered.startswith("You are an assistant.")
-    assert "Chunk 1:" in rendered
+    assert "Unique ID: [chunk 001]" in rendered
+    assert "Chunk 1:" not in rendered
     assert "Markdown" in rendered
 
 

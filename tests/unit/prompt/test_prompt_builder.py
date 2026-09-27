@@ -69,7 +69,8 @@ def test_typed_setters_configure_default_sections():
 
     assert "You are an assistant." in rendered
     assert "user: Hello" in rendered
-    assert "Chunk 1:" in rendered
+    assert "Unique ID: [chunk 001]" in rendered
+    assert "Chunk 1:" not in rendered
     assert "system input" in rendered
     assert "Markdown" in rendered
     assert rendered.startswith("You are an assistant.")

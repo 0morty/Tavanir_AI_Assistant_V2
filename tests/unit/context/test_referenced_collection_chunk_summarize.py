@@ -34,7 +34,7 @@ def test_chunks_section_uses_injected_chunk_summarizer():
     result = section.summarize(section.prepare(), CAPACITY)
     assert [item.content for item in result.items] == ["summary-1", "summary-2"]
     assert summarizer.calls == [
-        (["Relevant context chunks:\n\nChunk 1:\none", "Relevant context chunks:\n\nChunk 2:\ntwo"], CAPACITY)
+        (["Relevant context chunks:\n\nUnique ID: [chunk 001]\n\none", "Relevant context chunks:\n\nUnique ID: [chunk 002]\n\ntwo"], CAPACITY)
     ]
 
 

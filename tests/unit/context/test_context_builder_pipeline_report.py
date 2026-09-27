@@ -89,11 +89,11 @@ class RecordingSummarizer(ITextSummarizer):
     def summarize_chunks(self, chunks: list[str], *, capacity_tokens: int) -> list[str]:
         results = []
         for chunk in chunks:
-            match = re.search(r"Chunk (\d+):", chunk)
+            match = re.search(r"Unique ID: \[chunk ([0-9]{3})\]", chunk)
             if match is None:
-                raise ValueError("A prepared chunk lost its numbered marker")
+                raise ValueError("A prepared chunk lost its citation marker")
             number = int(match.group(1))
-            results.append(f"Chunk {number}: {self.CHUNK_SUMMARIES[number]}")
+            results.append(self.CHUNK_SUMMARIES[number])
         self.chunk_calls.append((tuple(chunks), capacity_tokens, tuple(results)))
         return results
 
@@ -254,7 +254,7 @@ def test_context_builder_complete_pipeline_with_execution_report(tmp_path):
     context_builder = ContextBuilder(
         tokenizer=tokenizer, capacity_allocator=allocator, dispatcher=dispatcher
     )
-    budget = 1200
+    budget = 1400
     failures = []
     checks_run = 0
     passed_checks = 0
@@ -489,7 +489,7 @@ def test_context_builder_complete_pipeline_with_execution_report(tmp_path):
         if summarizer.chunk_calls:
             inputs, target, summaries = summarizer.chunk_calls[0]
             check(inputs == snapshots["CHUNKS"].item_inputs and len(inputs) == len(chunks)
-                  and all(f"Chunk {i}:" in item and "Source:" in item
+                  and all(f"Unique ID: [chunk {i:03d}]" in item and "Source:" in item
                           and "Relevant context chunks:" in item
                           and "Keep each source distinct" in item
                           for i, item in enumerate(inputs, 1))

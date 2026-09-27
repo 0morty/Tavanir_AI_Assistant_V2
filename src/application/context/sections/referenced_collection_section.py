@@ -75,6 +75,10 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
             else content
         )
 
+    def _item_body_at(self, item: Any, index: int) -> str:
+        """Allow sections with position-based metadata to render each item."""
+        return self._item_body(item)
+
     def _render_bodies(self, bodies: Sequence[str]) -> str:
         joined = self.item_separator.join(body for body in bodies if body.strip())
         return self._compose(self._with_section_reference(joined))
@@ -82,18 +86,24 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
     def append_references(self) -> str:
         """Return the joined item bodies with each item's reference injected."""
         return self.item_separator.join(
-            body for item in self._items if (body := self._item_body(item)).strip()
+            body
+            for index, item in enumerate(self._items)
+            if (body := self._item_body_at(item, index)).strip()
         )
 
     def body(self) -> str:
         return self.append_references()
 
     def render(self) -> str:
-        return self._render_bodies(tuple(self._item_body(item) for item in self._items))
+        return self._render_bodies(
+            tuple(self._item_body_at(item, index) for index, item in enumerate(self._items))
+        )
 
     def prepare(self) -> SectionProcessingResult:
         """Inject references once, then prepare aggregate and per-item inputs."""
-        bodies = tuple(self._item_body(item) for item in self._items)
+        bodies = tuple(
+            self._item_body_at(item, index) for index, item in enumerate(self._items)
+        )
         return SectionProcessingResult(
             content=self._render_bodies(bodies),
             items=self._items,

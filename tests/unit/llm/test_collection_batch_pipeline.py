@@ -86,7 +86,7 @@ class CollectionBatchPipelineTests(unittest.TestCase):
                 DemandAllocator(), RedistributionAllocator()
             ),
             dispatcher=OverflowStrategyDispatcher(),
-        ).build(builder, max_tokens=75)
+        ).build(builder, max_tokens=150)
 
         self.assertEqual([item.content for item in result.sections[0].items], [
             "first summary", "second summary"
@@ -161,13 +161,13 @@ class CollectionBatchPipelineTests(unittest.TestCase):
             dispatcher=OverflowStrategyDispatcher(),
         ).build(
             builder,
-            max_tokens=len("Relevant context chunks:\n\nChunk 1:\none"),
+            max_tokens=len("Relevant context chunks:\n\nUnique ID: [chunk 001]\n\none"),
         )
 
         self.assertEqual(result.sections[0].items, (originals[0],))
         self.assertEqual(
             result.sections[0].content,
-            "Relevant context chunks:\n\nChunk 1:\none",
+            "Relevant context chunks:\n\nUnique ID: [chunk 001]\n\none",
         )
         self.assertEqual(len(section.items), 2)
 

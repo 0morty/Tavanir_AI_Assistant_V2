@@ -9,9 +9,10 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory, gettempdir
-from typing import get_type_hints
+from typing import ClassVar, get_type_hints
 
 from src.application.context import ContextBuilder, OverflowStrategyDispatcher
+from src.application.exceptions import LLMAPIError
 from src.application.context.allocation import (
     CapacityAllocator,
     DemandAllocator,
@@ -143,6 +144,34 @@ def _context_builder() -> ContextBuilder:
 
 
 class LLMReferenceGeneratorSchemaTest(unittest.TestCase):
+    def test_inherited_annotation_schema_excludes_unavailable_values(self) -> None:
+        class ParentReference(Reference):
+            title: str
+            category: ClassVar[str] = "source"
+
+            @property
+            def description(self) -> str:
+                return "An annotated source."
+
+        class ChildReference(ParentReference):
+            page: int
+            note: str | None
+
+            def __init__(self) -> None:
+                self.title = "Relay Maintenance Log"
+                self.page = 42
+                self.note = None
+
+        reference = ChildReference()
+        self.assertEqual(
+            reference.details.properties,
+            (("title", "str"), ("page", "int")),
+        )
+        self.assertEqual(
+            reference.details.hash(),
+            DataclassMyReference("Relay Maintenance Log", 42).details.hash(),
+        )
+
     def test_generated_templates_match_reference_schemas(self) -> None:
         validator = TemplateValidator()
         cases = (
@@ -300,7 +329,12 @@ class LLMReferenceGeneratorSchemaTest(unittest.TestCase):
                     max_attempts=2,
                     max_tokens=4096,
                 )
-                generated_text = generator.generate(reference)
+                generated_error = None
+                try:
+                    generated_text = generator.generate(reference)
+                except LLMAPIError as error:
+                    generated_text = None
+                    generated_error = error
                 validator_result = validator.validate(raw_output.strip(), reference.details)
                 cached_template = cache.load(reference.details.hash())
                 sample_values = {name: getattr(reference, name) for name in names}
@@ -316,10 +350,12 @@ class LLMReferenceGeneratorSchemaTest(unittest.TestCase):
                 schema_pass = analysis["schema_compliant"] and actual_details == expected_types
                 overall_case_pass = (
                     (schema_pass and analysis["template_valid"] and semantic_valid and render_pass
-                     and validator_result.valid and len(provider.prompts) == 1
+                     and validator_result.valid and generated_error is None
+                     and len(provider.prompts) == 1
                      and cached_template == raw_output.strip())
                     if should_be_valid
-                    else not validator_result.valid
+                    else (not validator_result.valid and isinstance(generated_error, LLMAPIError)
+                          and cached_template is None and len(provider.prompts) == 2)
                 )
                 if not overall_case_pass:
                     failures.append(
@@ -365,24 +401,33 @@ class LLMReferenceGeneratorSchemaTest(unittest.TestCase):
                     f"Template cached: {cached_template is not None}",
                     "RENDER TEST",
                     f"Rendered result: {rendered if rendered is not None else 'not attempted; schema incomplete'}",
-                    f"Generator result: {generated_text}",
+                    f"Generator result: {generated_text if generated_error is None else 'controlled failure'}",
+                    f"Generator error: {generated_error if generated_error is not None else 'none'}",
                     f"Case result: {'PASS' if overall_case_pass else 'FAIL'}",
                     "",
                 ))
-                if should_be_valid and provider.prompts:
-                    prompt = provider.prompts[0]
-                    for name, type_name in expected_types:
-                        property_row = f"| {name} | {type_name} |"
-                        if property_row not in prompt:
-                            failures.append(f"{label}: LLM prompt omitted schema row {property_row!r}")
+                if provider.prompts:
+                    for prompt in provider.prompts:
+                        for name, type_name in expected_types:
+                            property_row = f"| {name} | {type_name} |"
+                            if property_row not in prompt:
+                                failures.append(
+                                    f"{label}: LLM prompt omitted schema row {property_row!r}"
+                                )
+                if not should_be_valid and len(provider.prompts) > 1:
+                    if validator_result.error_message() not in provider.prompts[1]:
+                        failures.append(
+                            f"{label}: retry prompt omitted validator feedback"
+                        )
 
         lines.extend((
             "=" * 72,
-            "IMPLEMENTATION FINDINGS",
+            "IMPLEMENTATION CHECKS",
             "=" * 72,
-            "ReferenceDetails.from_instance in src/domain/entities.py reads dataclass fields only; plain annotations produce an empty schema.",
-            "TemplateValidator.validate in src/application/reference/template_validator.py rejects unknown placeholders but does not require declared fields or any placeholder.",
-            "LLMBaseReferenceGenerator.generate accepts a Reference instance, not a class definition.",
+            f"Plain annotated Reference schema and generation: {'PASS' if plain_pass else 'FAIL'}",
+            "Dataclass and alternate-wording cases are evaluated separately above.",
+            "Invalid responses must raise a controlled LLM error and remain uncached.",
+            "LLMBaseReferenceGenerator.generate accepts a Reference instance.",
             "",
             "=" * 72,
             "FINAL RESULT",

@@ -2,15 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.application.exceptions import LLMAPIError
 from src.application.interfaces.i_context_builder import IContextBuilder
 from src.application.interfaces.i_llm_client import ILLMClient
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.application.interfaces.i_template_validator import ITemplateValidator
 from src.application.reference.reference_cache import ReferenceCache
-from src.application.reference.template_filler import (
-    fill_with_fallback,
-    substitute_placeholders,
-)
+from src.application.reference.template_filler import substitute_placeholders
 from src.domain.entities import Reference, ReferenceDetails
 
 _DEFAULT_ROLE = (
@@ -68,16 +66,16 @@ class LLMBaseReferenceGenerator(IReferenceGenerator):
     - invalid template -> retried, with the **exact** validator error included
       in the ERROR section of the next attempt's prompt so the LLM can fix the
       mistake;
-    - after ``max_attempts`` exhausted -> the template from the final attempt
-      is kept and filled tolerantly (``fill_with_fallback``), replacing
-      unavailable placeholders with an empty representation.
+    - after all attempts fail validation -> raise an LLM error, leaving the
+      cache unchanged rather than rendering a malformed template.
 
     Validated templates are persisted by ``cache`` (§17): the property-shape
     hash computed from :class:`ReferenceDetails` is the key, so a later
     Reference sharing the same property shape reuses the cached template and
-    skips the LLM entirely (§18 cache-resolution flow). Only templates that
-    passed validation are cached; a reference with no available properties
-    renders as ``""`` and never touches the cache.
+    skips the LLM entirely (§18 cache-resolution flow). Cached entries are
+    revalidated before use so an old invalid entry cannot be rendered. Only
+    templates that passed validation are cached; a reference with no available
+    properties renders as ``""`` and never touches the cache.
 
     Retry state (counter, error carry-over) lives only in this generator;
     ``ContextBuilder``/``PromptBuilder``/sections/``TemplateValidator`` are
@@ -120,32 +118,25 @@ class LLMBaseReferenceGenerator(IReferenceGenerator):
             return ""
         shape_hash = details.hash()
         template = self._cache.load(shape_hash)
-        valid = True
-        if template is None:
-            template, valid = self._resolve_template(details)
-            if valid:
-                self._cache.save(shape_hash, template)
-        if valid:
-            return substitute_placeholders(template, reference)
-        return fill_with_fallback(template, reference)
+        if template is None or not self._validator.validate(template, details).valid:
+            template = self._resolve_template(details)
+            self._cache.save(shape_hash, template)
+        return substitute_placeholders(template, reference)
 
-    def _resolve_template(self, details: ReferenceDetails) -> tuple[str, bool]:
-        """Run the generate-validate-retry loop.
-
-        Returns the accepted template with ``True``, or the template from the
-        final attempt with ``False`` when every attempt was invalid.
-        """
-        last_template = ""
+    def _resolve_template(self, details: ReferenceDetails) -> str:
+        """Return a validated template or fail after the configured attempts."""
         validation_message = ""
         for _ in range(self._max_attempts):
             prompt = self._build_prompt(details, validation_message)
             template = self._llm_client.complete(prompt).strip()
-            last_template = template
             result = self._validator.validate(template, details)
             if result.valid:
-                return template, True
+                return template
             validation_message = result.error_message()
-        return last_template, False
+        raise LLMAPIError(
+            "Reference template validation failed after "
+            f"{self._max_attempts} attempts: {validation_message}"
+        )
 
     def _build_prompt(self, details: ReferenceDetails, validation_message: str) -> str:
         error_content = ""

@@ -19,45 +19,56 @@ def extract_placeholders(template: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class TemplateValidationResult:
-    """Outcome of validating a template against a ``ReferenceDetails`` instance.
+    """Schema differences found in a candidate reference template.
 
-    ``missing`` holds the placeholders that refer to properties not available
-    in the validated ``ReferenceDetails``, sorted alphabetically. The
-    validator only *reports*; deciding whether to retry or fall back belongs to
-    the calling generation workflow.
+    Missing contains declared properties absent from the template in schema
+    order. Unknown contains placeholders absent from the schema, sorted
+    alphabetically. Repeated valid placeholders remain allowed.
     """
 
     valid: bool
     missing: tuple[str, ...] = ()
+    unknown: tuple[str, ...] = ()
 
     def error_message(self) -> str:
-        """Human-readable description of the failure, or ``""`` when valid.
-
-        This is the exact error text a generation workflow should feed back to
-        the LLM on a retry attempt, without rewriting or reformatting.
-        """
+        """Return corrective feedback for the next LLM attempt."""
         if self.valid:
             return ""
-        listed = ", ".join(self.missing)
-        return f"Template references unavailable properties: {listed}."
+        messages = []
+        if self.unknown:
+            messages.append(
+                "Template references unavailable properties: "
+                + ", ".join(self.unknown)
+                + "."
+            )
+        if self.missing:
+            messages.append(
+                "Template omits required properties: "
+                + ", ".join(self.missing)
+                + "."
+            )
+        return "\n".join(messages) if messages else "Template validation failed."
 
 
 class TemplateValidator(ITemplateValidator):
-    """Validate that every placeholder in a template refers to an available property.
+    """Require every available property and reject unknown placeholders.
 
-    The check is about property *existence* in the given
-    :class:`ReferenceDetails`. It never inspects property values: a property
-    whose value is ``None`` is still valid as long as it exists in
-    ``ReferenceDetails.properties``. A template with no placeholders
-    references nothing that could be missing and is therefore valid.
+    Validation uses the shape in ReferenceDetails rather than property values.
+    Repeating a valid placeholder is permitted by the existing contract.
     """
 
     def validate(
         self, template: str, details: ReferenceDetails
     ) -> TemplateValidationResult:
         placeholders = extract_placeholders(template)
+        detected = set(placeholders)
         available = {name for name, _ in details.properties}
         missing = tuple(
-            sorted(placeholder for placeholder in placeholders if placeholder not in available)
+            name for name, _ in details.properties if name not in detected
         )
-        return TemplateValidationResult(valid=not missing, missing=missing)
+        unknown = tuple(sorted(detected - available))
+        return TemplateValidationResult(
+            valid=not missing and not unknown,
+            missing=missing,
+            unknown=unknown,
+        )

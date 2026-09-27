@@ -5,6 +5,7 @@ from tempfile import mkdtemp
 from types import SimpleNamespace
 
 from src.application.context import ContextBuilder, OverflowStrategyDispatcher
+from src.application.exceptions import LLMAPIError
 from src.application.context.allocation import (
     CapacityAllocator,
     DemandAllocator,
@@ -163,7 +164,9 @@ def test_retry_includes_validator_error_in_next_prompt():
     assert len(client.prompts) == 2
 
     retry_prompt = client.prompts[1]
-    message = TemplateValidationResult(valid=False, missing=("writer",)).error_message()
+    message = TemplateValidationResult(
+        valid=False, missing=("author",), unknown=("writer",)
+    ).error_message()
     assert _PROMPTS.error_heading in retry_prompt
     assert message in retry_prompt
 
@@ -181,14 +184,13 @@ def test_multiple_retries_accumulate_latest_error():
     assert message in client.prompts[2]
 
 
-def test_invalid_after_final_attempt_uses_fallback_fill():
+def test_invalid_after_final_attempt_raises_controlled_error():
     template = "Written by [ghost], it is stated:"
-
     generator, client = make_generator(template, template, template)
 
-    text = generator.generate(PageReference())
+    with raises(LLMAPIError):
+        generator.generate(PageReference())
 
-    assert text == "Written by , it is stated:"
     assert len(client.prompts) == 3
 
 
@@ -197,10 +199,10 @@ def test_max_attempts_is_configurable():
 
     generator, client = make_generator(template, max_attempts=5)
 
-    text = generator.generate(PageReference())
+    with raises(LLMAPIError):
+        generator.generate(PageReference())
 
     assert len(client.prompts) == 5
-    assert text == "Written by :"
 
 
 def test_rejects_invalid_max_attempts():
@@ -230,7 +232,8 @@ def test_injected_validator_is_used():
     validator = StrictValidator()
     generator, client = make_generator(_VALID_TEMPLATE, validator=validator)
 
-    generator.generate(PageReference())
+    with raises(LLMAPIError):
+        generator.generate(PageReference())
 
     assert len(client.prompts) == 3
 
@@ -283,9 +286,14 @@ def test_injected_context_builder_respects_max_tokens():
     assert context_builder.budgets == [512]
 
 
-def test_validation_error_message_reports_missing_properties():
-    result = TemplateValidationResult(valid=False, missing=("writer",))
+def test_validation_error_message_reports_unknown_properties():
+    result = TemplateValidationResult(valid=False, unknown=("writer",))
     assert result.error_message() == "Template references unavailable properties: writer."
+
+
+def test_validation_error_message_reports_missing_properties():
+    result = TemplateValidationResult(valid=False, missing=("article",))
+    assert result.error_message() == "Template omits required properties: article."
 
 
 def test_cache_hit_skips_llm_on_repeated_same_shape():
@@ -338,12 +346,50 @@ def test_invalid_template_is_not_cached():
     cache = ReferenceCache(cache_dir)
     generator, client = make_generator(template, template, template, cache=cache)
 
-    generator.generate(PageReference())
+    with raises(LLMAPIError):
+        generator.generate(PageReference())
     entry = cache_dir / f"{PageReference().details.hash()}.txt"
 
     assert not entry.exists()
-    generator.generate(PageReference())
+    with raises(LLMAPIError):
+        generator.generate(PageReference())
     assert len(client.prompts) == 6
+
+
+def test_invalid_cached_template_is_regenerated_and_replaced():
+    cache = ReferenceCache(mkdtemp(prefix="ref-cache-"))
+    reference = PageReference()
+    cache.save(reference.details.hash(), "On page [page], it is stated:")
+    generator, client = make_generator(_VALID_TEMPLATE, cache=cache)
+
+    assert generator.generate(reference) == (
+        "On page 10, written by Hamid Jafari, it is stated:"
+    )
+    assert len(client.prompts) == 1
+    assert cache.load(reference.details.hash()) == _VALID_TEMPLATE
+    assert generator.generate(reference) == (
+        "On page 10, written by Hamid Jafari, it is stated:"
+    )
+    assert len(client.prompts) == 1
+
+
+def test_invalid_cached_template_is_never_rendered_after_retry_exhaustion():
+    cache = ReferenceCache(mkdtemp(prefix="ref-cache-"))
+    reference = PageReference()
+    cache.save(reference.details.hash(), "On page [page], it is stated:")
+    generator, client = make_generator(
+        "Written by [ghost]:", cache=cache, max_attempts=2
+    )
+
+    with raises(LLMAPIError):
+        generator.generate(reference)
+
+    assert len(client.prompts) == 2
+    assert cache.load(reference.details.hash()) == "On page [page], it is stated:"
+    replacement, replacement_client = make_generator(_VALID_TEMPLATE, cache=cache)
+    assert "Hamid Jafari" in replacement.generate(reference)
+    assert len(replacement_client.prompts) == 1
+    assert cache.load(reference.details.hash()) == _VALID_TEMPLATE
 
 
 def test_missing_cache_is_rejected():

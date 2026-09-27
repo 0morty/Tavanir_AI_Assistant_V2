@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import Field
-
 from src.presentation.schemas.responses import BaseResponseModel, SuccessResponse
+
 from src.presentation.security import get_api_key
 
 router = APIRouter(

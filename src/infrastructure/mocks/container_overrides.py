@@ -11,9 +11,7 @@ from src.infrastructure.mocks.mock_use_cases import (
 )
 
 
-def apply_mock_overrides(
-    container: Container, store: InMemorySuggestionStore
-) -> None:
+def apply_mock_overrides(container: Container, store: InMemorySuggestionStore) -> None:
     """Overrides application use case providers on Container with zero-dependency mock doubles.
 
     Bypasses external resource initialization (PostgreSQL, Qdrant, TEI, HuggingFace AutoTokenizer).
@@ -22,9 +20,7 @@ def apply_mock_overrides(
     mock_ingest = MockIngestSuggestionUseCase(store=store)
     mock_update = MockUpdateSuggestionUseCase(store=store)
     mock_delete = MockDeleteSuggestionUseCase(store=store)
-    mock_bulk_delete = MockBulkDeleteSuggestionsUseCase(
-        delete_use_case=mock_delete
-    )
+    mock_bulk_delete = MockBulkDeleteSuggestionsUseCase(delete_use_case=mock_delete)
 
     container.analyze_suggestion_use_case.override(mock_analyze)
     container.ingest_suggestion_use_case.override(mock_ingest)

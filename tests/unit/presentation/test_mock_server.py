@@ -1,8 +1,8 @@
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-
 from src.infrastructure.configs.settings import security_settings
+
 from src.main import create_app
 
 VALID_HEADERS = {
@@ -14,11 +14,11 @@ VALID_HEADERS = {
 async def client():
     """Test client executing with mock lifespan enabled."""
     app = create_app(is_mock=True)
-    async with app.router.lifespan_context(app):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
-            yield ac
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac,
+    ):
+        yield ac
 
 
 @pytest.mark.asyncio

@@ -11,16 +11,11 @@ if str(project_root) not in sys.path:
 from src.main import create_app
 
 
-def export_openapi(
-    is_mock: bool = True, output_path: Path | None = None
-) -> Path:
+def export_openapi(is_mock: bool = True, output_path: Path | None = None) -> Path:
     """Exports OpenAPI schema from the FastAPI application factory."""
     if output_path is None:
         output_path = (
-            Path(__file__).resolve().parents[1]
-            / "docs"
-            / "contracts"
-            / "openapi.json"
+            Path(__file__).resolve().parents[1] / "docs" / "contracts" / "openapi.json"
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

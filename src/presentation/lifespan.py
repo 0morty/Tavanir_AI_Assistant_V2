@@ -1,22 +1,22 @@
 from collections.abc import AsyncGenerator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
 from src.containers import Container
-
-from src.infrastructure.configs.logging_setup import configure_logging
 from src.infrastructure.mocks.container_overrides import apply_mock_overrides
 from src.infrastructure.mocks.in_memory_suggestion_store import (
     InMemorySuggestionStore,
 )
+
+from src.infrastructure.configs.logging_setup import configure_logging
 
 logger = structlog.get_logger(__name__)
 
 
 def create_lifespan(
     is_mock: bool = False,
-) -> Callable[[FastAPI], AsyncGenerator[None, None]]:
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     """Factory creating application lifespan manager with mock or production wiring."""
 
     @asynccontextmanager
@@ -24,9 +24,7 @@ def create_lifespan(
         configure_logging()
 
         if is_mock:
-            await logger.ainfo(
-                "Tavanir AI Assistant V2 is starting up in MOCK mode..."
-            )
+            await logger.ainfo("Tavanir AI Assistant V2 is starting up in MOCK mode...")
             store = InMemorySuggestionStore()
             container = Container()
             apply_mock_overrides(container, store)

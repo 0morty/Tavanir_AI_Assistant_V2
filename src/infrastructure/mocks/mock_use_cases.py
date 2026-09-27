@@ -110,9 +110,7 @@ class MockIngestSuggestionUseCase(IngestSuggestionUseCase):
     def __init__(self, store: InMemorySuggestionStore) -> None:
         self._store = store
 
-    async def execute(
-        self, dto: CreateSuggestionDTO
-    ) -> IngestSuggestionResponseDTO:
+    async def execute(self, dto: CreateSuggestionDTO) -> IngestSuggestionResponseDTO:
         # Step 1: Pre-check duplicate existence
         if await self._store.exists(dto.suggestion_id, include_deleted=True):
             raise SuggestionAlreadyExistsError(
@@ -130,10 +128,7 @@ class MockIngestSuggestionUseCase(IngestSuggestionUseCase):
         date_obj = ShamsiDate(dto.shamsi_date) if dto.shamsi_date else None
 
         secretariat_eval = None
-        if (
-            dto.secretariat_scrutiny is not None
-            or dto.secretariat_comment is not None
-        ):
+        if dto.secretariat_scrutiny is not None or dto.secretariat_comment is not None:
             secretariat_eval = SecretariatEvaluation(
                 scrutiny=dto.secretariat_scrutiny,
                 comment=dto.secretariat_comment,
@@ -199,10 +194,7 @@ class MockUpdateSuggestionUseCase(UpdateSuggestionUseCase):
         if dto.context_title is not None:
             existing.context_title = dto.context_title
 
-        if (
-            dto.secretariat_scrutiny is not None
-            or dto.secretariat_comment is not None
-        ):
+        if dto.secretariat_scrutiny is not None or dto.secretariat_comment is not None:
             existing.secretariat_evaluation = SecretariatEvaluation(
                 scrutiny=dto.secretariat_scrutiny,
                 comment=dto.secretariat_comment,
@@ -223,9 +215,7 @@ class MockUpdateSuggestionUseCase(UpdateSuggestionUseCase):
     async def execute_patch(
         self, dto: PatchSuggestionDTO
     ) -> UpdateSuggestionResponseDTO:
-        existing = await self._store.get(
-            dto.suggestion_id, include_deleted=False
-        )
+        existing = await self._store.get(dto.suggestion_id, include_deleted=False)
         if existing is None:
             raise SuggestionNotFoundError(
                 f"Suggestion with ID '{dto.suggestion_id}' not found.",
@@ -233,15 +223,9 @@ class MockUpdateSuggestionUseCase(UpdateSuggestionUseCase):
             )
 
         title = dto.title if dto.title is not None else existing.content.title
-        problem = (
-            dto.problem
-            if dto.problem is not None
-            else existing.content.problem
-        )
+        problem = dto.problem if dto.problem is not None else existing.content.problem
         solution = (
-            dto.solution
-            if dto.solution is not None
-            else existing.content.solution
+            dto.solution if dto.solution is not None else existing.content.solution
         )
         existing.content = SuggestionContent(
             title=title, problem=problem, solution=solution
@@ -318,9 +302,7 @@ class MockBulkDeleteSuggestionsUseCase(BulkDeleteSuggestionsUseCase):
     def __init__(self, delete_use_case: DeleteSuggestionUseCase) -> None:
         self._delete_use_case = delete_use_case
 
-    async def execute(
-        self, dto: BulkDeleteSuggestionsDTO
-    ) -> BulkDeleteResultDTO:
+    async def execute(self, dto: BulkDeleteSuggestionsDTO) -> BulkDeleteResultDTO:
         deleted_ids: list[str] = []
         errors: list[BulkDeleteErrorItemDTO] = []
         total_requested = len(dto.suggestion_ids)

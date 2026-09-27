@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, status
 from src.presentation.routers.v1.suggestion import (
     router as suggestion_router,
@@ -6,7 +8,7 @@ from src.presentation.schemas.responses import ErrorResponse
 
 from src.presentation.security import get_api_key
 
-COMMON_ERROR_RESPONSES = {
+COMMON_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     status.HTTP_400_BAD_REQUEST: {
         "model": ErrorResponse,
         "description": "Bad Request - Malformed syntax, invalid parameters, or payload violation",

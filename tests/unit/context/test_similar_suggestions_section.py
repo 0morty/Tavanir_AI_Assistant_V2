@@ -1,9 +1,12 @@
 from src.application.context.sections.similar_suggestions_section import (
     SimilarSuggestionsSection,
 )
+from src.application.dtos import SectionProcessingResult, SimilarSuggestionInput
+from src.application.reference.similar_suggestion_reference import (
+    SimilarSuggestionReference,
+)
 from src.domain.context.tokenizer import Tokenizer
-
-from src.application.dtos import SimilarSuggestionInput
+from src.domain.entities import GenerationChunk
 from src.domain.enums import SuggestionStatus
 
 
@@ -101,3 +104,37 @@ def test_truncate_neutralized_to_empty_string():
     tok = FakeCharTokenizer()
     section = SimilarSuggestionsSection([_make_item("101")])
     assert section.truncate(section.render(), 50, tokenizer=tok) == ""
+
+
+def test_similar_suggestions_section_items_are_generation_chunks():
+    s1 = _make_item("101", similarity=0.98)
+    s2 = _make_item("102", similarity=0.91)
+    section = SimilarSuggestionsSection([s1, s2])
+
+    assert len(section.items) == 2
+    for chunk in section.items:
+        assert isinstance(chunk, GenerationChunk)
+        assert isinstance(chunk.reference, SimilarSuggestionReference)
+
+    assert section.items[0].chunk_id == "101"
+    assert section.items[0].reference.similarity == 0.98
+    assert section.items[1].chunk_id == "102"
+    assert section.items[1].reference.similarity == 0.91
+
+
+
+def test_similar_suggestions_section_processing_result_support():
+    tok = FakeCharTokenizer()
+    s1 = _make_item("101", problem="الف" * 20)
+    section = SimilarSuggestionsSection([s1])
+
+    prep = section.prepare()
+    assert isinstance(prep, SectionProcessingResult)
+    assert len(prep.items) == 1
+
+    # Call ignore with SectionProcessingResult
+    res = section.ignore(prep, 500, tokenizer=tok)
+    assert isinstance(res, SectionProcessingResult)
+    assert len(res.items) == 1
+    assert "101" in res.content
+

@@ -4,7 +4,7 @@ from typing import Any
 from src.application.context.sections.referenced_collection_section import (
     ReferencedCollectionSection,
 )
-from src.application.dtos import SimilarSuggestionInput
+from src.application.dtos import SectionProcessingResult, SimilarSuggestionInput
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
@@ -18,7 +18,7 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
     """Section rendering retrieved similar suggestions in strict upstream rank order.
 
     Enforces rank integrity with no out-of-order skipping (knapsack anti-skip).
-    Overrides :meth:`truncate` to return an empty string, preventing
+    Overrides :meth:`truncate` to return an empty string or result, preventing
     :class:`ContextBuilder` from falling back to mid-sentence cutting.
     """
 
@@ -32,9 +32,14 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         summarizer: Summarizer | None = None,
         chunk_summarizer: ITextSummarizer | None = None,
     ) -> None:
+        chunks = [
+            item.to_generation_chunk(idx + 1)
+            for idx, item in enumerate(suggestions)
+        ]
+
         resolved_overflow = OverflowStrategyStack([OverflowStrategy.IGNORE])
         super().__init__(
-            items=suggestions,
+            items=chunks,
             item_separator=item_separator,
             importance=importance,
             demand=demand,
@@ -55,65 +60,42 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         return "## سوابق پیشنهادات مشابه بازیابی‌شده:"
 
     def item_content(self, item: Any) -> str:
-        try:
-            index = self._items.index(item) + 1
-        except (ValueError, AttributeError):
-            index = 1
-        item_id = getattr(item, "id", "")
-        status_val = getattr(item, "status", None)
-        status_title = (
-            getattr(status_val, "title_fa", str(status_val))
-            if status_val is not None
-            else ""
-        )
-        similarity = getattr(item, "similarity", 0.0)
-        try:
-            sim_str = f"{float(similarity):.2f}"
-        except (ValueError, TypeError):
-            sim_str = "0.00"
-        title = getattr(item, "title", "")
-        problem = getattr(item, "problem", "")
-        solution = getattr(item, "solution", "")
-        return (
-            f"[پیشنهاد مشابه {index}] کد پیشنهاد: {item_id} | وضعیت: {status_title} | میزان تشابه: {sim_str}\n"
-            f"عنوان: {title}\n"
-            f"مسئله: {problem}\n"
-            f"راهکار: {solution}"
-        )
+        """Return the chunk content, adapting SimilarSuggestionInput if passed directly."""
+        if isinstance(item, SimilarSuggestionInput):
+            return item.to_generation_chunk(1).content
+        return getattr(item, "content", "")
+
+    def _item_body(self, item: Any) -> str:
+        """The item content already contains its formatted heading and metadata."""
+        return self.item_content(item)
+
+    def compose_referenced_content(self, reference_text: str, content: str) -> str:
+        """Compose citation only if not already present in the formatted content heading."""
+        if not reference_text or reference_text in content:
+            return content
+        return f"{reference_text}\n{content}"
 
     def ignore(
         self,
-        content: str,
+        content: SectionProcessingResult | str,
         capacity_tokens: int,
         *,
         tokenizer: Tokenizer,
-    ) -> str:
-        """Fit items in upstream rank order, accounting for pre-context header framing."""
-        if not self._items or capacity_tokens <= 0:
-            return ""
-
-        pre = self.pre_context
-        pre_tokens = tokenizer.count_tokens(pre) if pre else 0
-        frame_sep_tokens = tokenizer.count_tokens(self.separator) if pre else 0
-        available_for_items = capacity_tokens - (pre_tokens + frame_sep_tokens)
-
-        if available_for_items <= 0:
-            return ""
-
-        fitted_body = self._include_fitting_items(
-            self._enriched_item_texts(), available_for_items, tokenizer
-        )
-        if not fitted_body:
-            return ""
-
-        return self._compose(fitted_body)
+    ) -> SectionProcessingResult | str:
+        """Fit items in rank order, supporting both SectionProcessingResult and legacy str callers."""
+        is_str = isinstance(content, str)
+        prep = self.prepare() if is_str else content
+        result = super().ignore(prep, capacity_tokens, tokenizer=tokenizer)
+        return result.content if is_str else result
 
     def truncate(
         self,
-        content: str,
+        content: SectionProcessingResult | str,
         capacity_tokens: int,
         *,
         tokenizer: Tokenizer,
-    ) -> str:
-        """Override to neutralize ContextBuilder's mid-sentence truncation safety net."""
-        return ""
+    ) -> SectionProcessingResult | str:
+        """Neutralize truncation to prevent mid-sentence cutting."""
+        if isinstance(content, str):
+            return ""
+        return SectionProcessingResult("", (), (), ())

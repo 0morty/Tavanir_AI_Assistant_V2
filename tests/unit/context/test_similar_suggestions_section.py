@@ -40,15 +40,16 @@ def _make_item(
 
 
 def test_render_includes_all_when_budget_unlimited():
-    tok = FakeCharTokenizer()
     s1 = _make_item("101", similarity=0.98)
     s2 = _make_item("102", similarity=0.91)
     section = SimilarSuggestionsSection([s1, s2])
     rendered = section.render()
 
     assert "## سوابق پیشنهادات مشابه بازیابی‌شده:" in rendered
-    assert "[پیشنهاد مشابه 1] کد پیشنهاد: 101" in rendered
-    assert "[پیشنهاد مشابه 2] کد پیشنهاد: 102" in rendered
+    assert "Unique ID: [similar 001]" in rendered
+    assert "Unique ID: [similar 002]" in rendered
+    assert "کد پیشنهاد: 101" not in rendered
+    assert "[پیشنهاد مشابه 1]" not in rendered
     assert "0.98" in rendered
     assert "0.91" in rendered
 
@@ -70,17 +71,18 @@ def test_ignore_preserves_strict_rank_order():
     pre_tokens = tok.count_tokens(pre)
     frame_sep_tokens = tok.count_tokens(section.separator)
 
-    item1_tokens = tok.count_tokens(section.item_content(s1))
-    item2_tokens = tok.count_tokens(section.item_content(s2))
+    prepared = section.prepare()
+    item1_tokens = tok.count_tokens(prepared.item_bodies[0])
+    item2_tokens = tok.count_tokens(prepared.item_bodies[1])
     sep_tokens = tok.count_tokens(section.item_separator)
 
-    # Budget fits s1 and s2, but NOT s3
+    # Budget fits s1 and s2, but not s3.
     capacity = pre_tokens + frame_sep_tokens + item1_tokens + sep_tokens + item2_tokens
-    fitted = section.ignore(section.render(), capacity, tokenizer=tok)
+    fitted = section.ignore(prepared, capacity, tokenizer=tok)
 
-    assert "101" in fitted
-    assert "102" in fitted
-    assert "103" not in fitted
+    assert fitted.citation_ids == ("[similar 001]", "[similar 002]")
+    assert "[similar 003]" not in fitted.content
+    assert [item.id for item in fitted.items] == ["101", "102"]
 
 
 def test_ignore_suppresses_header_when_zero_items_fit():
@@ -91,13 +93,15 @@ def test_ignore_suppresses_header_when_zero_items_fit():
     # Capacity only enough for header, but not enough for s1
     pre = section.pre_context
     pre_tokens = tok.count_tokens(pre)
-    fitted = section.ignore(section.render(), pre_tokens + 5, tokenizer=tok)
+    fitted = section.ignore(section.prepare(), pre_tokens + 5, tokenizer=tok)
 
-    # Whole section must be suppressed to empty string
-    assert fitted == ""
+    # Whole section must be suppressed to empty string.
+    assert fitted.content == ""
+    assert fitted.citation_ids == ()
 
 
-def test_truncate_neutralized_to_empty_string():
+def test_truncate_keeps_whole_collection_for_ignore_fallback():
     tok = FakeCharTokenizer()
     section = SimilarSuggestionsSection([_make_item("101")])
-    assert section.truncate(section.render(), 50, tokenizer=tok) == ""
+    prepared = section.prepare()
+    assert section.truncate(prepared, 50, tokenizer=tok) is prepared

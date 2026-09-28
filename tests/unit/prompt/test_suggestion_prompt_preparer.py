@@ -446,7 +446,7 @@ def test_exact_budget_for_single_item():
 
     # Tokens for item 1 with pre_context framing
     status_title = getattr(sug1.status, "title_fa", str(sug1.status))
-    item1_content = f"[پیشنهاد مشابه 1] کد پیشنهاد: {sug1.id} | وضعیت: {status_title} | میزان تشابه: {sug1.similarity:.2f}\nعنوان: {sug1.title}\nمسئله: {sug1.problem}\nراهکار: {sug1.solution}"
+    item1_content = f"Unique ID: [similar 001]\n\nوضعیت: {status_title} | میزان تشابه: {sug1.similarity:.2f}\nعنوان: {sug1.title}\nمسئله: {sug1.problem}\nراهکار: {sug1.solution}"
     pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
     item1_tokens = (
         tokenizer.count_tokens(pre_header)
@@ -457,8 +457,8 @@ def test_exact_budget_for_single_item():
     exact_budget = t_fixed + t_sep + item1_tokens
     result = preparer.prepare(gen_input, max_prompt_tokens=exact_budget)
 
-    assert "101" in result.prompt
-    assert "102" not in result.prompt
+    assert "Unique ID: [similar 001]" in result.prompt
+    assert "Unique ID: [similar 002]" not in result.prompt
     assert result.total_tokens <= exact_budget
 
 
@@ -488,7 +488,7 @@ def test_oversized_first_item_never_skipped():
 
     # Give budget enough for sug2_small, but not enough for sug1_large
     status_title2 = getattr(sug2_small.status, "title_fa", str(sug2_small.status))
-    item2_content = f"[پیشنهاد مشابه 1] کد پیشنهاد: {sug2_small.id} | وضعیت: {status_title2} | میزان تشابه: {sug2_small.similarity:.2f}\nعنوان: {sug2_small.title}\nمسئله: {sug2_small.problem}\nراهکار: {sug2_small.solution}"
+    item2_content = f"Unique ID: [similar 001]\n\nوضعیت: {status_title2} | میزان تشابه: {sug2_small.similarity:.2f}\nعنوان: {sug2_small.title}\nمسئله: {sug2_small.problem}\nراهکار: {sug2_small.solution}"
     pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
     item2_tokens = (
         tokenizer.count_tokens(pre_header)
@@ -525,7 +525,7 @@ def test_oversized_intermediate_item_stops_collection():
 
     # Capacity enough for sug1 + a bit more, but not enough for sug2_large
     status_title1 = getattr(sug1.status, "title_fa", str(sug1.status))
-    item1_content = f"[پیشنهاد مشابه 1] کد پیشنهاد: {sug1.id} | وضعیت: {status_title1} | میزان تشابه: {sug1.similarity:.2f}\nعنوان: {sug1.title}\nمسئله: {sug1.problem}\nراهکار: {sug1.solution}"
+    item1_content = f"Unique ID: [similar 001]\n\nوضعیت: {status_title1} | میزان تشابه: {sug1.similarity:.2f}\nعنوان: {sug1.title}\nمسئله: {sug1.problem}\nراهکار: {sug1.solution}"
     pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
     item1_tokens = (
         tokenizer.count_tokens(pre_header)
@@ -537,9 +537,9 @@ def test_oversized_intermediate_item_stops_collection():
     result = preparer.prepare(gen_input, max_prompt_tokens=budget)
 
     # Asserts sug1 is present, but sug2 and sug3 are NOT present (break on sug2)
-    assert "101" in result.prompt
-    assert "102" not in result.prompt
-    assert "103" not in result.prompt
+    assert "Unique ID: [similar 001]" in result.prompt
+    assert "Unique ID: [similar 002]" not in result.prompt
+    assert "Unique ID: [similar 003]" not in result.prompt
 
 
 # ==============================================================================

@@ -83,6 +83,7 @@ class ContextBuilder(IContextBuilder):
                     fitted_tokens=self._tokenizer.count_tokens(result.content),
                     overflowed=overflowed,
                     items=result.items,
+                    citation_ids=result.citation_ids,
                 )
             )
 

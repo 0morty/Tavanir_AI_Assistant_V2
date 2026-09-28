@@ -7,20 +7,11 @@ from src.application.context.sections.referenced_collection_section import (
 from src.application.dtos import SimilarSuggestionInput
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.context.summarizer import Summarizer
-from src.domain.context.tokenizer import Tokenizer
-from src.domain.overflow_strategy_stack import (
-    OverflowStrategy,
-    OverflowStrategyStack,
-)
+from src.domain.overflow_strategy_stack import OverflowStrategy, OverflowStrategyStack
 
 
 class SimilarSuggestionsSection(ReferencedCollectionSection):
-    """Section rendering retrieved similar suggestions in strict upstream rank order.
-
-    Enforces rank integrity with no out-of-order skipping (knapsack anti-skip).
-    Overrides :meth:`truncate` to return an empty string, preventing
-    :class:`ContextBuilder` from falling back to mid-sentence cutting.
-    """
+    """Render retrieved suggestions in strict upstream rank order."""
 
     def __init__(
         self,
@@ -35,6 +26,7 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         resolved_overflow = OverflowStrategyStack([OverflowStrategy.IGNORE])
         super().__init__(
             items=suggestions,
+            citation_label="similar",
             item_separator=item_separator,
             importance=importance,
             demand=demand,
@@ -55,11 +47,6 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         return "## سوابق پیشنهادات مشابه بازیابی‌شده:"
 
     def item_content(self, item: Any) -> str:
-        try:
-            index = self._items.index(item) + 1
-        except (ValueError, AttributeError):
-            index = 1
-        item_id = getattr(item, "id", "")
         status_val = getattr(item, "status", None)
         status_title = (
             getattr(status_val, "title_fa", str(status_val))
@@ -75,45 +62,8 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         problem = getattr(item, "problem", "")
         solution = getattr(item, "solution", "")
         return (
-            f"[پیشنهاد مشابه {index}] کد پیشنهاد: {item_id} | وضعیت: {status_title} | میزان تشابه: {sim_str}\n"
+            f"وضعیت: {status_title} | میزان تشابه: {sim_str}\n"
             f"عنوان: {title}\n"
             f"مسئله: {problem}\n"
             f"راهکار: {solution}"
         )
-
-    def ignore(
-        self,
-        content: str,
-        capacity_tokens: int,
-        *,
-        tokenizer: Tokenizer,
-    ) -> str:
-        """Fit items in upstream rank order, accounting for pre-context header framing."""
-        if not self._items or capacity_tokens <= 0:
-            return ""
-
-        pre = self.pre_context
-        pre_tokens = tokenizer.count_tokens(pre) if pre else 0
-        frame_sep_tokens = tokenizer.count_tokens(self.separator) if pre else 0
-        available_for_items = capacity_tokens - (pre_tokens + frame_sep_tokens)
-
-        if available_for_items <= 0:
-            return ""
-
-        fitted_body = self._include_fitting_items(
-            self._enriched_item_texts(), available_for_items, tokenizer
-        )
-        if not fitted_body:
-            return ""
-
-        return self._compose(fitted_body)
-
-    def truncate(
-        self,
-        content: str,
-        capacity_tokens: int,
-        *,
-        tokenizer: Tokenizer,
-    ) -> str:
-        """Override to neutralize ContextBuilder's mid-sentence truncation safety net."""
-        return ""

@@ -125,9 +125,8 @@ class SuggestionPromptPreparer(ISuggestionPromptPreparer):
                 demand=d_evi,
                 importance=0.1,
             )
-            first_item_text = evidence_section.item_content(
-                generation_input.similar_suggestions[0]
-            )
+            # Include the visible citation when checking whether the first item fits.
+            first_item_text = evidence_section.prepare().item_bodies[0]
             pre_tokens = self._tokenizer.count_tokens(evidence_section.pre_context)
             frame_sep_tokens = self._tokenizer.count_tokens(evidence_section.separator)
             first_item_tokens = (

@@ -80,6 +80,8 @@ class LLMRequestBuilderPipelineTests(unittest.TestCase):
         result = context_builder().build(history_builder(turns), max_tokens=200)
         self.assertFalse(result.sections[0].overflowed)
         self.assertEqual(result.sections[0].history_messages, tuple(turns))
+        self.assertIsNone(result.sections[0].citation_ids)
+        self.assertNotIn("[history", result.sections[0].content)
         self.assertEqual(
             LLMRequestBuilder().build_messages(result),
             [

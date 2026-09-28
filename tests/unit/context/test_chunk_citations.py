@@ -79,13 +79,14 @@ class ChunkCitationTests(unittest.TestCase):
         ]
         section = ChunksSection(chunks)
         expected = {
-            "[chunk 001]": "SUG-004",
-            "[chunk 002]": "SUG-002",
-            "[chunk 003]": "SUG-009",
+            "[chunk 001]": chunks[0],
+            "[chunk 002]": chunks[1],
+            "[chunk 003]": chunks[2],
         }
         self.assertEqual(section.citation_map, expected)
         self.assertEqual(ChunksSection(chunks).citation_map, expected)
-        self.assertEqual([chunk.chunk_id for chunk in section.chunks], list(expected.values()))
+        self.assertEqual([item.chunk_id for item in section.citation_map.values()],
+                         ["SUG-004", "SUG-002", "SUG-009"])
         self.assertEqual(len(section.citation_map), len(chunks))
         self.assertTrue(all(re.fullmatch(r"\[chunk [0-9]{3}\]", key) for key in expected))
 
@@ -163,31 +164,33 @@ class ChunkCitationTests(unittest.TestCase):
         output = result.sections[0]
         self.assertEqual(output.content, first_only)
         self.assertEqual([item.chunk_id for item in output.items], ["SUG-001"])
-        self.assertEqual(section.citation_map_for(output.items), {"[chunk 001]": "SUG-001"})
+        self.assertEqual(section.citation_map_for(output), {"[chunk 001]": section.chunks[0]})
         self.assertNotIn("[chunk 002]", result.prompt)
-        self.assertEqual(section.invalid_citation_ids("Use [chunk 001] and [chunk 002].", output.items), ["[chunk 002]"])
-        self.assertEqual(
-            section.cited_sources("Use [chunk 002] then [chunk 001].", output.items),
-            {"[chunk 001]": "SUG-001"},
+        self.assertIs(
+            section.resolve_citation_ids(["[chunk 001]"], output)["[chunk 001]"],
+            section.chunks[0],
         )
-        with self.assertRaises(ValueError):
-            section.citation_map_for(tuple(reversed(section.chunks)))
+        with self.assertRaisesRegex(ValueError, "Unknown citation ID"):
+            section.resolve_citation_ids(["[chunk 002]"], output)
 
-    def test_extraction_is_exact_ordered_unique_and_reports_unknown_ids(self) -> None:
+    def test_structured_extraction_is_exact_ordered_unique_and_rejects_unknown_ids(self) -> None:
         section = ChunksSection([
             GenerationChunk("SUG-001", "one"), GenerationChunk("SUG-002", "two")
         ])
-        response = (
-            "[topic] [chunk 002] [chunk 001] [chunk 002] [Chunk 001] "
-            "[chunk 01] [chunk 0001] [chunk abc] [chunk 999]"
-        )
-        self.assertEqual(section.extract_citation_ids(response), [
-            "[chunk 002]", "[chunk 001]", "[chunk 999]"
-        ])
-        self.assertEqual(section.invalid_citation_ids(response, section.chunks), ["[chunk 999]"])
-        self.assertEqual(section.cited_sources(response, section.chunks), {
-            "[chunk 002]": "SUG-002", "[chunk 001]": "SUG-001"
-        })
+        output = build_section(section, 200).sections[0]
+        structured = {"answer": "supported", "citations": [
+            "[chunk 002]", "[chunk 001]", "[chunk 002]"
+        ]}
+        ids = section.extract_citation_ids(structured)
+        self.assertEqual(ids, ["[chunk 002]", "[chunk 001]"])
+        resolved = section.resolve_citation_ids(ids, output)
+        self.assertIs(resolved["[chunk 002]"], section.chunks[1])
+        self.assertIs(resolved["[chunk 001]"], section.chunks[0])
+        with self.assertRaisesRegex(ValueError, "Unknown citation ID"):
+            section.resolve_citation_ids(["[chunk 999]"], output)
+        for invalid in ("[Chunk 001]", "[chunk 01]", "[chunk 0001]", "[chunk abc]"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                section.extract_citation_ids({"citations": [invalid]})
 
     def test_three_digit_limit_is_enforced(self) -> None:
         with self.assertRaises(ValueError):

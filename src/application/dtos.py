@@ -43,13 +43,15 @@ class SectionProcessingResult:
     ``items`` preserves collection boundaries and metadata. ``item_bodies``
     holds each reference-enriched body for exact prefix rendering; ``item_inputs``
     holds each complete pre/post-framed input for independent summarization.
-    Single-text sections leave all three as None.
+    ``citation_ids`` preserves surviving original item identities.
+    Single-text sections leave these collection fields as None.
     """
 
     content: str
     items: tuple[Any, ...] | None = None
     item_bodies: tuple[str, ...] | None = None
     item_inputs: tuple[str, ...] | None = None
+    citation_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,7 @@ class SectionOutput:
     fitted_tokens: int
     overflowed: bool
     items: tuple[Any, ...] | None = None
+    citation_ids: tuple[str, ...] | None = None
 
     @property
     def history_messages(self) -> tuple[HistoryMessage, ...] | None:

@@ -35,6 +35,7 @@ from src.application.interfaces import (
     ITextSummarizer,
     IUnitOfWork,
 )
+from src.application.interfaces.i_output_parser import IOutputParser
 from src.application.prompt import (
     SuggestionAnalysisPromptConfig,
     SuggestionPromptPreparer,
@@ -93,6 +94,7 @@ from src.infrastructure.services.embeddings.persian_bm25_embedder import (
 from src.infrastructure.services.extractors import MssqlSuggestionExtractor
 from src.infrastructure.services.llm import OpenAILLMClient
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
+from src.infrastructure.services.llm.output_parser import GenerationOutputParser
 from src.infrastructure.services.qdrant import QdrantAdminService
 from src.infrastructure.services.reranker import TEIReranker
 from src.infrastructure.services.summarizers import LLMChunkSummarizer, LLMSummarizer
@@ -417,6 +419,10 @@ class Container(containers.DeclarativeContainer):
         model=generation_settings.LLM_MODEL,
         temperature=generation_settings.LLM_TEMPERATURE,
         max_tokens=generation_settings.LLM_MAX_TOKENS,
+    )
+
+    generation_output_parser: providers.Provider[IOutputParser] = providers.Singleton(
+        GenerationOutputParser
     )
 
     # 14. Generation LLM Summarizer (Context overflow SUMMARIZE strategy)

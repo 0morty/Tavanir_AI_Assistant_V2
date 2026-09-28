@@ -9,6 +9,7 @@ from src.domain.entities import HistoryMessage
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 
+# TODO: همگام سازی با استاندارد GenerationChunk
 class HistorySection(ReferencedCollectionSection):
     """Conversation/interaction history, distinct from RAG context chunks.
 

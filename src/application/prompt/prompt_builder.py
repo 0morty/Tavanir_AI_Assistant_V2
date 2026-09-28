@@ -1,13 +1,13 @@
 from collections.abc import Iterable, Mapping
 
+from src.domain.entities import GenerationChunk, HistoryMessage
+from src.application.interfaces import IPromptSection
 from src.application.context.sections.chunks_section import ChunksSection
 from src.application.context.sections.history_section import HistorySection
 from src.application.context.sections.output_format_section import OutputFormatSection
 from src.application.context.sections.role_section import RoleSection
 from src.application.context.sections.system_input_section import SystemInputSection
 from src.application.context.sections.user_input_section import UserInputSection
-from src.application.interfaces import IPromptSection
-from src.domain.entities import GenerationChunk, HistoryMessage
 
 
 def _canonical_name(name: str) -> str:
@@ -64,6 +64,7 @@ class PromptBuilder:
             self.set_output_format("")
         for section in sections or []:
             self.set_section(section.section_type, section)
+
 
     def set_section(self, name: str, value: IPromptSection) -> None:
         """Register a section under ``name``.

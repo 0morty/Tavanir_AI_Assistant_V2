@@ -1,23 +1,19 @@
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
-from src.domain.overflow_strategy_stack import OverflowStrategyStack
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.application.dtos import SectionProcessingResult
+    from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 
 class IPromptSection(ABC):
-    """Pure interface (port) every prompt section must satisfy.
+    """Section identity, tuning, rendering, and complete input preparation.
 
-    ``IPromptSection`` declares the prompt-section contract only -- no state
-    and no default behavior. The ``PromptSection`` skeleton
-    (``src/application/context/sections/prompt_section.py``) implements this
-    port and ships the default prompt-section behavior on top of the
-    contract: the tuning properties with validation, the optional pre/post
-    context framing, and the default ``CompressibleSection`` overflow interpretation
-    for plain-text content.
-
-    Developers building a new section subclass the ``PromptSection`` skeleton
-    to inherit the defaults; they only need to provide ``section_type`` and
-    ``body()``. Code that merely *consumes* sections (such as the
-    ``PromptBuilder``) can depend on this port alone.
+    ``render`` remains the text-only API used by PromptBuilder. ``prepare``
+    produces the immutable value consumed by ContextBuilder and overflow
+    operations, including structured collection items where applicable.
     """
 
     @property
@@ -57,3 +53,7 @@ class IPromptSection(ABC):
     @abstractmethod
     def render(self) -> str:
         """Render the complete section (framing around the body)."""
+
+    @abstractmethod
+    def prepare(self) -> SectionProcessingResult:
+        """Build the complete reference-enriched input before overflow handling."""

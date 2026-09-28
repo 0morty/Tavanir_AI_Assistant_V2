@@ -11,12 +11,7 @@ from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 # TODO: همگام سازی با استاندارد GenerationChunk
 class HistorySection(ReferencedCollectionSection):
-    """Conversation/interaction history, distinct from RAG context chunks.
-
-    A ``HistorySection`` is a collection section: the conversation turns are
-    held as the section's items. Each turn keeps its ``role`` prefix in the
-    rendered text, so a reference enrichment never strips the sender role.
-    """
+    """Conversation turns whose processed results retain order and roles."""
 
     def __init__(
         self,
@@ -51,3 +46,8 @@ class HistorySection(ReferencedCollectionSection):
     def item_content(self, item: Any) -> str:
         """Render a turn as ``role: content`` so the sender is preserved."""
         return f"{item.role.value}: {item.content}"
+
+    def _summary_bodies(
+        self, items: tuple[HistoryMessage, ...], summaries: list[str]
+    ) -> tuple[str, ...]:
+        return tuple(self.item_content(item) for item in items)

@@ -265,20 +265,20 @@ ROLE = (
 SYSTEM_INPUT = (
     "Read each suggestion's actual content. Identify (1) exactly the same "
     "solution and (2) similar or closely related solutions. Distinguish "
-    "identical mechanisms from related ideas; cite each source ID. Exclude "
+    "identical mechanisms from related ideas; cite each Unique ID. Exclude "
     "unrelated household energy ideas from residential lighting groups. "
     "Explain borderline cases and evidence gaps. Treat the result as "
     "decision support rather than an organizational decision."
 )
 OUTPUT_FORMAT = (
     "Suggestions introducing the same solution:\n\n---\n\n"
-    "1. First suggestion (source ID)\n\n---\n\n"
-    "2. Second suggestion (source ID)\n\n---\n\n"
-    "3. Third suggestion (source ID)\n\n---\n\n"
+    "1. First suggestion (Unique ID)\n\n---\n\n"
+    "2. Second suggestion (Unique ID)\n\n---\n\n"
+    "3. Third suggestion (Unique ID)\n\n---\n\n"
     "Suggestions introducing similar solutions:\n\n---\n\n"
-    "1. First similar suggestion (source ID)\n\n---\n\n"
-    "2. Second similar suggestion (source ID)\n\n---\n\n"
-    "3. Third similar suggestion (source ID)"
+    "1. First similar suggestion (Unique ID)\n\n---\n\n"
+    "2. Second similar suggestion (Unique ID)\n\n---\n\n"
+    "3. Third similar suggestion (Unique ID)"
 )
 
 
@@ -395,7 +395,7 @@ class FinalSuggestionBuilderReportTest(unittest.TestCase):
                 lines.append(f"Importance: {section.importance}; demand: {section.demand}; strategies: {[s.name for s in section.overflow_strategies.strategies]}.\n")
                 lines.append("Exact body():\n")
                 lines.append(fenced(body_outputs[section.section_type]))
-            lines.append("Exactly 10 source chunks, with source IDs and three paragraphs each:\n")
+            lines.append("Exactly 10 source chunks, with original chunk IDs and three paragraphs each:\n")
             for item in chunks:
                 lines.append(f"### {item.chunk_id} — {item.reference.title}, page {item.reference.page}\n")
                 lines.append(fenced(item.content))
@@ -483,7 +483,7 @@ class FinalSuggestionBuilderReportTest(unittest.TestCase):
                 after_ids = [getattr(item, "chunk_id", None) for item in after.items or ()] if after else []
                 lines.append(f"### Attempt {index}: {section.section_type} / {strategy.name}\n")
                 lines.append(f"Section class: {type(section).__name__}; configured order: {[s.name for s in section.overflow_strategies.strategies]}; input tokens: {before_count}; capacity: {capacity}; remaining capacity before: {capacity-before_count}; output tokens: {after_count}; token delta: {None if after_count is None else before_count-after_count}; selected: {selected}; validation: {'fits' if selected else 'does not fit or unavailable'}; fallback: {'none' if selected else 'next configured strategy or safety fallback'}.\n")
-                lines.append(f"Source IDs before: {before_ids!r}; after: {after_ids!r}; items removed: {[x for x in before_ids if x not in after_ids]!r}; ordering preserved: {after_ids == before_ids[:len(after_ids)]}; source items changed: {[(c.chunk_id, c.content, c.reference) for c in chunks] != source_copy}.\n")
+                lines.append(f"Original chunk IDs before: {before_ids!r}; after: {after_ids!r}; items removed: {[x for x in before_ids if x not in after_ids]!r}; ordering preserved: {after_ids == before_ids[:len(after_ids)]}; source items changed: {[(c.chunk_id, c.content, c.reference) for c in chunks] != source_copy}.\n")
                 if before.item_inputs:
                     for item_index, item_input in enumerate(before.item_inputs, 1):
                         lines.append(f"Actual per-item input {item_index}:\n" + fenced(item_input))
@@ -534,7 +534,7 @@ class FinalSuggestionBuilderReportTest(unittest.TestCase):
                               f"Original section tokens: {original_tokens}; final section tokens: {final_section_tokens}; section tokens saved: {original_tokens-final_section_tokens}; surviving separator tokens: {(sum(bool(o.content) for o in context_result.sections)-1)*len(builder.SECTION_SEPARATOR)}; final prompt tokens: {context_result.total_tokens}; budget: {budget}; remaining: {budget-context_result.total_tokens}.\n"])
                 chunk_output = next(o for o in context_result.sections if o.section_type == "CHUNKS")
                 lines.extend(["## 16. Reference Preservation Summary", "",
-                              f"Original source IDs: {[c.chunk_id for c in chunks]!r}; final item IDs: {[c.chunk_id for c in chunk_output.items or ()]!r}.\n",
+                              f"Original chunk IDs: {[c.chunk_id for c in chunks]!r}; final item IDs: {[c.chunk_id for c in chunk_output.items or ()]!r}.\n",
                               f"Structured references on final item objects: {[c.reference for c in chunk_output.items or ()]!r}.\n",
                               f"Rendered citation strings present in prepared CHUNKS: {all(text in prepared['CHUNKS'].content for _, text in reference_generator.calls[:10])}; present in final CHUNKS prompt text: {all(text in chunk_output.content for _, text in reference_generator.calls[:10])}.\n"])
             else:
@@ -548,7 +548,7 @@ class FinalSuggestionBuilderReportTest(unittest.TestCase):
 
             expected_order = ["ROLE", "CHUNKS", "SYSTEM-INPUT", "OUTPUT-FORMAT"]
             check("four sections in exact order", [s.section_type for s in builder.sections] == expected_order)
-            check("ten unique source IDs", len(chunks) == len({c.chunk_id for c in chunks}) == 10)
+            check("ten unique chunk IDs", len(chunks) == len({c.chunk_id for c in chunks}) == 10)
             check("three paragraphs per chunk", all(len(c.content.split("\n\n")) == 3 for c in chunks))
             check("English main section bodies", all(body_outputs[s.section_type].isascii() for s in sections))
             check("structured references and details", all(isinstance(c.reference, Reference) and c.reference.details.properties == (("title", "str"), ("page", "int")) for c in chunks))
@@ -577,7 +577,7 @@ class FinalSuggestionBuilderReportTest(unittest.TestCase):
                 check("no duplicate or unexpected section", len(context_result.sections) == len({o.section_type for o in context_result.sections}) == 4 and set(o.section_type for o in context_result.sections) == set(expected_order))
                 check("role remains intact", context_result.sections[0].content == prepared["ROLE"].content)
                 check("output format remains intact", context_result.sections[3].content == prepared["OUTPUT-FORMAT"].content)
-                check("system input retains grouping and citation rules", all(term in context_result.sections[2].content for term in ("exactly the same", "similar or closely related", "cite each source ID", "Exclude unrelated")))
+                check("system input retains grouping and citation rules", all(term in context_result.sections[2].content for term in ("exactly the same", "similar or closely related", "cite each Unique ID", "Exclude unrelated")))
                 check("all scripted summaries mapped one to one", [c.content for c in chunk_output.items or ()] == list(batch_llm.summaries))
                 check("all chunk IDs and order survive", [c.chunk_id for c in chunk_output.items or ()] == [c.chunk_id for c in chunks])
                 check("reference objects survive on items", [c.reference for c in chunk_output.items or ()] == [c.reference for c in chunks])
@@ -620,7 +620,7 @@ class FinalSuggestionBuilderReportTest(unittest.TestCase):
                           "## 19. Final Result", "",
                           f"**{'FAIL' if failed or errors else 'PASS'}** — {len(checks)-len(failed)} assertions passed; {len(failed)} failed; {len(errors)} execution errors. No production code was changed.\n"])
             report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            report_path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
             print("\n".join((
                 f"Test Result: {'FAIL' if failed or errors else 'PASS'}",
                 f"Total Sections: {len(sections)}",

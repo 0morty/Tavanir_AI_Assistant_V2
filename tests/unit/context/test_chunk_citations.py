@@ -71,7 +71,7 @@ def build_section(section: ChunksSection, budget: int):
 
 
 class ChunkCitationTests(unittest.TestCase):
-    def test_mapping_is_short_ordered_unique_and_separate_from_source_ids(self) -> None:
+    def test_mapping_is_short_ordered_unique_and_direct_to_items(self) -> None:
         chunks = [
             GenerationChunk("SUG-004", "four"),
             GenerationChunk("SUG-002", "two"),
@@ -85,8 +85,10 @@ class ChunkCitationTests(unittest.TestCase):
         }
         self.assertEqual(section.citation_map, expected)
         self.assertEqual(ChunksSection(chunks).citation_map, expected)
-        self.assertEqual([item.chunk_id for item in section.citation_map.values()],
-                         ["SUG-004", "SUG-002", "SUG-009"])
+        self.assertIs(section.citation_map["[chunk 001]"], chunks[0])
+        self.assertIs(section.citation_map["[chunk 002]"], chunks[1])
+        self.assertIs(section.citation_map["[chunk 003]"], chunks[2])
+        self.assertNotIn("SUG-004", section.render())
         self.assertEqual(len(section.citation_map), len(chunks))
         self.assertTrue(all(re.fullmatch(r"\[chunk [0-9]{3}\]", key) for key in expected))
 

@@ -21,7 +21,6 @@ from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 @dataclass
 class Evidence:
-    source_id: str
     content: str
 
 
@@ -70,8 +69,8 @@ def build(section, budget):
 
 class ReferencedCollectionCitationTests(unittest.TestCase):
     def test_original_items_have_deterministic_position_ids(self):
-        shared = Evidence("SRC-1", "the same evidence")
-        items = [shared, shared, Evidence("SRC-2", "other evidence")]
+        shared = Evidence("the same evidence")
+        items = [shared, shared, Evidence("other evidence")]
         section = RegulationSection(items)
 
         self.assertEqual(section.citation_ids_for(shared), ("[regulation 001]", "[regulation 002]"))
@@ -81,11 +80,11 @@ class ReferencedCollectionCitationTests(unittest.TestCase):
             "[regulation 003]": items[2],
         })
         self.assertEqual(RegulationSection(items).citation_ids, section.citation_ids)
-        self.assertEqual([item.source_id for item in section.items], ["SRC-1", "SRC-1", "SRC-2"])
+        self.assertEqual(set(vars(shared)), {"content"})
         self.assertIn("Unique ID: [regulation 003]\n\nother evidence", section.prepare().content)
 
     def test_summary_keeps_original_mapping_through_final_request(self):
-        items = [Evidence("SRC-1", "first evidence " * 15), Evidence("SRC-2", "second evidence " * 15)]
+        items = [Evidence("first evidence " * 15), Evidence("second evidence " * 15)]
         summarizer = RecordingSummarizer()
         section = RegulationSection(
             items,
@@ -117,7 +116,7 @@ class ReferencedCollectionCitationTests(unittest.TestCase):
 
     def test_truncate_is_noop_and_ignore_rejects_removed_item(self):
         section = RegulationSection(
-            [Evidence("SRC-1", "one"), Evidence("SRC-2", "two")],
+            [Evidence("one"), Evidence("two")],
             overflow_strategies=OverflowStrategyStack([OverflowStrategy.TRUNCATE, OverflowStrategy.IGNORE]),
         )
         prepared = section.prepare()
@@ -132,7 +131,7 @@ class ReferencedCollectionCitationTests(unittest.TestCase):
             section.resolve_citation_ids(["[regulation 002]"], output)
 
     def test_ignore_after_summary_preserves_original_identity(self):
-        items = [Evidence("SRC-1", "first evidence " * 15), Evidence("SRC-2", "second evidence " * 15)]
+        items = [Evidence("first evidence " * 15), Evidence("second evidence " * 15)]
         section = RegulationSection(items, chunk_summarizer=RecordingSummarizer())
         summarized = section.summarize(section.prepare(), 100)
         first_only = "Unique ID: [regulation 001]\n\nbrief first"
@@ -147,7 +146,7 @@ class ReferencedCollectionCitationTests(unittest.TestCase):
             section.resolve_citation_ids(["[regulation 002]"], ignored)
 
     def test_structured_output_rejects_invalid_and_unknown_citations(self):
-        section = RegulationSection([Evidence("SRC-1", "one")])
+        section = RegulationSection([Evidence("one")])
         output = build(section, 200).sections[0]
         for value in ("[regulation 01]", "[Regulation 001]", "[chunk 001]", 1):
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -164,7 +163,7 @@ class ReferencedCollectionCitationTests(unittest.TestCase):
 
     def test_three_digit_limit_is_generic(self):
         with self.assertRaises(ValueError):
-            RegulationSection([Evidence(str(index), "x") for index in range(1000)])
+            RegulationSection([Evidence("x") for _ in range(1000)])
 
 
 if __name__ == "__main__":

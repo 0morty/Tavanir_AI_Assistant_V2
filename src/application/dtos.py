@@ -10,7 +10,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from src.domain.entities import HistoryMessage
 
 from src.application.exceptions import DuplicateEvidenceIdError
-from src.domain.entities import NOISE_PLACEHOLDERS
+from src.domain.entities import GenerationChunk, NOISE_PLACEHOLDERS
 from src.domain.enums import (
     CommitteeScrutiny,
     SecretariatScrutiny,
@@ -441,6 +441,14 @@ class GenerationInput:
             seen_ids.add(item.id)
 
 
+@dataclass(frozen=True, slots=True)
+class GenerationResult:
+    """Generated answer with original source chunks resolved from prompt citations."""
+
+    answer: str
+    citations: list[GenerationChunk]
+
+
 __all__ = [
     "AnalyzeSuggestionResponse",
     "SectionOutput",
@@ -469,4 +477,5 @@ __all__ = [
     "SimilarSuggestionInput",
     "RegulationInput",
     "GenerationInput",
+    "GenerationResult",
 ]

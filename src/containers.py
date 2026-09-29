@@ -101,7 +101,7 @@ from src.infrastructure.services.summarizers import LLMChunkSummarizer, LLMSumma
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
-from src.infrastructure.services.tokenizers.gemma_tokenizer import GemmaTokenizer
+from src.infrastructure.services.tokenizers.qwen_tokenizer import QwenTokenizer
 
 
 async def init_client_registry(
@@ -151,23 +151,23 @@ async def init_llm_client(
     llm_client.close()
 
 
-async def init_tokenizer() -> GemmaTokenizer:
-    """Initialize the Hugging Face tokenizer for context overflow handling."""
+async def init_tokenizer() -> QwenTokenizer:
+    """Load the configured Qwen tokenizer from local files for context budgeting."""
     from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
     try:
         raw = AutoTokenizer.from_pretrained(
-            generation_settings.TOKENIZER_MODEL, use_fast=True
+            generation_settings.TOKENIZER_MODEL, use_fast=True, local_files_only=True
         )
     except Exception as err:
         raise RuntimeError(
-            f"Failed to load tokenizer {generation_settings.TOKENIZER_MODEL!r}: {err}"
+            f"Failed to load local tokenizer {generation_settings.TOKENIZER_MODEL!r}: {err}"
         ) from err
     if not isinstance(raw, PreTrainedTokenizerFast):
         raise RuntimeError(
             f"Tokenizer {generation_settings.TOKENIZER_MODEL!r} could not be loaded as a fast tokenizer."
         )
-    return GemmaTokenizer(raw)
+    return QwenTokenizer(raw)
 
 
 async def init_reranker_client(

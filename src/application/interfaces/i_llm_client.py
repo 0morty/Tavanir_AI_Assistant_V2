@@ -1,16 +1,13 @@
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 
 class ILLMClient(ABC):
     """Application-layer port for LLM invocation.
 
-    This is the Generation API's shared contract for calling an LLM: send a
-    fully assembled prompt and receive the model's raw completion text.
-    Concrete adapters (e.g. an OpenAI-compatible HTTP client) are injected
-    from the infrastructure layer; this port never references a concrete
-    provider. The prompt passed in is already built by the shared
-    ``PromptBuilder`` / ``ContextBuilder`` pipeline.
+    Synchronous prompt operations serve reference and summarization helpers.
+    ``complete_chat`` serves final Generation with role-preserving messages.
+    Infrastructure adapters provide either capability behind this port.
     """
 
     @abstractmethod
@@ -28,3 +25,11 @@ class ILLMClient(ABC):
         no loss of per-prompt isolation.
         """
         return [self.complete(prompt) for prompt in prompts]
+
+    async def complete_chat(self, messages: Sequence[Mapping[str, str]]) -> str:
+        """Return raw text for a role-preserving chat conversation.
+
+        Existing synchronous helper clients can implement only ``complete``;
+        final-generation clients override this async operation.
+        """
+        raise NotImplementedError("This LLM client does not support async chat")

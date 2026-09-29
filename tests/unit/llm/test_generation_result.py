@@ -6,7 +6,7 @@ from typing import get_type_hints
 
 import src.application.dtos as dtos
 from src.application.context.sections import ChunksSection
-from src.application.dtos import GenerationResult
+from src.application.dtos import GenerationResult, SimilarSuggestionInput
 from src.domain.entities import GenerationChunk
 
 
@@ -23,8 +23,8 @@ class GenerationResultTests(unittest.TestCase):
         chunks = [GenerationChunk("source-a", "first"), GenerationChunk("source-b", "second")]
         result = GenerationResult(answer="Supported.", citations=chunks)
 
-        self.assertEqual([field.name for field in fields(GenerationResult)], ["answer", "citations"])
-        self.assertEqual(get_type_hints(GenerationResult)["citations"], list[GenerationChunk])
+        self.assertEqual([field.name for field in fields(GenerationResult)], ["answer", "citations", "uncertainty"])
+        self.assertEqual(get_type_hints(GenerationResult)["citations"], list[GenerationChunk | SimilarSuggestionInput])
         self.assertFalse(hasattr(dtos, "ResolvedCitation"))
         self.assertEqual(len(result.citations), 2)
         self.assertTrue(all(type(citation) is GenerationChunk for citation in result.citations))

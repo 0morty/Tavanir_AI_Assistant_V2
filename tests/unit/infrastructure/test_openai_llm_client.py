@@ -147,6 +147,21 @@ def test_complete_returns_message_content():
     assert client.complete("prompt") == "done"
 
 
+@pytest.mark.asyncio
+async def test_async_chat_reuses_transport_loop_and_preserves_roles():
+    fake = LoopBindingClient(content="done")
+    client = make_client(client=fake, model="m")
+    assert await asyncio.to_thread(client.complete, "helper prompt") == "done"
+
+    messages = [
+        {"role": "system", "content": "instructions"},
+        {"role": "user", "content": "suggestion"},
+    ]
+    assert await client.complete_chat(messages) == "done"
+    assert fake.create_calls[1]["messages"] == messages
+    assert fake._bound_loop is client._loop
+
+
 def test_complete_returns_empty_when_content_is_none():
     fake = FakeCompletionClient(None)
     client = make_client(client=fake, model="m")

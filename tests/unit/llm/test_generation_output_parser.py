@@ -156,7 +156,7 @@ class GenerationOutputParserTests(unittest.TestCase):
                 citation_map=fitted_map,
             )
 
-    def test_rejects_citation_that_does_not_resolve_to_generation_chunk(self) -> None:
+    def test_resolves_original_similar_suggestion(self) -> None:
         suggestion = SimilarSuggestionInput(
             id="SUG-001",
             status=SuggestionStatus.PENDING,
@@ -168,11 +168,12 @@ class GenerationOutputParserTests(unittest.TestCase):
         section = SimilarSuggestionsSection([suggestion])
         retained = section.citation_map_for(section.prepare())
 
-        with self.assertRaises(LLMInvalidCitationError):
-            self.parser.parse(
-                '{"answer": "yes", "citations": ["[similar 001]"]}',
-                citation_map=retained,
-            )
+        result = self.parser.parse(
+            '{"answer": "yes", "citations": ["[similar 001]"], "uncertainty": null}',
+            citation_map=retained,
+        )
+        self.assertIs(result.citations[0], suggestion)
+        self.assertIsNone(result.uncertainty)
 
 
 if __name__ == "__main__":

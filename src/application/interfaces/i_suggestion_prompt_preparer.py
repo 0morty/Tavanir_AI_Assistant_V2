@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from src.application.dtos import ContextBuilderResult, GenerationInput
+from src.application.dtos import ContextBuilderResult, GenerationInput, PreparedGeneration
 
 
 class ISuggestionPromptPreparer(ABC):
@@ -25,4 +25,13 @@ class ISuggestionPromptPreparer(ABC):
             PromptBudgetExceededError: When fixed sections exceed max_prompt_tokens.
             InsufficientEvidenceBudgetError: When remaining budget cannot fit even 1 similar suggestion.
         """
+        raise NotImplementedError
+
+    @abstractmethod
+    def prepare_with_citations(
+        self,
+        generation_input: GenerationInput,
+        max_prompt_tokens: int,
+    ) -> PreparedGeneration:
+        """Return fitted context with its direct retained evidence map."""
         raise NotImplementedError

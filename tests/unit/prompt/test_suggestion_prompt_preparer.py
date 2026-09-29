@@ -32,6 +32,8 @@ from src.application.exceptions import (
     PromptBudgetExceededError,
 )
 from src.application.interfaces import ISuggestionPromptPreparer
+from src.application.interfaces.i_llm_client import ILLMClient
+from src.application.use_cases.generate_suggestion_use_case import GenerateSuggestionUseCase
 from src.domain.enums import SuggestionStatus
 from src.domain.exceptions import InvalidSuggestionContentError
 
@@ -658,6 +660,38 @@ def test_container_resolves_suggestion_prompt_preparer():
     container.tokenizer.override(providers.Object(FakeTokenizer()))
     preparer = container.suggestion_prompt_preparer()
     assert isinstance(preparer, ISuggestionPromptPreparer)
+
+
+@pytest.mark.asyncio
+async def test_container_resolves_and_uses_generation_collaborators():
+    class ScriptedClient(ILLMClient):
+        def __init__(self) -> None:
+            self.messages = None
+
+        def complete(self, prompt: str) -> str:
+            raise AssertionError("Final Generation must use async chat")
+
+        async def complete_chat(self, messages):
+            self.messages = messages
+            return '{"answer":"Validated analysis","citations":["[similar 001]"]}'
+
+    container = Container()
+    client = ScriptedClient()
+    container.tokenizer.override(providers.Object(FakeTokenizer()))
+    container.llm_client.override(providers.Object(client))
+    use_case = container.generate_suggestion_use_case()
+    assert isinstance(use_case, GenerateSuggestionUseCase)
+
+    suggestion = _make_similar("sug-1")
+    result = await use_case.execute(
+        GenerationInput(
+            current_suggestion=_make_current(),
+            similar_suggestions=[suggestion],
+        )
+    )
+    assert result.answer == "Validated analysis"
+    assert result.citations[0] is suggestion
+    assert [message["role"] for message in client.messages] == ["system", "user"]
 
 
 def test_constructor_requires_collaborators():

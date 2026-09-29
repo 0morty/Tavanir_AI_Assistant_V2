@@ -442,11 +442,20 @@ class GenerationInput:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedGeneration:
+    """Fitted prompt and only the original suggestions retained in it."""
+
+    context: ContextBuilderResult
+    citation_map: Mapping[str, SimilarSuggestionInput]
+
+
+@dataclass(frozen=True, slots=True)
 class GenerationResult:
-    """Generated answer with original source chunks resolved from prompt citations."""
+    """Validated model answer with original cited evidence."""
 
     answer: str
-    citations: list[GenerationChunk]
+    citations: list[GenerationChunk | SimilarSuggestionInput]
+    uncertainty: str | None = None
 
 
 __all__ = [
@@ -477,5 +486,6 @@ __all__ = [
     "SimilarSuggestionInput",
     "RegulationInput",
     "GenerationInput",
+    "PreparedGeneration",
     "GenerationResult",
 ]

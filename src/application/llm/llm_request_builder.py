@@ -1,32 +1,48 @@
-"""Serialize a processed ContextBuilderResult as OpenAI-compatible messages."""
+"""Serialize fitted context as provider-neutral chat messages."""
 
 from src.application.dtos import ContextBuilderResult
+from src.application.interfaces.i_llm_request_builder import ILLMRequestBuilder
 
 
-class LLMRequestBuilder:
+class LLMRequestBuilder(ILLMRequestBuilder):
     """Turn fitted section outputs into a chat request without reprocessing them."""
 
     def build_messages(
         self, context_result: ContextBuilderResult
     ) -> list[dict[str, str]]:
-        """Assemble non-history output, then emit the fitted History turns."""
-        system_content = context_result.section_separator.join(
-            output.content
-            for output in context_result.sections
-            if output.section_type != "HISTORY" and output.content
-        )
-        messages: list[dict[str, str]] = []
-        if system_content:
-            messages.append({"role": "system", "content": system_content})
-
+        """Build system, fitted history, and user messages from section outputs."""
+        system_parts: list[str] = []
+        user_parts: list[str] = []
+        history: list[dict[str, str]] = []
         for output in context_result.sections:
-            if output.section_type != "HISTORY":
-                continue
-            if output.history_messages is None:
-                raise ValueError("Processed HISTORY output has no chat messages")
-            messages.extend(
-                {"role": turn.role.value, "content": turn.content}
-                for turn in output.history_messages
+            if output.section_type == "HISTORY":
+                if output.history_messages is None:
+                    raise ValueError("Processed HISTORY output has no chat messages")
+                history.extend(
+                    {"role": turn.role.value, "content": turn.content}
+                    for turn in output.history_messages
+                )
+            elif output.content:
+                if output.section_type in {"USER-INPUT", "SIMILAR-SUGGESTIONS"}:
+                    user_parts.append(output.content)
+                else:
+                    system_parts.append(output.content)
+
+        messages: list[dict[str, str]] = []
+        if system_parts:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": context_result.section_separator.join(system_parts),
+                }
+            )
+        messages.extend(history)
+        if user_parts:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": context_result.section_separator.join(user_parts),
+                }
             )
         return messages
 

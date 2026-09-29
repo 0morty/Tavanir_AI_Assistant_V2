@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.application.dtos import GenerationResult
+    from src.application.dtos import GenerationResult, SimilarSuggestionInput
     from src.domain.entities import GenerationChunk
 
 
@@ -19,6 +19,6 @@ class IOutputParser(ABC):
         self,
         raw_output: str,
         *,
-        citation_map: Mapping[str, GenerationChunk],
+        citation_map: Mapping[str, GenerationChunk | SimilarSuggestionInput],
     ) -> GenerationResult:
-        """Return an answer and original chunks from ``citation_map_for`` output."""
+        """Return an answer and original retained evidence objects."""

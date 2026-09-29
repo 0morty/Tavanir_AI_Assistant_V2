@@ -165,7 +165,7 @@ class LLMRequestBuilderPipelineTests(unittest.TestCase):
             [{"role": "user", "content": "hi"}],
         )
 
-    def test_non_history_outputs_form_one_system_message(self) -> None:
+    def test_user_input_follows_history_as_a_user_message(self) -> None:
         builder = PromptBuilder(seed_defaults=False)
         builder.add_section(RoleSection("You are an analyst."))
         builder.add_section(HistorySection([HistoryMessage(HistoryRole.USER, "hello")]))
@@ -177,9 +177,10 @@ class LLMRequestBuilderPipelineTests(unittest.TestCase):
             [
                 {
                     "role": "system",
-                    "content": "You are an analyst.\n\nAnalyze the proposal.\n\nPlain text.",
+                    "content": "You are an analyst.\n\nPlain text.",
                 },
                 {"role": "user", "content": "hello"},
+                {"role": "user", "content": "Analyze the proposal."},
             ],
         )
 

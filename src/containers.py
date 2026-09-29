@@ -23,6 +23,7 @@ from src.application.interfaces import (
     IHistoricalSuggestionExtractor,
     IHybridEmbeddingService,
     ILLMClient,
+    ILLMRequestBuilder,
     IOverflowStrategyDispatcher,
     IQdrantAdminService,
     IRedistributionAllocator,
@@ -36,6 +37,10 @@ from src.application.interfaces import (
     IUnitOfWork,
 )
 from src.application.interfaces.i_output_parser import IOutputParser
+from src.application.llm import LLMRequestBuilder
+from src.application.use_cases.generate_suggestion_use_case import (
+    GenerateSuggestionUseCase,
+)
 from src.application.prompt import (
     SuggestionAnalysisPromptConfig,
     SuggestionPromptPreparer,
@@ -425,6 +430,10 @@ class Container(containers.DeclarativeContainer):
         GenerationOutputParser
     )
 
+    llm_request_builder: providers.Provider[ILLMRequestBuilder] = providers.Singleton(
+        LLMRequestBuilder
+    )
+
     # 14. Generation LLM Summarizer (Context overflow SUMMARIZE strategy)
     llm_summarizer: providers.Provider[ITextSummarizer] = providers.Singleton(
         LLMSummarizer,
@@ -460,6 +469,17 @@ class Container(containers.DeclarativeContainer):
             context_builder=context_builder,
             tokenizer=tokenizer,
             config=suggestion_analysis_prompt_config,
+        )
+    )
+
+    generate_suggestion_use_case: providers.Provider[GenerateSuggestionUseCase] = (
+        providers.Factory(
+            GenerateSuggestionUseCase,
+            prompt_preparer=suggestion_prompt_preparer,
+            request_builder=llm_request_builder,
+            llm_client=llm_client,
+            output_parser=generation_output_parser,
+            max_prompt_tokens=suggestion_analysis_settings.SUGGESTION_ANALYSIS_MAX_PROMPT_TOKENS,
         )
     )
 

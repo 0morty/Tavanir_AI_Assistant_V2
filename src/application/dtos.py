@@ -10,7 +10,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from src.domain.entities import HistoryMessage
 
 from src.application.exceptions import DuplicateEvidenceIdError
-from src.domain.entities import GenerationChunk, NOISE_PLACEHOLDERS
+from src.domain.entities import GenerationChunk, NOISE_PLACEHOLDERS, Reference
 from src.domain.enums import (
     CommitteeScrutiny,
     SecretariatScrutiny,
@@ -369,6 +369,44 @@ class SimilarSuggestionInput:
     solution: str
     similarity: float
     context_title: str | None = None
+    reference: Reference | None = None
+
+    def to_generation_chunk(self, index: int = 1) -> GenerationChunk:
+        """Adapts this suggestion DTO into a strictly typed GenerationChunk."""
+        from src.application.reference.similar_suggestion_reference import (
+            SimilarSuggestionReference,
+        )
+
+        status_str = (
+            self.status.title_fa
+            if hasattr(self.status, "title_fa")
+            else str(self.status)
+        )
+        sim_str = f"{float(self.similarity):.2f}"
+        ctx_str = f" | حوزه: {self.context_title}" if self.context_title else ""
+
+        ref = self.reference
+        if ref is None:
+            ref = SimilarSuggestionReference(
+                suggestion_id=self.id,
+                status=status_str,
+                similarity=self.similarity,
+                context_title=self.context_title,
+            )
+
+        content = (
+            f"[پیشنهاد مشابه {index}] کد پیشنهاد: {self.id} | "
+            f"وضعیت: {status_str} | میزان تشابه: {sim_str}\n"
+            f"عنوان: {self.title}\n"
+            f"مسئله: {self.problem}\n"
+            f"راهکار: {self.solution}"
+        )
+
+        return GenerationChunk(
+            chunk_id=self.id,
+            content=content,
+            reference=ref,
+        )
 
     def validate_with_index(self, index: int) -> None:
         if not self.id or not isinstance(self.id, str) or not self.id.strip():

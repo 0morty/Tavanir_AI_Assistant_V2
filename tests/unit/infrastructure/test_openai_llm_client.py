@@ -316,3 +316,14 @@ def test_complete_after_close_fails_fast():
 
     with pytest.raises(RuntimeError):
         client.complete("prompt")
+
+@pytest.mark.parametrize('indexes', [(0, 0), (1, 1), (False, True)])
+def test_complete_many_rejects_ambiguous_batch_indexes(indexes):
+    """Each returned summary must have one unambiguous input position."""
+    fake = ChoiceBatchClient([
+        {'index': index, 'message': {'content': f'summary-{position}'}}
+        for position, index in enumerate(indexes)
+    ])
+    client = make_client(client=fake)
+    with pytest.raises(LLMAPIError, match='choice index'):
+        client.complete_many(['evidence-A', 'evidence-B'])

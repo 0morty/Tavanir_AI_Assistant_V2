@@ -242,12 +242,16 @@ def _extract_batch_results(data: object, expected: int) -> list[str]:
         )
 
     results: list[str] = [""] * expected
+    seen_indexes: set[int] = set()
     for choice in choices:
         if not isinstance(choice, dict):
             raise LLMAPIError("Unexpected batch response choice.")
         index = choice.get("index")
-        if not isinstance(index, int) or not 0 <= index < expected:
+        if type(index) is not int or not 0 <= index < expected:
             raise LLMAPIError(f"Invalid choice index in batch response: {index!r}.")
+        if index in seen_indexes:
+            raise LLMAPIError(f"Duplicate choice index in batch response: {index}.")
+        seen_indexes.add(index)
         message = choice.get("message")
         content = message.get("content") if isinstance(message, dict) else None
         results[index] = content if isinstance(content, str) else ""

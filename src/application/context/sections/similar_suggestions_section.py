@@ -4,14 +4,15 @@ from typing import Any
 from src.application.context.sections.referenced_collection_section import (
     ReferencedCollectionSection,
 )
-from src.application.dtos import SimilarSuggestionInput
+from src.application.dtos import SectionProcessingResult, SimilarSuggestionInput
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.context.summarizer import Summarizer
+from src.domain.context.tokenizer import Tokenizer
 from src.domain.overflow_strategy_stack import OverflowStrategy, OverflowStrategyStack
 
 
 class SimilarSuggestionsSection(ReferencedCollectionSection):
-    """Render retrieved suggestions in strict upstream rank order."""
+    """Render suggestions in rank order while retaining their original identities."""
 
     def __init__(
         self,
@@ -47,23 +48,38 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         return "## سوابق پیشنهادات مشابه بازیابی‌شده:"
 
     def item_content(self, item: Any) -> str:
-        status_val = getattr(item, "status", None)
-        status_title = (
-            getattr(status_val, "title_fa", str(status_val))
-            if status_val is not None
-            else ""
-        )
-        similarity = getattr(item, "similarity", 0.0)
-        try:
-            sim_str = f"{float(similarity):.2f}"
-        except (ValueError, TypeError):
-            sim_str = "0.00"
-        title = getattr(item, "title", "")
-        problem = getattr(item, "problem", "")
-        solution = getattr(item, "solution", "")
-        return (
-            f"وضعیت: {status_title} | میزان تشابه: {sim_str}\n"
-            f"عنوان: {title}\n"
-            f"مسئله: {problem}\n"
-            f"راهکار: {solution}"
-        )
+        if isinstance(item, SimilarSuggestionInput):
+            return item.to_generation_chunk(1).content
+        return getattr(item, "content", "")
+
+    def _item_body_at(self, item: Any, index: int) -> str:
+        if isinstance(item, SimilarSuggestionInput):
+            chunk = item.to_generation_chunk(index + 1)
+            return self._cited_body(chunk, index, chunk.content)
+        return super()._item_body_at(item, index)
+
+    def ignore(
+        self,
+        content: SectionProcessingResult | str,
+        capacity_tokens: int,
+        *,
+        tokenizer: Tokenizer,
+    ) -> SectionProcessingResult | str:
+        """Fit a prefix of complete suggestions, including legacy string callers."""
+        if isinstance(content, str):
+            return super().ignore(
+                self.prepare(), capacity_tokens, tokenizer=tokenizer
+            ).content
+        return super().ignore(content, capacity_tokens, tokenizer=tokenizer)
+
+    def truncate(
+        self,
+        content: SectionProcessingResult | str,
+        capacity_tokens: int,
+        *,
+        tokenizer: Tokenizer,
+    ) -> SectionProcessingResult | str:
+        """Keep fitted objects intact; legacy string callers receive no fragment."""
+        if isinstance(content, str):
+            return ""
+        return super().truncate(content, capacity_tokens, tokenizer=tokenizer)

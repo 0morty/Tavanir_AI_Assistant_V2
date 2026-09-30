@@ -1,9 +1,11 @@
 from src.application.context.sections.similar_suggestions_section import (
     SimilarSuggestionsSection,
 )
+from src.application.dtos import SectionProcessingResult, SimilarSuggestionInput
+from src.application.reference.similar_suggestion_reference import (
+    SimilarSuggestionReference,
+)
 from src.domain.context.tokenizer import Tokenizer
-
-from src.application.dtos import SimilarSuggestionInput
 from src.domain.enums import SuggestionStatus
 
 
@@ -48,8 +50,8 @@ def test_render_includes_all_when_budget_unlimited():
     assert "## سوابق پیشنهادات مشابه بازیابی‌شده:" in rendered
     assert "Unique ID: [similar 001]" in rendered
     assert "Unique ID: [similar 002]" in rendered
-    assert "کد پیشنهاد: 101" not in rendered
-    assert "[پیشنهاد مشابه 1]" not in rendered
+    assert "کد پیشنهاد: 101" in rendered
+    assert "[پیشنهاد مشابه 1]" in rendered
     assert "0.98" in rendered
     assert "0.91" in rendered
 
@@ -105,3 +107,37 @@ def test_truncate_keeps_whole_collection_for_ignore_fallback():
     section = SimilarSuggestionsSection([_make_item("101")])
     prepared = section.prepare()
     assert section.truncate(prepared, 50, tokenizer=tok) is prepared
+    assert section.truncate(section.render(), 50, tokenizer=tok) == ""
+
+
+def test_similar_suggestions_keep_original_items_and_render_reference_metadata():
+    s1 = _make_item("101", similarity=0.98)
+    s2 = _make_item("102", similarity=0.91)
+    section = SimilarSuggestionsSection([s1, s2])
+
+    assert section.items == (s1, s2)
+    assert section.citation_map_for(section.prepare()) == {
+        "[similar 001]": s1,
+        "[similar 002]": s2,
+    }
+    assert isinstance(s1.to_generation_chunk().reference, SimilarSuggestionReference)
+    rendered = section.render()
+    assert "[پیشنهاد مشابه 1]" in rendered
+    assert "[پیشنهاد مشابه 2]" in rendered
+    assert "Unique ID: [similar 001]" in rendered
+    assert "Unique ID: [similar 002]" in rendered
+
+
+def test_similar_suggestions_section_processing_result_support():
+    tok = FakeCharTokenizer()
+    s1 = _make_item("101", problem="الف" * 20)
+    section = SimilarSuggestionsSection([s1])
+
+    prepared = section.prepare()
+    assert isinstance(prepared, SectionProcessingResult)
+    assert prepared.items == (s1,)
+    result = section.ignore(prepared, len(prepared.content), tokenizer=tok)
+    assert isinstance(result, SectionProcessingResult)
+    assert result.items == (s1,)
+    assert "101" in result.content
+    assert section.ignore(section.render(), len(prepared.content), tokenizer=tok) == result.content

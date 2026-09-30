@@ -9,6 +9,7 @@ from src.domain.entities import HistoryMessage
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 
 
+# TODO: همگام سازی با استاندارد GenerationChunk
 class HistorySection(ReferencedCollectionSection):
     """Conversation turns whose processed results retain order and roles."""
 
@@ -44,6 +45,7 @@ class HistorySection(ReferencedCollectionSection):
         return "History of previous interactions:"
 
     def item_content(self, item: Any) -> str:
+        """Render a turn as ``role: content`` so the sender is preserved."""
         return f"{item.role.value}: {item.content}"
 
     def _summary_bodies(

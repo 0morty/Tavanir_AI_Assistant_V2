@@ -8,6 +8,7 @@ from src.application.context.allocation import (
     RedistributionAllocator,
 )
 from src.application.context.context_builder import ContextBuilder
+from src.application.context.sections.similar_suggestions_section import SimilarSuggestionsSection
 from src.application.context.overflow_strategy_dispatcher import (
     OverflowStrategyDispatcher,
 )
@@ -446,14 +447,9 @@ def test_exact_budget_for_single_item():
     )
     t_sep = 3 * tokenizer.count_tokens("\n\n")
 
-    # Tokens for item 1 with pre_context framing
-    status_title = getattr(sug1.status, "title_fa", str(sug1.status))
-    item1_content = f"Unique ID: [similar 001]\n\nوضعیت: {status_title} | میزان تشابه: {sug1.similarity:.2f}\nعنوان: {sug1.title}\nمسئله: {sug1.problem}\nراهکار: {sug1.solution}"
-    pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
-    item1_tokens = (
-        tokenizer.count_tokens(pre_header)
-        + tokenizer.count_tokens("\n\n")
-        + tokenizer.count_tokens(item1_content)
+    # Count the rendered first item, including its reference metadata and citation.
+    item1_tokens = tokenizer.count_tokens(
+        SimilarSuggestionsSection([sug1]).prepare().content
     )
 
     exact_budget = t_fixed + t_sep + item1_tokens
@@ -488,14 +484,9 @@ def test_oversized_first_item_never_skipped():
     )
     t_sep = 3 * tokenizer.count_tokens("\n\n")
 
-    # Give budget enough for sug2_small, but not enough for sug1_large
-    status_title2 = getattr(sug2_small.status, "title_fa", str(sug2_small.status))
-    item2_content = f"Unique ID: [similar 001]\n\nوضعیت: {status_title2} | میزان تشابه: {sug2_small.similarity:.2f}\nعنوان: {sug2_small.title}\nمسئله: {sug2_small.problem}\nراهکار: {sug2_small.solution}"
-    pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
-    item2_tokens = (
-        tokenizer.count_tokens(pre_header)
-        + tokenizer.count_tokens("\n\n")
-        + tokenizer.count_tokens(item2_content)
+    # Give budget enough for the smaller second item, but not the first.
+    item2_tokens = tokenizer.count_tokens(
+        SimilarSuggestionsSection([sug2_small]).prepare().content
     )
 
     budget = t_fixed + t_sep + item2_tokens + 10
@@ -525,14 +516,9 @@ def test_oversized_intermediate_item_stops_collection():
     )
     t_sep = 3 * tokenizer.count_tokens("\n\n")
 
-    # Capacity enough for sug1 + a bit more, but not enough for sug2_large
-    status_title1 = getattr(sug1.status, "title_fa", str(sug1.status))
-    item1_content = f"Unique ID: [similar 001]\n\nوضعیت: {status_title1} | میزان تشابه: {sug1.similarity:.2f}\nعنوان: {sug1.title}\nمسئله: {sug1.problem}\nراهکار: {sug1.solution}"
-    pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
-    item1_tokens = (
-        tokenizer.count_tokens(pre_header)
-        + tokenizer.count_tokens("\n\n")
-        + tokenizer.count_tokens(item1_content)
+    # Capacity enough for the first rendered item, but not the next large item.
+    item1_tokens = tokenizer.count_tokens(
+        SimilarSuggestionsSection([sug1]).prepare().content
     )
 
     budget = t_fixed + t_sep + item1_tokens + 50

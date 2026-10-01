@@ -8,6 +8,7 @@ from src.application.context.allocation import (
     RedistributionAllocator,
 )
 from src.application.context.context_builder import ContextBuilder
+from src.application.context.sections.similar_suggestions_section import SimilarSuggestionsSection
 from src.application.context.overflow_strategy_dispatcher import (
     OverflowStrategyDispatcher,
 )
@@ -32,6 +33,8 @@ from src.application.exceptions import (
     PromptBudgetExceededError,
 )
 from src.application.interfaces import ISuggestionPromptPreparer
+from src.application.interfaces.i_llm_client import ILLMClient
+from src.application.use_cases.generate_suggestion_use_case import GenerateSuggestionUseCase
 from src.domain.enums import SuggestionStatus
 from src.domain.exceptions import InvalidSuggestionContentError
 
@@ -444,21 +447,16 @@ def test_exact_budget_for_single_item():
     )
     t_sep = 3 * tokenizer.count_tokens("\n\n")
 
-    # Tokens for item 1 with pre_context framing
-    status_title = getattr(sug1.status, "title_fa", str(sug1.status))
-    item1_content = f"[پیشنهاد مشابه 1] کد پیشنهاد: {sug1.id} | وضعیت: {status_title} | میزان تشابه: {sug1.similarity:.2f}\nعنوان: {sug1.title}\nمسئله: {sug1.problem}\nراهکار: {sug1.solution}"
-    pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
-    item1_tokens = (
-        tokenizer.count_tokens(pre_header)
-        + tokenizer.count_tokens("\n\n")
-        + tokenizer.count_tokens(item1_content)
+    # Count the rendered first item, including its reference metadata and citation.
+    item1_tokens = tokenizer.count_tokens(
+        SimilarSuggestionsSection([sug1]).prepare().content
     )
 
     exact_budget = t_fixed + t_sep + item1_tokens
     result = preparer.prepare(gen_input, max_prompt_tokens=exact_budget)
 
-    assert "101" in result.prompt
-    assert "102" not in result.prompt
+    assert "Unique ID: [similar 001]" in result.prompt
+    assert "Unique ID: [similar 002]" not in result.prompt
     assert result.total_tokens <= exact_budget
 
 
@@ -486,14 +484,9 @@ def test_oversized_first_item_never_skipped():
     )
     t_sep = 3 * tokenizer.count_tokens("\n\n")
 
-    # Give budget enough for sug2_small, but not enough for sug1_large
-    status_title2 = getattr(sug2_small.status, "title_fa", str(sug2_small.status))
-    item2_content = f"[پیشنهاد مشابه 1] کد پیشنهاد: {sug2_small.id} | وضعیت: {status_title2} | میزان تشابه: {sug2_small.similarity:.2f}\nعنوان: {sug2_small.title}\nمسئله: {sug2_small.problem}\nراهکار: {sug2_small.solution}"
-    pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
-    item2_tokens = (
-        tokenizer.count_tokens(pre_header)
-        + tokenizer.count_tokens("\n\n")
-        + tokenizer.count_tokens(item2_content)
+    # Give budget enough for the smaller second item, but not the first.
+    item2_tokens = tokenizer.count_tokens(
+        SimilarSuggestionsSection([sug2_small]).prepare().content
     )
 
     budget = t_fixed + t_sep + item2_tokens + 10
@@ -523,23 +516,18 @@ def test_oversized_intermediate_item_stops_collection():
     )
     t_sep = 3 * tokenizer.count_tokens("\n\n")
 
-    # Capacity enough for sug1 + a bit more, but not enough for sug2_large
-    status_title1 = getattr(sug1.status, "title_fa", str(sug1.status))
-    item1_content = f"[پیشنهاد مشابه 1] کد پیشنهاد: {sug1.id} | وضعیت: {status_title1} | میزان تشابه: {sug1.similarity:.2f}\nعنوان: {sug1.title}\nمسئله: {sug1.problem}\nراهکار: {sug1.solution}"
-    pre_header = "## سوابق پیشنهادات مشابه بازیابی‌شده:"
-    item1_tokens = (
-        tokenizer.count_tokens(pre_header)
-        + tokenizer.count_tokens("\n\n")
-        + tokenizer.count_tokens(item1_content)
+    # Capacity enough for the first rendered item, but not the next large item.
+    item1_tokens = tokenizer.count_tokens(
+        SimilarSuggestionsSection([sug1]).prepare().content
     )
 
     budget = t_fixed + t_sep + item1_tokens + 50
     result = preparer.prepare(gen_input, max_prompt_tokens=budget)
 
     # Asserts sug1 is present, but sug2 and sug3 are NOT present (break on sug2)
-    assert "101" in result.prompt
-    assert "102" not in result.prompt
-    assert "103" not in result.prompt
+    assert "Unique ID: [similar 001]" in result.prompt
+    assert "Unique ID: [similar 002]" not in result.prompt
+    assert "Unique ID: [similar 003]" not in result.prompt
 
 
 # ==============================================================================
@@ -658,6 +646,38 @@ def test_container_resolves_suggestion_prompt_preparer():
     container.tokenizer.override(providers.Object(FakeTokenizer()))
     preparer = container.suggestion_prompt_preparer()
     assert isinstance(preparer, ISuggestionPromptPreparer)
+
+
+@pytest.mark.asyncio
+async def test_container_resolves_and_uses_generation_collaborators():
+    class ScriptedClient(ILLMClient):
+        def __init__(self) -> None:
+            self.messages = None
+
+        def complete(self, prompt: str) -> str:
+            raise AssertionError("Final Generation must use async chat")
+
+        async def complete_chat(self, messages):
+            self.messages = messages
+            return '{"answer":"Validated analysis","citations":["[similar 001]"]}'
+
+    container = Container()
+    client = ScriptedClient()
+    container.tokenizer.override(providers.Object(FakeTokenizer()))
+    container.llm_client.override(providers.Object(client))
+    use_case = container.generate_suggestion_use_case()
+    assert isinstance(use_case, GenerateSuggestionUseCase)
+
+    suggestion = _make_similar("sug-1")
+    result = await use_case.execute(
+        GenerationInput(
+            current_suggestion=_make_current(),
+            similar_suggestions=[suggestion],
+        )
+    )
+    assert result.answer == "Validated analysis"
+    assert result.citations[0] is suggestion
+    assert [message["role"] for message in client.messages] == ["system", "user"]
 
 
 def test_constructor_requires_collaborators():

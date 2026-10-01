@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from src.application.context.allocation.capacity_allocator import CapacityRequest
 from src.application.dtos import (
     ContextBuilderResult,
@@ -10,9 +14,11 @@ from src.application.interfaces.i_context_builder import IContextBuilder
 from src.application.interfaces.i_overflow_strategy_dispatcher import (
     IOverflowStrategyDispatcher,
 )
-from src.application.prompt.prompt_builder import PromptBuilder
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.enums import OverflowStrategy
+
+if TYPE_CHECKING:
+    from src.application.prompt.prompt_builder import PromptBuilder
 
 
 class ContextBuilder(IContextBuilder):
@@ -83,6 +89,7 @@ class ContextBuilder(IContextBuilder):
                     fitted_tokens=self._tokenizer.count_tokens(result.content),
                     overflowed=overflowed,
                     items=result.items,
+                    citation_ids=result.citation_ids,
                 )
             )
 

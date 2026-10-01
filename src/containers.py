@@ -23,6 +23,7 @@ from src.application.interfaces import (
     IHistoricalSuggestionExtractor,
     IHybridEmbeddingService,
     ILLMClient,
+    ILLMRequestBuilder,
     IOverflowStrategyDispatcher,
     IQdrantAdminService,
     IRedistributionAllocator,
@@ -34,6 +35,11 @@ from src.application.interfaces import (
     ITextNormalizer,
     ITextSummarizer,
     IUnitOfWork,
+)
+from src.application.interfaces.i_output_parser import IOutputParser
+from src.application.llm import LLMRequestBuilder
+from src.application.use_cases.generate_suggestion_use_case import (
+    GenerateSuggestionUseCase,
 )
 from src.application.prompt import (
     SuggestionAnalysisPromptConfig,
@@ -93,13 +99,14 @@ from src.infrastructure.services.embeddings.persian_bm25_embedder import (
 from src.infrastructure.services.extractors import MssqlSuggestionExtractor
 from src.infrastructure.services.llm import OpenAILLMClient
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
+from src.infrastructure.services.llm.output_parser import GenerationOutputParser
 from src.infrastructure.services.qdrant import QdrantAdminService
 from src.infrastructure.services.reranker import TEIReranker
 from src.infrastructure.services.summarizers import LLMChunkSummarizer, LLMSummarizer
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
-from src.infrastructure.services.tokenizers.gemma_tokenizer import GemmaTokenizer
+from src.infrastructure.services.tokenizers.qwen_tokenizer import QwenTokenizer
 
 
 async def init_client_registry(
@@ -149,23 +156,23 @@ async def init_llm_client(
     llm_client.close()
 
 
-async def init_tokenizer() -> GemmaTokenizer:
-    """Initialize the Hugging Face tokenizer for context overflow handling."""
+async def init_tokenizer() -> QwenTokenizer:
+    """Load the configured Qwen tokenizer from local files for context budgeting."""
     from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
     try:
         raw = AutoTokenizer.from_pretrained(
-            generation_settings.TOKENIZER_MODEL, use_fast=True
+            generation_settings.TOKENIZER_MODEL, use_fast=True, local_files_only=True
         )
     except Exception as err:
         raise RuntimeError(
-            f"Failed to load tokenizer {generation_settings.TOKENIZER_MODEL!r}: {err}"
+            f"Failed to load local tokenizer {generation_settings.TOKENIZER_MODEL!r}: {err}"
         ) from err
     if not isinstance(raw, PreTrainedTokenizerFast):
         raise RuntimeError(
             f"Tokenizer {generation_settings.TOKENIZER_MODEL!r} could not be loaded as a fast tokenizer."
         )
-    return GemmaTokenizer(raw)
+    return QwenTokenizer(raw)
 
 
 async def init_reranker_client(
@@ -437,6 +444,14 @@ class Container(containers.DeclarativeContainer):
         max_tokens=generation_settings.LLM_MAX_TOKENS,
     )
 
+    generation_output_parser: providers.Provider[IOutputParser] = providers.Singleton(
+        GenerationOutputParser
+    )
+
+    llm_request_builder: providers.Provider[ILLMRequestBuilder] = providers.Singleton(
+        LLMRequestBuilder
+    )
+
     # 14. Generation LLM Summarizer (Context overflow SUMMARIZE strategy)
     llm_summarizer: providers.Provider[ITextSummarizer] = providers.Singleton(
         LLMSummarizer,
@@ -472,6 +487,17 @@ class Container(containers.DeclarativeContainer):
             context_builder=context_builder,
             tokenizer=tokenizer,
             config=suggestion_analysis_prompt_config,
+        )
+    )
+
+    generate_suggestion_use_case: providers.Provider[GenerateSuggestionUseCase] = (
+        providers.Factory(
+            GenerateSuggestionUseCase,
+            prompt_preparer=suggestion_prompt_preparer,
+            request_builder=llm_request_builder,
+            llm_client=llm_client,
+            output_parser=generation_output_parser,
+            max_prompt_tokens=suggestion_analysis_settings.SUGGESTION_ANALYSIS_MAX_PROMPT_TOKENS,
         )
     )
 

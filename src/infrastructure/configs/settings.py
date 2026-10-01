@@ -79,8 +79,13 @@ class GenerationSettings(BaseSettings):
     LLM_TEMPERATURE: float = 0.2
     LLM_MAX_TOKENS: int = 4096
 
-    # Tokenizer configuration for context overflow handling
-    TOKENIZER_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
+    # Local Qwen tokenizer assets for context overflow handling.
+    TOKENIZER_MODEL: str = str(
+        Path(__file__).resolve().parents[3]
+        / "assets"
+        / "tokenizers"
+        / "Qwen2.5-7B-Instruct"
+    )
 
 
 class BM25Settings(BaseSettings):

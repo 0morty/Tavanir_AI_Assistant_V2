@@ -8,19 +8,11 @@ from src.application.dtos import SectionProcessingResult, SimilarSuggestionInput
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
-from src.domain.overflow_strategy_stack import (
-    OverflowStrategy,
-    OverflowStrategyStack,
-)
+from src.domain.overflow_strategy_stack import OverflowStrategy, OverflowStrategyStack
 
 
 class SimilarSuggestionsSection(ReferencedCollectionSection):
-    """Section rendering retrieved similar suggestions in strict upstream rank order.
-
-    Enforces rank integrity with no out-of-order skipping (knapsack anti-skip).
-    Overrides :meth:`truncate` to return an empty string or result, preventing
-    :class:`ContextBuilder` from falling back to mid-sentence cutting.
-    """
+    """Render suggestions in rank order while retaining their original identities."""
 
     def __init__(
         self,
@@ -32,14 +24,10 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         summarizer: Summarizer | None = None,
         chunk_summarizer: ITextSummarizer | None = None,
     ) -> None:
-        chunks = [
-            item.to_generation_chunk(idx + 1)
-            for idx, item in enumerate(suggestions)
-        ]
-
         resolved_overflow = OverflowStrategyStack([OverflowStrategy.IGNORE])
         super().__init__(
-            items=chunks,
+            items=suggestions,
+            citation_label="similar",
             item_separator=item_separator,
             importance=importance,
             demand=demand,
@@ -60,20 +48,15 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         return "## سوابق پیشنهادات مشابه بازیابی‌شده:"
 
     def item_content(self, item: Any) -> str:
-        """Return the chunk content, adapting SimilarSuggestionInput if passed directly."""
         if isinstance(item, SimilarSuggestionInput):
             return item.to_generation_chunk(1).content
         return getattr(item, "content", "")
 
-    def _item_body(self, item: Any) -> str:
-        """The item content already contains its formatted heading and metadata."""
-        return self.item_content(item)
-
-    def compose_referenced_content(self, reference_text: str, content: str) -> str:
-        """Compose citation only if not already present in the formatted content heading."""
-        if not reference_text or reference_text in content:
-            return content
-        return f"{reference_text}\n{content}"
+    def _item_body_at(self, item: Any, index: int) -> str:
+        if isinstance(item, SimilarSuggestionInput):
+            chunk = item.to_generation_chunk(index + 1)
+            return self._cited_body(chunk, index, chunk.content)
+        return super()._item_body_at(item, index)
 
     def ignore(
         self,
@@ -82,11 +65,12 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         *,
         tokenizer: Tokenizer,
     ) -> SectionProcessingResult | str:
-        """Fit items in rank order, supporting both SectionProcessingResult and legacy str callers."""
-        is_str = isinstance(content, str)
-        prep = self.prepare() if is_str else content
-        result = super().ignore(prep, capacity_tokens, tokenizer=tokenizer)
-        return result.content if is_str else result
+        """Fit a prefix of complete suggestions, including legacy string callers."""
+        if isinstance(content, str):
+            return super().ignore(
+                self.prepare(), capacity_tokens, tokenizer=tokenizer
+            ).content
+        return super().ignore(content, capacity_tokens, tokenizer=tokenizer)
 
     def truncate(
         self,
@@ -95,7 +79,7 @@ class SimilarSuggestionsSection(ReferencedCollectionSection):
         *,
         tokenizer: Tokenizer,
     ) -> SectionProcessingResult | str:
-        """Neutralize truncation to prevent mid-sentence cutting."""
+        """Keep fitted objects intact; legacy string callers receive no fragment."""
         if isinstance(content, str):
             return ""
-        return SectionProcessingResult("", (), (), ())
+        return super().truncate(content, capacity_tokens, tokenizer=tokenizer)

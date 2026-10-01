@@ -128,6 +128,22 @@ class LLMAuthenticationError(LLMBaseError):
     pass
 
 
+class LLMOutputParseError(LLMBaseError):
+    """Raised when the final model response cannot be parsed as valid output."""
+
+
+class LLMOutputSchemaError(LLMOutputParseError):
+    """Raised when parsed model output lacks the required answer or citations shape."""
+
+
+class LLMInvalidCitationError(LLMOutputParseError):
+    """Raised when a citation has invalid syntax or resolves to the wrong type."""
+
+
+class LLMUnknownCitationError(LLMOutputParseError):
+    """Raised when a citation is absent from the fitted prompt's retained map."""
+
+
 class ChunkSummarizationError(LLMBaseError):
     """Raised when batched LLM chunk summarization cannot produce a strict 1:1 mapping.
 

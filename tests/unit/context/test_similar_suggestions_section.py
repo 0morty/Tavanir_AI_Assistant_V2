@@ -6,7 +6,6 @@ from src.application.reference.similar_suggestion_reference import (
     SimilarSuggestionReference,
 )
 from src.domain.context.tokenizer import Tokenizer
-from src.domain.entities import GenerationChunk
 from src.domain.enums import SuggestionStatus
 
 
@@ -43,15 +42,16 @@ def _make_item(
 
 
 def test_render_includes_all_when_budget_unlimited():
-    tok = FakeCharTokenizer()
     s1 = _make_item("101", similarity=0.98)
     s2 = _make_item("102", similarity=0.91)
     section = SimilarSuggestionsSection([s1, s2])
     rendered = section.render()
 
     assert "## سوابق پیشنهادات مشابه بازیابی‌شده:" in rendered
-    assert "[پیشنهاد مشابه 1] کد پیشنهاد: 101" in rendered
-    assert "[پیشنهاد مشابه 2] کد پیشنهاد: 102" in rendered
+    assert "Unique ID: [similar 001]" in rendered
+    assert "Unique ID: [similar 002]" in rendered
+    assert "کد پیشنهاد: 101" in rendered
+    assert "[پیشنهاد مشابه 1]" in rendered
     assert "0.98" in rendered
     assert "0.91" in rendered
 
@@ -73,17 +73,18 @@ def test_ignore_preserves_strict_rank_order():
     pre_tokens = tok.count_tokens(pre)
     frame_sep_tokens = tok.count_tokens(section.separator)
 
-    item1_tokens = tok.count_tokens(section.item_content(s1))
-    item2_tokens = tok.count_tokens(section.item_content(s2))
+    prepared = section.prepare()
+    item1_tokens = tok.count_tokens(prepared.item_bodies[0])
+    item2_tokens = tok.count_tokens(prepared.item_bodies[1])
     sep_tokens = tok.count_tokens(section.item_separator)
 
-    # Budget fits s1 and s2, but NOT s3
+    # Budget fits s1 and s2, but not s3.
     capacity = pre_tokens + frame_sep_tokens + item1_tokens + sep_tokens + item2_tokens
-    fitted = section.ignore(section.render(), capacity, tokenizer=tok)
+    fitted = section.ignore(prepared, capacity, tokenizer=tok)
 
-    assert "101" in fitted
-    assert "102" in fitted
-    assert "103" not in fitted
+    assert fitted.citation_ids == ("[similar 001]", "[similar 002]")
+    assert "[similar 003]" not in fitted.content
+    assert [item.id for item in fitted.items] == ["101", "102"]
 
 
 def test_ignore_suppresses_header_when_zero_items_fit():
@@ -94,33 +95,37 @@ def test_ignore_suppresses_header_when_zero_items_fit():
     # Capacity only enough for header, but not enough for s1
     pre = section.pre_context
     pre_tokens = tok.count_tokens(pre)
-    fitted = section.ignore(section.render(), pre_tokens + 5, tokenizer=tok)
+    fitted = section.ignore(section.prepare(), pre_tokens + 5, tokenizer=tok)
 
-    # Whole section must be suppressed to empty string
-    assert fitted == ""
+    # Whole section must be suppressed to empty string.
+    assert fitted.content == ""
+    assert fitted.citation_ids == ()
 
 
-def test_truncate_neutralized_to_empty_string():
+def test_truncate_keeps_whole_collection_for_ignore_fallback():
     tok = FakeCharTokenizer()
     section = SimilarSuggestionsSection([_make_item("101")])
+    prepared = section.prepare()
+    assert section.truncate(prepared, 50, tokenizer=tok) is prepared
     assert section.truncate(section.render(), 50, tokenizer=tok) == ""
 
 
-def test_similar_suggestions_section_items_are_generation_chunks():
+def test_similar_suggestions_keep_original_items_and_render_reference_metadata():
     s1 = _make_item("101", similarity=0.98)
     s2 = _make_item("102", similarity=0.91)
     section = SimilarSuggestionsSection([s1, s2])
 
-    assert len(section.items) == 2
-    for chunk in section.items:
-        assert isinstance(chunk, GenerationChunk)
-        assert isinstance(chunk.reference, SimilarSuggestionReference)
-
-    assert section.items[0].chunk_id == "101"
-    assert section.items[0].reference.similarity == 0.98
-    assert section.items[1].chunk_id == "102"
-    assert section.items[1].reference.similarity == 0.91
-
+    assert section.items == (s1, s2)
+    assert section.citation_map_for(section.prepare()) == {
+        "[similar 001]": s1,
+        "[similar 002]": s2,
+    }
+    assert isinstance(s1.to_generation_chunk().reference, SimilarSuggestionReference)
+    rendered = section.render()
+    assert "[پیشنهاد مشابه 1]" in rendered
+    assert "[پیشنهاد مشابه 2]" in rendered
+    assert "Unique ID: [similar 001]" in rendered
+    assert "Unique ID: [similar 002]" in rendered
 
 
 def test_similar_suggestions_section_processing_result_support():
@@ -128,13 +133,11 @@ def test_similar_suggestions_section_processing_result_support():
     s1 = _make_item("101", problem="الف" * 20)
     section = SimilarSuggestionsSection([s1])
 
-    prep = section.prepare()
-    assert isinstance(prep, SectionProcessingResult)
-    assert len(prep.items) == 1
-
-    # Call ignore with SectionProcessingResult
-    res = section.ignore(prep, 500, tokenizer=tok)
-    assert isinstance(res, SectionProcessingResult)
-    assert len(res.items) == 1
-    assert "101" in res.content
-
+    prepared = section.prepare()
+    assert isinstance(prepared, SectionProcessingResult)
+    assert prepared.items == (s1,)
+    result = section.ignore(prepared, len(prepared.content), tokenizer=tok)
+    assert isinstance(result, SectionProcessingResult)
+    assert result.items == (s1,)
+    assert "101" in result.content
+    assert section.ignore(section.render(), len(prepared.content), tokenizer=tok) == result.content

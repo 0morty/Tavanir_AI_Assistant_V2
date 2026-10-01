@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import TypeVar
 
 from openai import AsyncOpenAI, NotFoundError
@@ -38,8 +38,7 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
     the prompts concurrently (continuous batching) with the completion calls
     bounded by ``max_concurrency``.
 
-    ``complete``/``complete_many`` are synchronous by contract (the whole
-    Generation pipeline is synchronous). They must therefore bridge the async
+    ``complete``/``complete_many`` serve synchronous helpers and bridge the async
     ``AsyncOpenAI`` API. Bridging with a throwaway ``asyncio.run`` per call is
     broken: it creates and closes one event loop per call, whereas the
     ``httpx.AsyncClient`` wrapped by ``AsyncOpenAI`` binds lazily to the *first*
@@ -51,8 +50,9 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
     dedicated daemon thread. Every call submits its coroutine onto that loop via
     :func:`asyncio.run_coroutine_threadsafe` and blocks on the result, so
     repeated calls on the same ``OpenAILLMClient`` reuse one running loop and
-    never touch a closed one. Call :meth:`close` (e.g. from DI resource
-    teardown) to shut the loop and its thread down; it is idempotent.
+    never touch a closed one. ``complete_chat`` schedules onto that same loop
+    and awaits its result without blocking the caller's event loop. Call
+    :meth:`close` from DI resource teardown; it is idempotent.
     """
 
     def __init__(
@@ -112,6 +112,31 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
             )
         future = asyncio.run_coroutine_threadsafe(coro_factory(), self._loop)
         return future.result()
+
+    async def complete_chat(self, messages: Sequence[Mapping[str, str]]) -> str:
+        """Send chat messages without blocking the caller's event loop."""
+        if self._closed:
+            raise RuntimeError("OpenAILLMClient has been closed")
+        if not messages:
+            raise ValueError("Chat completion requires at least one message")
+        chat_messages = [
+            {"role": message["role"], "content": message["content"]}
+            for message in messages
+        ]
+        future = asyncio.run_coroutine_threadsafe(
+            self._complete_chat(chat_messages), self._loop
+        )
+        return await asyncio.wrap_future(future)
+
+    async def _complete_chat(self, messages: list[dict[str, str]]) -> str:
+        async with self._handle_api_call_scope("chat completion"):
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+            )
+            return response.choices[0].message.content or ""
 
     def complete(self, prompt: str) -> str:
         """Return the model's raw completion for ``prompt``."""
@@ -217,12 +242,16 @@ def _extract_batch_results(data: object, expected: int) -> list[str]:
         )
 
     results: list[str] = [""] * expected
+    seen_indexes: set[int] = set()
     for choice in choices:
         if not isinstance(choice, dict):
             raise LLMAPIError("Unexpected batch response choice.")
         index = choice.get("index")
-        if not isinstance(index, int) or not 0 <= index < expected:
+        if type(index) is not int or not 0 <= index < expected:
             raise LLMAPIError(f"Invalid choice index in batch response: {index!r}.")
+        if index in seen_indexes:
+            raise LLMAPIError(f"Duplicate choice index in batch response: {index}.")
+        seen_indexes.add(index)
         message = choice.get("message")
         content = message.get("content") if isinstance(message, dict) else None
         results[index] = content if isinstance(content, str) else ""

@@ -1,11 +1,12 @@
-from collections.abc import Sequence
+import re
+from collections.abc import Mapping, Sequence
 from copy import copy
 from dataclasses import is_dataclass, replace
 from typing import Any
 
 from src.application.context.sections.prompt_section import PromptSection
 from src.application.context.sections.referenced_section import ReferenceSupport
-from src.application.dtos import SectionProcessingResult
+from src.application.dtos import SectionOutput, SectionProcessingResult
 from src.application.interfaces.i_reference_generator import IReferenceGenerator
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
 from src.domain.context.overflow.summarize import SummarizeStrategy
@@ -13,6 +14,9 @@ from src.domain.context.summarizer import Summarizer
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.entities import Reference
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
+
+_MAX_CITATION_IDS = 999
+_CITATION_LABEL_PATTERN = re.compile(r"[a-z][a-z0-9-]*")
 
 
 class ReferencedCollectionSection(PromptSection, ReferenceSupport):
@@ -28,6 +32,8 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
         reference: Reference | None = None,
         *,
         reference_generator: IReferenceGenerator | None = None,
+        citation_label: str | None = None,
+        cite_items: bool = True,
         separator: str = "\n\n",
         item_separator: str = "\n\n",
         importance: float | None = None,
@@ -54,30 +60,120 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
         self.item_separator = item_separator
         self._items = tuple(items)
         self._chunk_summarizer = chunk_summarizer
+        self._cite_items = cite_items
+        self._citation_pattern = re.compile(r"(?!)")
+        self._summary_citation_pattern = re.compile(r"(?!)")
+        self._citation_ids: tuple[str, ...] = ()
+        self._citation_id_to_item: dict[str, Any] = {}
+        self._item_identity_to_citations: dict[int, list[str]] = {}
+        if cite_items:
+            label = citation_label if citation_label is not None else self.section_type.lower()
+            if not _CITATION_LABEL_PATTERN.fullmatch(label):
+                raise ValueError("citation_label must be a lowercase ASCII identifier")
+            if len(self._items) > _MAX_CITATION_IDS:
+                raise ValueError("Referenced collections support at most 999 citation IDs")
+            self._citation_pattern = re.compile(rf"\[{re.escape(label)} [0-9]{{3}}\]")
+            self._summary_citation_pattern = re.compile(
+                rf"\[{re.escape(label)} [^\[\]]*\]"
+            )
+            self._citation_ids = tuple(
+                f"[{label} {index:03d}]" for index in range(1, len(self._items) + 1)
+            )
+            self._citation_id_to_item = dict(zip(self._citation_ids, self._items))
+            for citation_id, item in zip(self._citation_ids, self._items):
+                self._item_identity_to_citations.setdefault(id(item), []).append(citation_id)
 
     @property
     def items(self) -> tuple[Any, ...]:
         return self._items
 
+    @property
+    def citation_ids(self) -> tuple[str, ...]:
+        return self._citation_ids
+
+    @property
+    def citation_map(self) -> dict[str, Any]:
+        """Return citation IDs mapped to the original, unmodified items."""
+        return self._citation_id_to_item.copy()
+
+    def citation_ids_for(self, item: Any) -> tuple[str, ...]:
+        """Return every occurrence ID for this exact source object."""
+        return tuple(self._item_identity_to_citations.get(id(item), ()))
+
+    def citation_map_for(
+        self, result: SectionProcessingResult | SectionOutput
+    ) -> dict[str, Any]:
+        """Restrict the original map to IDs retained by overflow processing."""
+        if not self._cite_items:
+            raise ValueError("This collection does not expose citations")
+        ids = result.citation_ids
+        items = result.items
+        if ids is None or items is None or len(ids) != len(items):
+            raise ValueError("Collection result requires aligned citation IDs and items")
+        if isinstance(result, SectionOutput) and result.section_type != self.section_type:
+            raise ValueError("Collection result belongs to a different section")
+        if ids != self._citation_ids[: len(ids)]:
+            raise ValueError("Retained citation IDs must preserve their original order")
+        return {citation_id: self._citation_id_to_item[citation_id] for citation_id in ids}
+
+    def extract_citation_ids(self, output: Mapping[str, Any]) -> list[str]:
+        """Read exact, unique IDs from the structured LLM citations array."""
+        if not self._cite_items:
+            raise ValueError("This collection does not expose citations")
+        if not isinstance(output, Mapping):
+            raise ValueError("Structured output must be a mapping")
+        citations = output.get("citations")
+        if not isinstance(citations, list):
+            raise ValueError("Structured output requires a citations list")
+        unique: dict[str, None] = {}
+        for citation_id in citations:
+            if not isinstance(citation_id, str) or not self._citation_pattern.fullmatch(citation_id):
+                raise ValueError(f"Invalid citation ID: {citation_id!r}")
+            unique[citation_id] = None
+        return list(unique)
+
+    def resolve_citation_ids(
+        self,
+        citation_ids: Sequence[str],
+        result: SectionProcessingResult | SectionOutput,
+    ) -> dict[str, Any]:
+        """Resolve retained IDs to original items; reject malformed or unknown IDs."""
+        if isinstance(citation_ids, str):
+            raise ValueError("Citation IDs must be a sequence of IDs")
+        retained = self.citation_map_for(result)
+        resolved: dict[str, Any] = {}
+        for citation_id in citation_ids:
+            if not isinstance(citation_id, str) or not self._citation_pattern.fullmatch(citation_id):
+                raise ValueError(f"Invalid citation ID: {citation_id!r}")
+            if citation_id not in retained:
+                raise ValueError(f"Unknown citation ID: {citation_id}")
+            resolved[citation_id] = retained[citation_id]
+        return resolved
+
     def item_content(self, item: Any) -> str:
         return getattr(item, "content", "")
 
-    def _item_body(self, item: Any) -> str:
-        """Add this item's reference to its own formatted content."""
-        content = self.item_content(item)
-        reference = getattr(item, "reference", None)
-        if not content.strip() or reference is None:
-            return content
-        reference_text = self._resolve_reference_text(reference)
-        return (
-            self.compose_referenced_content(reference_text, content)
-            if reference_text
-            else content
-        )
-
     def _item_body_at(self, item: Any, index: int) -> str:
-        """Allow sections with position-based metadata to render each item."""
-        return self._item_body(item)
+        """Attach a citation to source evidence and preserve uncited collections."""
+        content = self.item_content(item)
+        if not self._cite_items:
+            reference = getattr(item, "reference", None)
+            if reference is None or not content.strip():
+                return content
+            reference_text = self._resolve_reference_text(reference)
+            return (
+                self.compose_referenced_content(reference_text, content)
+                if reference_text
+                else content
+            )
+        return self._cited_body(item, index, content)
+
+    def _cited_body(self, item: Any, index: int, content: str) -> str:
+        reference = getattr(item, "reference", None)
+        reference_text = self._resolve_reference_text(reference) if reference is not None else ""
+        marker = f"Unique ID: {self._citation_ids[index]}"
+        heading = f"{reference_text}\n{marker}" if reference_text else marker
+        return f"{heading}\n\n{content}"
 
     def _render_bodies(self, bodies: Sequence[str]) -> str:
         joined = self.item_separator.join(body for body in bodies if body.strip())
@@ -111,6 +207,7 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
             item_inputs=tuple(
                 self._compose(self._with_section_reference(body)) for body in bodies
             ),
+            citation_ids=self._citation_ids if self._cite_items else None,
         )
 
     def truncate(
@@ -133,7 +230,15 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
             return None
         items = content.items or ()
         if not items or capacity_tokens <= 0:
-            return SectionProcessingResult("", (), (), ())
+            return SectionProcessingResult(
+                content="",
+                items=(),
+                item_bodies=(),
+                item_inputs=(),
+                citation_ids=() if self._cite_items else None,
+            )
+        if self._cite_items:
+            self.citation_map_for(content)
         inputs = content.item_inputs
         if inputs is None or len(inputs) != len(items):
             raise ValueError("Collection result requires one prepared input per item")
@@ -148,6 +253,11 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
             summaries = [strategy.apply(text, capacity_tokens) for text in inputs]
         if len(summaries) != len(items):
             raise ValueError("Collection summarizer must return one result per item")
+        if self._cite_items:
+            summaries = [
+                self._summary_citation_pattern.sub("", summary).strip()
+                for summary in summaries
+            ]
         processed = tuple(
             self._copy_with_content(item, summary)
             for item, summary in zip(items, summaries)
@@ -160,13 +270,17 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
             item_inputs=tuple(
                 self._compose(self._with_section_reference(body)) for body in bodies
             ),
+            citation_ids=content.citation_ids,
         )
 
     def _summary_bodies(
         self, items: tuple[Any, ...], summaries: list[str]
     ) -> tuple[str, ...]:
-        """Default output body for each summarized collection item."""
-        return tuple(summaries)
+        """Reattach original citations independently of the summarizer output."""
+        return tuple(
+            self._cited_body(item, index, getattr(item, "content", summary))
+            for index, (item, summary) in enumerate(zip(items, summaries))
+        )
 
     @staticmethod
     def _copy_with_content(item: Any, content: str) -> Any:
@@ -186,8 +300,9 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
         """Drop trailing whole items until the complete rendered result fits."""
         items = content.items or ()
         bodies = content.item_bodies or ()
-        if len(bodies) != len(items):
-            raise ValueError("Collection result requires one prepared body per item")
+        ids = content.citation_ids or ()
+        if len(bodies) != len(items) or (self._cite_items and len(ids) != len(items)):
+            raise ValueError("Collection result requires aligned bodies, items, and citation IDs")
         fitting_count = 0
         fitting_content = ""
         for count in range(1, len(items) + 1):
@@ -201,4 +316,5 @@ class ReferencedCollectionSection(PromptSection, ReferenceSupport):
             items=items[:fitting_count],
             item_bodies=bodies[:fitting_count],
             item_inputs=(content.item_inputs or ())[:fitting_count],
+            citation_ids=ids[:fitting_count] if self._cite_items else None,
         )

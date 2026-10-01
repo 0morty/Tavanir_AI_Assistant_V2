@@ -223,3 +223,7 @@ __marimo__/
 # Persistent Database Storage (Host Bind Mounts)
 /data/
 /data/qdrant_storage/
+
+# Generated test reports
+/tests/**/reports/
+/test_context_overflow_vllm/*report*.md

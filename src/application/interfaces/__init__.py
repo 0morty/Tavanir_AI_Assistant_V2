@@ -12,6 +12,7 @@ from src.application.interfaces.i_hybrid_embedding_service import (
     IHybridEmbeddingService,
 )
 from src.application.interfaces.i_llm_client import ILLMClient
+from src.application.interfaces.i_llm_request_builder import ILLMRequestBuilder
 from src.application.interfaces.i_overflow_strategy_dispatcher import (
     IOverflowStrategyDispatcher,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "IDemandAllocator",
     "IDenseEmbedder",
     "ILLMClient",
+    "ILLMRequestBuilder",
     "IOverflowStrategyDispatcher",
     "IPromptSection",
     "IRedistributionAllocator",

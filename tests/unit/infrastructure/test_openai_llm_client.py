@@ -147,6 +147,21 @@ def test_complete_returns_message_content():
     assert client.complete("prompt") == "done"
 
 
+@pytest.mark.asyncio
+async def test_async_chat_reuses_transport_loop_and_preserves_roles():
+    fake = LoopBindingClient(content="done")
+    client = make_client(client=fake, model="m")
+    assert await asyncio.to_thread(client.complete, "helper prompt") == "done"
+
+    messages = [
+        {"role": "system", "content": "instructions"},
+        {"role": "user", "content": "suggestion"},
+    ]
+    assert await client.complete_chat(messages) == "done"
+    assert fake.create_calls[1]["messages"] == messages
+    assert fake._bound_loop is client._loop
+
+
 def test_complete_returns_empty_when_content_is_none():
     fake = FakeCompletionClient(None)
     client = make_client(client=fake, model="m")
@@ -301,3 +316,14 @@ def test_complete_after_close_fails_fast():
 
     with pytest.raises(RuntimeError):
         client.complete("prompt")
+
+@pytest.mark.parametrize('indexes', [(0, 0), (1, 1), (False, True)])
+def test_complete_many_rejects_ambiguous_batch_indexes(indexes):
+    """Each returned summary must have one unambiguous input position."""
+    fake = ChoiceBatchClient([
+        {'index': index, 'message': {'content': f'summary-{position}'}}
+        for position, index in enumerate(indexes)
+    ])
+    client = make_client(client=fake)
+    with pytest.raises(LLMAPIError, match='choice index'):
+        client.complete_many(['evidence-A', 'evidence-B'])

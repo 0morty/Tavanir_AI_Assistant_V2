@@ -10,11 +10,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from src.domain.entities import HistoryMessage
 
 from src.application.exceptions import DuplicateEvidenceIdError
-from src.domain.entities import (
-    NOISE_PLACEHOLDERS,
-    GenerationChunk,
-    Reference,
-)
+from src.domain.entities import GenerationChunk, NOISE_PLACEHOLDERS, Reference
 from src.domain.enums import (
     CommitteeScrutiny,
     SecretariatScrutiny,
@@ -47,13 +43,15 @@ class SectionProcessingResult:
     ``items`` preserves collection boundaries and metadata. ``item_bodies``
     holds each reference-enriched body for exact prefix rendering; ``item_inputs``
     holds each complete pre/post-framed input for independent summarization.
-    Single-text sections leave all three as None.
+    ``citation_ids`` preserves surviving original item identities.
+    Single-text sections leave these collection fields as None.
     """
 
     content: str
     items: tuple[Any, ...] | None = None
     item_bodies: tuple[str, ...] | None = None
     item_inputs: tuple[str, ...] | None = None
+    citation_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +65,7 @@ class SectionOutput:
     fitted_tokens: int
     overflowed: bool
     items: tuple[Any, ...] | None = None
+    citation_ids: tuple[str, ...] | None = None
 
     @property
     def history_messages(self) -> tuple[HistoryMessage, ...] | None:
@@ -480,6 +479,23 @@ class GenerationInput:
             seen_ids.add(item.id)
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedGeneration:
+    """Fitted prompt and only the original suggestions retained in it."""
+
+    context: ContextBuilderResult
+    citation_map: Mapping[str, SimilarSuggestionInput]
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationResult:
+    """Validated model answer with original cited evidence."""
+
+    answer: str
+    citations: list[GenerationChunk | SimilarSuggestionInput]
+    uncertainty: str | None = None
+
+
 __all__ = [
     "AnalyzeSuggestionResponse",
     "SectionOutput",
@@ -508,4 +524,6 @@ __all__ = [
     "SimilarSuggestionInput",
     "RegulationInput",
     "GenerationInput",
+    "PreparedGeneration",
+    "GenerationResult",
 ]

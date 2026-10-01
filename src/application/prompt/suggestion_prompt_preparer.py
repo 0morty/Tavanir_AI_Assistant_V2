@@ -4,7 +4,11 @@ from src.application.context.sections import (
     SystemInputSection,
     UserInputSection,
 )
-from src.application.dtos import ContextBuilderResult, GenerationInput
+from src.application.dtos import (
+    ContextBuilderResult,
+    GenerationInput,
+    PreparedGeneration,
+)
 from src.application.exceptions import (
     InsufficientEvidenceBudgetError,
     PromptBudgetExceededError,
@@ -50,6 +54,11 @@ class SuggestionPromptPreparer(ISuggestionPromptPreparer):
         generation_input: GenerationInput,
         max_prompt_tokens: int,
     ) -> ContextBuilderResult:
+        return self.prepare_with_citations(generation_input, max_prompt_tokens).context
+
+    def prepare_with_citations(
+        self, generation_input: GenerationInput, max_prompt_tokens: int
+    ) -> PreparedGeneration:
         if max_prompt_tokens <= 0:
             raise PromptBudgetExceededError(
                 f"max_prompt_tokens must be positive, got {max_prompt_tokens}.",
@@ -118,6 +127,7 @@ class SuggestionPromptPreparer(ISuggestionPromptPreparer):
         builder.set_section("SYSTEM-INPUT", system_section)
         builder.set_section("USER-INPUT", user_section)
 
+        evidence_section: SimilarSuggestionsSection | None = None
         if has_evidence:
             d_evi = t_remaining / usable_budget
             evidence_section = SimilarSuggestionsSection(
@@ -125,9 +135,8 @@ class SuggestionPromptPreparer(ISuggestionPromptPreparer):
                 demand=d_evi,
                 importance=0.1,
             )
-            first_item_text = evidence_section.item_content(
-                generation_input.similar_suggestions[0]
-            )
+            # Include the visible citation when checking whether the first item fits.
+            first_item_text = evidence_section.prepare().item_bodies[0]
             pre_tokens = self._tokenizer.count_tokens(evidence_section.pre_context)
             frame_sep_tokens = self._tokenizer.count_tokens(evidence_section.separator)
             first_item_tokens = (
@@ -147,4 +156,13 @@ class SuggestionPromptPreparer(ISuggestionPromptPreparer):
 
         builder.set_section("OUTPUT-FORMAT", output_section)
 
-        return self._context_builder.build(builder, max_tokens=max_prompt_tokens)
+        context = self._context_builder.build(builder, max_tokens=max_prompt_tokens)
+        citation_map = {}
+        if evidence_section is not None:
+            fitted_output = next(
+                output
+                for output in context.sections
+                if output.section_type == evidence_section.section_type
+            )
+            citation_map = evidence_section.citation_map_for(fitted_output)
+        return PreparedGeneration(context=context, citation_map=citation_map)

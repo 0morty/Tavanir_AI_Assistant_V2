@@ -255,3 +255,17 @@ def test_history_section_received_is_the_same_object():
     assert [item.content for item in history.items] == [
         turn.content for turn in HISTORY_TURNS
     ]
+
+
+def test_user_input_and_evidence_are_user_messages_with_output_schema_in_system():
+    result = _result(
+        _output("SYSTEM-INPUT", "Instructions"),
+        _output("USER-INPUT", "Current suggestion"),
+        _output("SIMILAR-SUGGESTIONS", "Evidence [similar 001]"),
+        _output("OUTPUT-FORMAT", "Return JSON"),
+    )
+
+    assert LLMRequestBuilder().build_messages(result) == [
+        {"role": "system", "content": "Instructions\n\nReturn JSON"},
+        {"role": "user", "content": "Current suggestion\n\nEvidence [similar 001]"},
+    ]

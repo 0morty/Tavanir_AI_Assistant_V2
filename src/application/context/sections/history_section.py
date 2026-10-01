@@ -25,6 +25,7 @@ class HistorySection(ReferencedCollectionSection):
     ) -> None:
         super().__init__(
             items=messages,
+            cite_items=False,
             separator="\n\n",
             importance=importance,
             demand=demand,

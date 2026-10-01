@@ -7,7 +7,7 @@ A step-by-step operational guide for developers and DevOps engineers to extract,
 ## 1. System Overview & Architecture
 
 The historical ingestion pipeline executes a high-throughput, fault-tolerant batch ETL process from legacy MSSQL into the modern dual-write data store:
-1. **PostgreSQL Relational DB:** Stores normalized suggestion entities, skipped records audit log, and keyset watermark checkpoints.
+1. **PostgreSQL Relational DB:** Stores normalized suggestion entities, skipped records audit log, and offset watermark checkpoints.
 2. **Qdrant Vector DB:** Stores dense (TEI) and sparse (Persian BM25) vector chunks with payload metadata behind an atomic search alias (`ADR-001`).
 
 ```text
@@ -34,7 +34,7 @@ The historical ingestion pipeline executes a high-throughput, fault-tolerant bat
 +-----------------------------------------------------------------------------------+
 | 3. STREAMING EXTRACTION & PERSISTENCE LOOP (ExtractAndIngestHistoricalSuggestions)|
 |                                                                                   |
-|    [MSSQL Keyset Streaming]                                                       |
+|    [MSSQL Offset Streaming]                                                       |
 |              │                                                                    |
 |              ▼                                                                    |
 |    [In-Memory Normalization] ──> Persian digits, Shamsi dates, Persian text       |
@@ -96,43 +96,44 @@ alembic upgrade head
 
 Verify that the following tables exist in PostgreSQL:
 - `suggestions`
-- `suggestion_checkpoints`
+- `ingestion_checkpoints`
 - `skipped_suggestions`
 
 ### C. Environment Configuration (`.env`)
 Verify the following variables in your `.env` file:
 ```dotenv
 # PostgreSQL
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
+POSTGRES_SERVER=localhost
+POSTGRES_PORT=7432
 POSTGRES_DB=tavanir_db
 POSTGRES_USERNAME=postgres
 POSTGRES_PASSWORD=your_password
 
 # Qdrant
 QDRANT_HOST=localhost
-QDRANT_PORT=6333
-QDRANT_GRPC_PORT=6334
+QDRANT_PORT=7333
+QDRANT_GRPC_PORT=7334
 QDRANT_API_KEY=your_qdrant_api_key
-QDRANT_SUGGESTION_COLLECTION=tavanir_suggestion_v2
+QDRANT_SUGGESTION_COLLECTION=tavanir_suggestion_v1
 QDRANT_SUGGESTION_ALIAS=tavanir_suggestion_active
 
 # MSSQL Source
-MSSQL_HOST=192.168.1.100
+MSSQL_SERVER=192.168.1.100
 MSSQL_PORT=1433
 MSSQL_DATABASE=LegacySuggestionsDB
 MSSQL_USER=etl_reader
 MSSQL_PASSWORD=your_mssql_password
+MSSQL_BATCH_SIZE=200
+MSSQL_QUERY_TIMEOUT=120
 
 # TEI / Dense Embedder
 TEI_HOST=localhost
 TEI_PORT=8080
-EMBEDDING_MODEL_NAME=BAAI/bge-m3
-EMBEDDING_DIMENSION=1024
+EMBEDDING_MODEL=google/embedding-gemma-2b
+EMBEDDING_DIMENSION=768
 
 # Historical Ingestion Defaults
-HISTORICAL_INGESTION_BATCH_SIZE=200
-HISTORICAL_INGESTION_CHECKPOINT_JOB_NAME=historical_suggestion_ingestion
+CHECKPOINT_JOB_NAME=historical_suggestion_ingestion
 ```
 
 ---
@@ -159,7 +160,7 @@ python scripts/extract_and_ingest_historical_suggestions.py --reset --batch-size
 ```
 
 #### Scenario B: Resume Interrupted Ingestion (`--resume`)
-Resumes from the exact last-committed watermark in PostgreSQL (`suggestion_checkpoints` table):
+Resumes from the exact last-committed watermark in PostgreSQL (`ingestion_checkpoints` table):
 ```bash
 python scripts/extract_and_ingest_historical_suggestions.py --resume --batch-size 200
 ```
@@ -174,7 +175,7 @@ python scripts/extract_and_ingest_historical_suggestions.py --resume --skip-gate
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--batch-size` | `int` | `200` | Number of suggestion records per keyset cursor page |
+| `--batch-size` | `int` | `200` | Number of suggestion records per offset page |
 | `--resume` / `--no-resume` | `bool` | `True` | Whether to resume from last committed PostgreSQL watermark |
 | `--reset` | `flag` | `False` | Drops target collection & clears PostgreSQL watermark before start |
 | `--skip-gatekeeper` | `flag` | `False` | Skips Gatekeeper hybrid smoke tests before alias switch |
@@ -219,7 +220,7 @@ The ingestion script is equipped with **graceful drain signal handling**:
 - The current in-flight batch completes:
   1. Relational records are committed to PostgreSQL.
   2. Vectors are upserted into Qdrant.
-  3. Watermark offset is saved to `suggestion_checkpoints`.
+  3. Watermark offset is saved to `ingestion_checkpoints`.
 - The `finally` block restores the Qdrant HNSW indexing threshold (`20000`).
 - The script exits cleanly with: `ingestion_stopped_early_by_user | message="Watermark preserved."`.
 - **To resume later:** Simply run with `--resume`.
@@ -238,7 +239,7 @@ SELECT COUNT(*) FROM suggestions;
 
 -- 2. Watermark status
 SELECT job_name, last_offset, last_processed_id, total_processed, updated_at 
-FROM suggestion_checkpoints;
+FROM ingestion_checkpoints;
 
 -- 3. Review skipped/corrupted records audit log
 SELECT error_type, reason, COUNT(*) 
@@ -250,18 +251,18 @@ GROUP BY error_type, reason;
 Using `curl` or Qdrant Web UI:
 ```bash
 # Check collection status and point count
-curl -X GET "http://localhost:6333/collections/tavanir_suggestion_v2" \
+curl -X GET "http://localhost:7333/collections/tavanir_suggestion_v1" \
      -H "api-key: your_qdrant_api_key"
 
 # Check active search alias
-curl -X GET "http://localhost:6333/aliases" \
+curl -X GET "http://localhost:7333/aliases" \
      -H "api-key: your_qdrant_api_key"
 ```
 
 Expected output confirms:
 1. `status: "green"`
 2. `points_count` matches total chunks.
-3. Alias `tavanir_suggestion_active` points to `tavanir_suggestion_v2`.
+3. Alias `tavanir_suggestion_active` points to `tavanir_suggestion_v1`.
 
 ---
 
@@ -271,7 +272,7 @@ Expected output confirms:
 - **Cause:** Qdrant container is not running or ports are blocked.
 - **Fix:**
   1. Check container status: `docker ps | grep qdrant`.
-  2. Test TCP port: `curl http://localhost:6333/readyz`.
+  2. Test TCP port: `curl http://localhost:7333/readyz`.
   3. Verify `QDRANT_HOST`, `QDRANT_PORT`, and `QDRANT_API_KEY` in `.env`.
 
 ### Problem 2: `Gatekeeper smoke test FAILED: 0 results returned for query`
@@ -284,9 +285,9 @@ Expected output confirms:
 ### Problem 3: `MSSQL Login failed / Network connection timeout`
 - **Cause:** Database firewall, FreeTDS driver issue, or invalid credentials.
 - **Fix:**
-  1. Verify host and port in `MSSQL_HOST` and `MSSQL_PORT`.
+  1. Verify host and port in `MSSQL_SERVER` and `MSSQL_PORT`.
   2. Ensure `freetds-dev` is installed in the Linux/Docker environment.
-  3. Test connectivity using `nc -zv $MSSQL_HOST 1433` or sqlcmd.
+  3. Test connectivity using `nc -zv $MSSQL_SERVER 1433` or sqlcmd.
 
 ### Problem 4: Script interrupted in the middle of a batch
 - **Resolution:** No manual database cleanup is needed. The pipeline uses **Pattern A Persistence with Compensating Rollback**:

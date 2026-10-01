@@ -1,6 +1,7 @@
 from pathlib import Path
 from urllib.parse import quote_plus
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,7 +20,9 @@ _base_config = SettingsConfigDict(
     env_file=_get_env_file_path(),
     env_ignore_empty=True,
     extra="ignore",
+    populate_by_name=True,
 )
+
 
 
 class CoreSettings(BaseSettings):
@@ -122,8 +125,14 @@ class QdrantSettings(BaseSettings):
 class DBSettings(BaseSettings):
     model_config = _base_config
 
-    POSTGRES_SERVER: str = "localhost"
-    POSTGRES_PORT: int = 7432
+    POSTGRES_SERVER: str = Field(
+        default="localhost",
+        validation_alias=AliasChoices("POSTGRES_SERVER", "POSTGRES_HOST"),
+    )
+    POSTGRES_PORT: int = Field(
+        default=7432,
+        validation_alias=AliasChoices("POSTGRES_PORT"),
+    )
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_USERNAME: str = "postgres"
     POSTGRES_DB: str = "tavanir_db"
@@ -167,14 +176,30 @@ class SecuritySettings(BaseSettings):
 class MssqlSettings(BaseSettings):
     model_config = _base_config
 
-    MSSQL_SERVER: str = "localhost"
-    MSSQL_PORT: int = 1433
-    MSSQL_USER: str = "sa"
-    MSSQL_PASSWORD: str = "YourStrongPassword123"
-    MSSQL_DATABASE: str = "TavanirSuggestionDB"
+    MSSQL_SERVER: str = Field(
+        default="localhost",
+        validation_alias=AliasChoices("MSSQL_SERVER", "MSSQL_HOST"),
+    )
+    MSSQL_PORT: int = Field(
+        default=1433,
+        validation_alias=AliasChoices("MSSQL_PORT"),
+    )
+    MSSQL_USER: str = Field(
+        default="sa",
+        validation_alias=AliasChoices("MSSQL_USER"),
+    )
+    MSSQL_PASSWORD: str = Field(
+        default="YourStrongPassword123",
+        validation_alias=AliasChoices("MSSQL_PASSWORD"),
+    )
+    MSSQL_DATABASE: str = Field(
+        default="TavanirSuggestionDB",
+        validation_alias=AliasChoices("MSSQL_DATABASE", "MSSQL_DB_NAME"),
+    )
     MSSQL_BATCH_SIZE: int = 200
     MSSQL_MAX_RETRIES: int = 3
     MSSQL_RETRY_BASE_DELAY: float = 1.0
+    MSSQL_QUERY_TIMEOUT: int = 120
 
 
 class HistoricalIngestionSettings(BaseSettings):

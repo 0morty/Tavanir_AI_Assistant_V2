@@ -80,5 +80,7 @@ services:
 
 networks:
   tavanir_network:
+    name: tavanir_network
     driver: bridge
+
 

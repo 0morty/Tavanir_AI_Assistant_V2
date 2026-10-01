@@ -242,3 +242,34 @@ async def test_stream_suggestions_batches(mock_mssql_settings: MssqlSettings):
         # Third call offset = 103 (102 + 1)
         assert mock_fetch.call_args_list[2][0] == (103, 2)
 
+
+def test_extraction_query_syntax_no_nolock_on_ctes():
+    # CTE references must not have WITH (NOLOCK) to prevent Msg 8197
+    assert "LatestCommitteeResult lcr WITH (NOLOCK)" not in EXTRACTION_QUERY
+    assert "LatestSecretariatResult dbr WITH (NOLOCK)" not in EXTRACTION_QUERY
+    assert (
+        "LEFT JOIN LatestSecretariatResult dbr ON dbr.Code = s.SuggestionId AND dbr.rn = 1"
+        in EXTRACTION_QUERY
+    )
+    assert (
+        "LEFT JOIN LatestCommitteeResult lcr ON lcr.SuggestionCode = s.SuggestionId AND lcr.rn = 1"
+        in EXTRACTION_QUERY
+    )
+
+
+def test_extraction_query_partitions_secretariat_result():
+    # dbr must be partitioned via CTE to prevent duplicate suggestion rows
+    assert "LatestSecretariatResult AS (" in EXTRACTION_QUERY
+    assert "ROW_NUMBER() OVER (" in EXTRACTION_QUERY
+    assert "PARTITION BY Code" in EXTRACTION_QUERY
+
+
+def test_get_connection_uses_configured_timeout(mock_mssql_settings: MssqlSettings):
+    extractor = MssqlSuggestionExtractor(config=mock_mssql_settings)
+    with patch("pymssql.connect") as mock_connect:
+        extractor._get_connection()
+        mock_connect.assert_called_once()
+        assert (
+            mock_connect.call_args.kwargs["timeout"]
+            == mock_mssql_settings.MSSQL_QUERY_TIMEOUT
+        )

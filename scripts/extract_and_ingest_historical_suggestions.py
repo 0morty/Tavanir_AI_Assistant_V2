@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import signal
 import sys
 from pathlib import Path
@@ -34,10 +35,17 @@ async def run_pipeline(
     skip_gatekeeper: bool,
 ) -> None:
     container = Container()
-    container.init_resources()
+    # Selectively initialize only resources needed for ingestion
+    await container.client_registry.init()
+    await container.embedding_client.init()
 
     admin_service = container.qdrant_admin_service()
-    suggestion_repo = container.suggestion_vector_repository()
+    if inspect.isawaitable(admin_service):
+        admin_service = await admin_service
+
+    staging_repo = container.staging_suggestion_vector_repository()
+    if inspect.isawaitable(staging_repo):
+        staging_repo = await staging_repo
 
     stop_requested = False
 
@@ -65,9 +73,9 @@ async def run_pipeline(
         collection_name = qdrant_settings.QDRANT_SUGGESTION_COLLECTION
         if reset:
             await admin_service.delete_collection_if_exists(collection_name)
-            await suggestion_repo.provision_collection()
+            await staging_repo.provision_collection()
         else:
-            await suggestion_repo.provision_collection()
+            await staging_repo.provision_collection()
 
         try:
             # 3. Disable HNSW Indexing during bulk ingestion for maximum write throughput
@@ -90,6 +98,8 @@ async def run_pipeline(
             # 5. Execute Historical Ingestion Use Case
             await logger.ainfo("initializing_historical_ingestion_use_case")
             use_case = container.extract_and_ingest_historical_suggestions_use_case()
+            if inspect.isawaitable(use_case):
+                use_case = await use_case
 
             await logger.ainfo(
                 "beginning_streaming_ingestion",
@@ -141,8 +151,11 @@ async def run_pipeline(
         if not skip_gatekeeper and result.total_ingested > 0:
             await logger.ainfo("running_gatekeeper_smoke_tests")
             dense_embedder = container.dense_embedder()
+            if inspect.isawaitable(dense_embedder):
+                dense_embedder = await dense_embedder
+
             sparse_embedder = container.sparse_embedder()
-            if asyncio.iscoroutine(sparse_embedder):
+            if inspect.isawaitable(sparse_embedder):
                 sparse_embedder = await sparse_embedder
 
             smoke_queries = [
@@ -153,7 +166,7 @@ async def run_pipeline(
             for query in smoke_queries:
                 dense_vec = await dense_embedder.embed_query(query)
                 sparse_vec = await sparse_embedder.embed_query(query)
-                results = await suggestion_repo.search_suggestions(
+                results = await staging_repo.search_suggestions(
                     dense_vector=dense_vec,
                     sparse_vector=sparse_vec,
                     limit=5,
@@ -171,7 +184,14 @@ async def run_pipeline(
         elif result.total_ingested == 0:
             await logger.ainfo("no_records_newly_ingested_skipping_gatekeeper_tests")
 
-        # 8. Atomic Alias Switch (ADR-001)
+        # 8. Atomic Alias Switch (ADR-001) with Zero-Record Safety Guard
+        if result.total_ingested == 0 and reset:
+            await logger.awarning(
+                "ingestion_yielded_zero_records_aborting_alias_cutover",
+                target_collection=collection_name,
+            )
+            return
+
         alias_name = qdrant_settings.QDRANT_SUGGESTION_ALIAS
         await admin_service.switch_alias(
             alias_name=alias_name,
@@ -184,7 +204,8 @@ async def run_pipeline(
         )
 
     finally:
-        container.shutdown_resources()
+        await container.embedding_client.shutdown()
+        await container.client_registry.shutdown()
 
 
 def main() -> None:
@@ -195,7 +216,7 @@ def main() -> None:
         "--batch-size",
         type=int,
         default=historical_ingestion_settings.BATCH_SIZE,
-        help="Keyset cursor batch size (default: from settings or 200)",
+        help="Offset batch size (default: from settings or 200)",
     )
     parser.add_argument(
         "--resume",

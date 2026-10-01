@@ -11,8 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gcc \
     freetds-dev \
+    freetds-bin \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure FreeTDS for Microsoft SQL Server (TDS 7.4) and permit legacy OpenSSL handshakes
+ENV TDSVER=7.4 \
+    FREETDSCONF=/etc/freetds/freetds.conf
+RUN mkdir -p /etc/freetds && \
+    printf "[global]\n\ttds version = 7.4\n\tclient charset = UTF-8\n\tencryption = off\n" > /etc/freetds/freetds.conf && \
+    sed -i 's/SECLEVEL=2/SECLEVEL=0/g' /etc/ssl/openssl.cnf
 
 # Install python dependencies
 COPY requirements.txt .
@@ -24,5 +32,8 @@ COPY scripts/ ./scripts/
 COPY migrations/ ./migrations/
 COPY alembic.ini .
 
-ENTRYPOINT ["python", "scripts/extract_and_ingest_historical_suggestions.py"]
+RUN sed -i 's/\r$//' ./scripts/docker_entrypoint.sh && chmod +x ./scripts/docker_entrypoint.sh
+
+ENTRYPOINT ["/app/scripts/docker_entrypoint.sh"]
 CMD ["--resume"]
+

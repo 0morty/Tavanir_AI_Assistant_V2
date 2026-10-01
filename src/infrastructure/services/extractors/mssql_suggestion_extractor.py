@@ -28,6 +28,17 @@ WITH LatestCommitteeResult AS (
             ORDER BY Iteration DESC
         ) as rn
     FROM CommitteeSessionResult WITH (NOLOCK)
+),
+LatestSecretariatResult AS (
+    SELECT
+        Code,
+        Arzy,
+        nzr_km,
+        ROW_NUMBER() OVER (
+            PARTITION BY Code
+            ORDER BY Arzy DESC, Code ASC
+        ) as rn
+    FROM dbr WITH (NOLOCK)
 )
 SELECT
     s.SuggestionId AS suggestion_id,
@@ -58,9 +69,9 @@ SELECT
     ISNULL(lcr.Description, '') AS committee_scrutiny_description
 FROM SuggestionInfo si WITH (NOLOCK)
 INNER JOIN suggestion s WITH (NOLOCK) ON s.SuggestionId = si.SuggestionInfoId
-LEFT JOIN dbr WITH (NOLOCK) ON dbr.Code = s.SuggestionId
+LEFT JOIN LatestSecretariatResult dbr ON dbr.Code = s.SuggestionId AND dbr.rn = 1
 LEFT JOIN SecretariatPrimaryScrutiny sps WITH (NOLOCK) ON sps.SecretariatPrimaryScrutinyId = dbr.Arzy
-LEFT JOIN LatestCommitteeResult lcr WITH (NOLOCK) ON lcr.SuggestionCode = s.SuggestionId AND lcr.rn = 1
+LEFT JOIN LatestCommitteeResult lcr ON lcr.SuggestionCode = s.SuggestionId AND lcr.rn = 1
 LEFT JOIN ComitteeScrutiny cs WITH (NOLOCK) ON cs.ComitteeScrutinyId = lcr.ComitteeScrutinyId
 LEFT JOIN SuggestContext sc WITH (NOLOCK) ON sc.SuggestContextId = s.SuggestContextId
 WHERE si.LastSuggestionStatusID IN (2, 10, 15, 56, 11, 12, 18, 19, 30, 46, 47, 55, 21, 27, 48, 13, 20)
@@ -89,7 +100,7 @@ class MssqlSuggestionExtractor(IHistoricalSuggestionExtractor):
             database=self._config.MSSQL_DATABASE,
             as_dict=True,
             login_timeout=15,
-            timeout=30,
+            timeout=self._config.MSSQL_QUERY_TIMEOUT,
             charset="UTF-8",
         )
 

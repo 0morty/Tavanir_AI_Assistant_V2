@@ -56,14 +56,21 @@ async def main() -> None:
     try:
         await wait_for_qdrant_ready(client)
 
-        # 1. ADR-001 & ADR-002: Historical Suggestions Collection
-        suggestion_repo = container.suggestion_vector_repository()
+        # 1. Provision Physical Staging Suggestion Collection
+        staging_repo = container.staging_suggestion_vector_repository()
         logger.info(
-            f"Provisioning collection '{qdrant_settings.QDRANT_SUGGESTION_COLLECTION}' via {type(suggestion_repo).__name__}..."
+            f"Provisioning collection '{qdrant_settings.QDRANT_SUGGESTION_COLLECTION}' via {type(staging_repo).__name__}..."
         )
-        await suggestion_repo.provision_collection()
+        await staging_repo.provision_collection()
 
-        # 2. ADR-001 & ADR-003: Regulatory Knowledge Collection
+        # 2. Point active alias to provisioned collection
+        admin_service = container.qdrant_admin_service()
+        await admin_service.switch_alias(
+            alias_name=qdrant_settings.QDRANT_SUGGESTION_ALIAS,
+            target_collection=qdrant_settings.QDRANT_SUGGESTION_COLLECTION,
+        )
+
+        # 3. ADR-001 & ADR-003: Regulatory Knowledge Collection
         regulatory_repo = container.regulatory_vector_repository()
         logger.info(
             f"Provisioning collection '{qdrant_settings.QDRANT_REGULATORY_COLLECTION}' via {type(regulatory_repo).__name__}..."

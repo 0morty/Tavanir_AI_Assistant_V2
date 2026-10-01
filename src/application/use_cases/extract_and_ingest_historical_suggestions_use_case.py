@@ -170,7 +170,7 @@ class ExtractAndIngestHistoricalSuggestionsUseCase:
         Execute full batch ingestion pipeline.
 
         Args:
-            batch_size: Keyset query page size.
+            batch_size: Offset query page size.
             resume: Whether to resume from saved watermark in PostgreSQL.
             reset: If True, clears existing watermark before beginning.
             on_progress: Optional callback invoked with (total_extracted, total_ingested, total_skipped).

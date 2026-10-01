@@ -249,12 +249,30 @@ class Container(containers.DeclarativeContainer):
         check_compatibility=False,
     )
 
-    # 5. Suggestion Vector Repository
+    # 5a. Runtime Suggestion Vector Repository (Queries & Online CRUD -> Active Alias)
     suggestion_vector_repository: providers.Provider[ISuggestionVectorRepository] = (
         providers.Singleton(
             QdrantSuggestionRepository,
             client=qdrant_client,
             collection_name=qdrant_settings.QDRANT_SUGGESTION_ALIAS,
+            dense_vector_name=qdrant_settings.QDRANT_DENSE_VECTOR_NAME,
+            sparse_vector_name=qdrant_settings.QDRANT_SPARSE_VECTOR_NAME,
+            default_dense_dim=embedding_settings.EMBEDDING_DIMENSION,
+            batch_size=qdrant_settings.QDRANT_BATCH_SIZE,
+            dense_score_threshold=qdrant_settings.QDRANT_DENSE_SCORE_THRESHOLD,
+            sparse_score_threshold=qdrant_settings.QDRANT_SPARSE_SCORE_THRESHOLD,
+            max_retries=qdrant_settings.QDRANT_MAX_RETRIES,
+            retry_base_delay=qdrant_settings.QDRANT_RETRY_BASE_DELAY,
+            retry_max_delay=qdrant_settings.QDRANT_RETRY_MAX_DELAY,
+        )
+    )
+
+    # 5b. Staging Suggestion Vector Repository (Batch Ingestion -> Physical Target Collection)
+    staging_suggestion_vector_repository: providers.Provider[ISuggestionVectorRepository] = (
+        providers.Factory(
+            QdrantSuggestionRepository,
+            client=qdrant_client,
+            collection_name=qdrant_settings.QDRANT_SUGGESTION_COLLECTION,
             dense_vector_name=qdrant_settings.QDRANT_DENSE_VECTOR_NAME,
             sparse_vector_name=qdrant_settings.QDRANT_SPARSE_VECTOR_NAME,
             default_dense_dim=embedding_settings.EMBEDDING_DIMENSION,
@@ -339,7 +357,7 @@ class Container(containers.DeclarativeContainer):
         normalizer=text_normalizer,
         chunker=suggestion_chunker,
         embedding_service=hybrid_embedding_service,
-        vector_repo=suggestion_vector_repository,
+        vector_repo=staging_suggestion_vector_repository,
         job_name=historical_ingestion_settings.CHECKPOINT_JOB_NAME,
     )
 

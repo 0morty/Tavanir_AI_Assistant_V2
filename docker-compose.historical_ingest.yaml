@@ -5,14 +5,20 @@ services:
       dockerfile: Dockerfile.historical_ingest
     container_name: tavanir_historical_ingest
     restart: "no"
+    stop_grace_period: 60s
     env_file:
       - .env
     environment:
-      - POSTGRES_HOST=tavanir_postgres
+      - POSTGRES_SERVER=tavanir_postgres
       - POSTGRES_PORT=5432
       - QDRANT_HOST=tavanir_qdrant
       - QDRANT_PORT=6333
       - QDRANT_GRPC_PORT=6334
+      - MSSQL_SERVER=${MSSQL_SERVER}
+      - MSSQL_PORT=${MSSQL_PORT}
+      - MSSQL_USER=${MSSQL_USER}
+      - MSSQL_PASSWORD=${MSSQL_PASSWORD}
+      - MSSQL_DATABASE=${MSSQL_DATABASE}
     networks:
       - tavanir_network
     command: ["--resume"]
@@ -20,3 +26,4 @@ services:
 networks:
   tavanir_network:
     external: true
+

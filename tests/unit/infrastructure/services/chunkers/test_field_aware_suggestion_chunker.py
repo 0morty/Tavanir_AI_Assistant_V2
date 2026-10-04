@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import replace
 
 import pytest
 
@@ -220,7 +221,10 @@ async def test_evaluation_partial_formatting(
         c for c in chunks_a if c.metadata.chunk_type == SuggestionChunkType.EVALUATION
     )
     assert "ارزیابی دبیرخانه: رد خودکار به دلیل کارشناسی" in eval_a.content
-    assert "نظر دبیرخانه: رد خودکار به دلیل عدم ارائه مدارک تکمیلی در مهلت مقرر کارشناسی." in eval_a.content
+    assert (
+        "نظر دبیرخانه: رد خودکار به دلیل عدم ارائه مدارک تکمیلی در مهلت مقرر کارشناسی."
+        in eval_a.content
+    )
     assert "بررسی کمیته:" not in eval_a.content
     assert "توضیحات مصوبه:" not in eval_a.content
 
@@ -276,7 +280,9 @@ async def test_substantive_commentary_guard_edge_cases(
         context_title=None,
     )
     chunks = await chunker.chunk(sugg_no_comments)
-    eval_chunks = [c for c in chunks if c.metadata.chunk_type == SuggestionChunkType.EVALUATION]
+    eval_chunks = [
+        c for c in chunks if c.metadata.chunk_type == SuggestionChunkType.EVALUATION
+    ]
     assert len(eval_chunks) == 0
     assert len(chunks) == 3
 
@@ -301,7 +307,11 @@ async def test_substantive_commentary_guard_edge_cases(
         context_title=None,
     )
     chunks_short = await chunker.chunk(sugg_short)
-    eval_short = [c for c in chunks_short if c.metadata.chunk_type == SuggestionChunkType.EVALUATION]
+    eval_short = [
+        c
+        for c in chunks_short
+        if c.metadata.chunk_type == SuggestionChunkType.EVALUATION
+    ]
     assert len(eval_short) == 0
 
     # 3. Both comments substantive -> 1 consolidated evaluation chunk
@@ -325,13 +335,23 @@ async def test_substantive_commentary_guard_edge_cases(
         context_title=None,
     )
     chunks_both = await chunker.chunk(sugg_both)
-    eval_both = [c for c in chunks_both if c.metadata.chunk_type == SuggestionChunkType.EVALUATION]
+    eval_both = [
+        c
+        for c in chunks_both
+        if c.metadata.chunk_type == SuggestionChunkType.EVALUATION
+    ]
     assert len(eval_both) == 1
     content = eval_both[0].content
     assert "ارزیابی دبیرخانه: ارجاع به کمیته" in content
-    assert "نظر دبیرخانه: مدارک اولیه بررسی و جهت تصمیم‌گیری نهایی به کمیته ارجاع گردید." in content
+    assert (
+        "نظر دبیرخانه: مدارک اولیه بررسی و جهت تصمیم‌گیری نهایی به کمیته ارجاع گردید."
+        in content
+    )
     assert "بررسی کمیته: تایید" in content
-    assert "توضیحات مصوبه: مصوب جلسه کارگروه با اکثریت آرا و تخصیص منابع مالی لازم." in content
+    assert (
+        "توضیحات مصوبه: مصوب جلسه کارگروه با اکثریت آرا و تخصیص منابع مالی لازم."
+        in content
+    )
 
     # 4. Substantive comment with unmapped/None scrutiny -> Emits comment cleanly
     sugg_none_scrutiny = Suggestion(
@@ -351,8 +371,15 @@ async def test_substantive_commentary_guard_edge_cases(
         context_title=None,
     )
     chunks_none = await chunker.chunk(sugg_none_scrutiny)
-    eval_none = next(c for c in chunks_none if c.metadata.chunk_type == SuggestionChunkType.EVALUATION)
-    assert eval_none.content == "توضیحات مصوبه: توضیحات کارشناسی کامل پیرامون ابعاد مختلف این پیشنهاد ثبت شده است."
+    eval_none = next(
+        c
+        for c in chunks_none
+        if c.metadata.chunk_type == SuggestionChunkType.EVALUATION
+    )
+    assert (
+        eval_none.content
+        == "توضیحات مصوبه: توضیحات کارشناسی کامل پیرامون ابعاد مختلف این پیشنهاد ثبت شده است."
+    )
     assert "بررسی کمیته:" not in eval_none.content
 
 
@@ -420,3 +447,41 @@ async def test_invalid_suggestion_raises_error(
                 context_title=None,
             )
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["problem", "solution"])
+async def test_inline_images_are_excluded_from_vectors_and_preserved_in_source(
+    chunker: FieldAwareSuggestionChunker, full_suggestion: Suggestion, field: str
+):
+    before = "نصب تجهیزات پایش شبکه برای کاهش تلفات."
+    after = "اندازه‌گیری نتایج پس از اجرای طرح."
+    image = "data:image/png;base64," + "A" * 10000
+    original = before + "\n" + image + "\n" + after
+    suggestion = replace(
+        full_suggestion, content=replace(full_suggestion.content, **{field: original})
+    )
+
+    chunks = await chunker.chunk(suggestion)
+    field_chunks = [c for c in chunks if c.metadata.chunk_type.value == field]
+
+    assert [c.content for c in field_chunks] == [before + "\n\n" + after]
+    assert getattr(suggestion.content, field) == original
+    assert all("data:image" not in c.content and image not in c.content for c in chunks)
+    assert field_chunks[0].parent_id == suggestion.id
+    assert field_chunks[0].metadata.sub_index == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["problem", "solution"])
+async def test_image_only_mandatory_fields_are_rejected(
+    chunker: FieldAwareSuggestionChunker, full_suggestion: Suggestion, field: str
+):
+    original = "data:image/png;base64," + "A" * 10000
+    suggestion = replace(
+        full_suggestion, content=replace(full_suggestion.content, **{field: original})
+    )
+
+    with pytest.raises(SuggestionChunkingError, match="no substantive text"):
+        await chunker.chunk(suggestion)
+    assert getattr(suggestion.content, field) == original

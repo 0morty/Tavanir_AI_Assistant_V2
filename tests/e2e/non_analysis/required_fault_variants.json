@@ -1,0 +1,1892 @@
+{
+  "schema_version": 1,
+  "purpose": "Frozen explicit required variant catalog for independent completeness checks",
+  "required_resilience_keys": [
+    "API-09/development_provider",
+    "API-09/development_validation",
+    "API-09/production_provider",
+    "API-09/production_validation",
+    "API-10/fault_bulk_internal_indexed_source",
+    "API-10/fault_internal_omits_source",
+    "API-11/bulk_qdrant_generated_request_id",
+    "API-11/bulk_qdrant_supplied_request_id",
+    "API-11/delete_qdrant_generated_request_id",
+    "API-11/delete_qdrant_supplied_request_id",
+    "API-11/patch_provider_generated_request_id",
+    "API-11/patch_provider_supplied_request_id",
+    "API-11/provider_generated_request_id",
+    "API-11/provider_supplied_request_id",
+    "API-11/put_provider_generated_request_id",
+    "API-11/put_provider_supplied_request_id",
+    "API-12/scheduled_concurrent_distinct_request_ids",
+    "API-13/primary_and_compensation_error_logs",
+    "API-14/dependency_recovery_same_process",
+    "BULK-06/all_locked",
+    "BULK-06/first_locked",
+    "BULK-06/last_locked",
+    "BULK-06/middle_locked",
+    "BULK-07/first_vector_failure",
+    "BULK-07/last_vector_failure",
+    "BULK-07/middle_vector_failure",
+    "BULK-08/all_sql_failed",
+    "BULK-08/first_sql_failure",
+    "BULK-08/last_sql_failure",
+    "BULK-08/middle_sql_failure",
+    "BULK-09/mixed_missing_lock_domain_success",
+    "BULK-15/all_vector_failed_independent_compensation",
+    "BULK-17/kill_after_first_completed_item",
+    "BULK-18/exact100_partial_failure_latency",
+    "DEL-06/separate_transaction_lock",
+    "DEL-07/sql_commit_after",
+    "DEL-07/sql_commit_before",
+    "DEL-07/sql_read_before",
+    "DEL-07/sql_soft_delete_before",
+    "DEL-08/purge_before_apply_restored",
+    "DEL-09/purge_and_compensation_failed",
+    "DEL-10/external_purge_applied_lost_ack",
+    "DEL-10/purge_applied_lost_ack",
+    "DEL-11/compensation_ignores_separate_lock",
+    "DEL-12/kill_after_soft_delete_commit",
+    "DEL-13/deleted_noop_without_qdrant",
+    "DEL-13/no_embedding_dependency",
+    "DEP-01/patch_reset",
+    "DEP-01/patch_timeout",
+    "DEP-01/patch_unreachable",
+    "DEP-01/post_reset",
+    "DEP-01/post_timeout",
+    "DEP-01/post_unreachable",
+    "DEP-01/put_reset",
+    "DEP-01/put_timeout",
+    "DEP-01/put_unreachable",
+    "DEP-02/patch_401",
+    "DEP-02/patch_429_plain",
+    "DEP-02/patch_429_retry",
+    "DEP-02/patch_500",
+    "DEP-02/patch_context_limit",
+    "DEP-02/patch_unknown_model",
+    "DEP-02/post_401",
+    "DEP-02/post_429_plain",
+    "DEP-02/post_429_retry",
+    "DEP-02/post_500",
+    "DEP-02/post_context_limit",
+    "DEP-02/post_unknown_model",
+    "DEP-02/put_401",
+    "DEP-02/put_429_plain",
+    "DEP-02/put_429_retry",
+    "DEP-02/put_500",
+    "DEP-02/put_context_limit",
+    "DEP-02/put_unknown_model",
+    "DEP-03/patch_duplicate_indices",
+    "DEP-03/patch_extra",
+    "DEP-03/patch_missing",
+    "DEP-03/patch_missing_indices",
+    "DEP-03/patch_reordered",
+    "DEP-03/post_duplicate_indices",
+    "DEP-03/post_extra",
+    "DEP-03/post_missing",
+    "DEP-03/post_missing_indices",
+    "DEP-03/post_reordered",
+    "DEP-03/put_duplicate_indices",
+    "DEP-03/put_extra",
+    "DEP-03/put_missing",
+    "DEP-03/put_missing_indices",
+    "DEP-03/put_reordered",
+    "DEP-04/patch_decoding",
+    "DEP-04/patch_malformed_sparse",
+    "DEP-04/patch_nonfinite",
+    "DEP-04/patch_wrong_dimension",
+    "DEP-04/post_decoding",
+    "DEP-04/post_malformed_sparse",
+    "DEP-04/post_nonfinite",
+    "DEP-04/post_wrong_dimension",
+    "DEP-04/put_decoding",
+    "DEP-04/put_malformed_sparse",
+    "DEP-04/put_nonfinite",
+    "DEP-04/put_wrong_dimension",
+    "DEP-05/patch_chunker_runtime",
+    "DEP-05/patch_chunking_domain",
+    "DEP-05/patch_chunking_suggestion",
+    "DEP-05/patch_normalizer",
+    "DEP-05/patch_sparse",
+    "DEP-05/patch_zero_chunks",
+    "DEP-05/post_chunker_runtime",
+    "DEP-05/post_chunking_domain",
+    "DEP-05/post_chunking_suggestion",
+    "DEP-05/post_normalizer",
+    "DEP-05/post_sparse",
+    "DEP-05/post_zero_chunks",
+    "DEP-05/put_chunker_runtime",
+    "DEP-05/put_chunking_domain",
+    "DEP-05/put_chunking_suggestion",
+    "DEP-05/put_normalizer",
+    "DEP-05/put_sparse",
+    "DEP-05/put_zero_chunks",
+    "FLOW-04/patch_patch",
+    "FLOW-04/put_patch",
+    "FLOW-04/put_put",
+    "FLOW-05/older_cutover_after_newer_commit",
+    "FLOW-06/stale_staging_after_winner_cutover",
+    "FLOW-07/delete_before_purge_then_restore",
+    "FLOW-07/delete_committed_then_restore",
+    "FLOW-07/update_committed_then_delete",
+    "FLOW-07/update_staged_then_delete",
+    "FLOW-08/stale_compensation_overwrites_accepted_put",
+    "FLOW-09/same_id_deletes_lock_then_idempotency",
+    "FLOW-10/bulk_and_single_overlap",
+    "FLOW-10/overlapping_bulk_batches",
+    "FLOW-11/independent_ids_scheduled_mutations",
+    "FLOW-12/ingest_commit_then_delete",
+    "FLOW-12/ingest_commit_then_put",
+    "FLOW-13/slow_embeddings_leave_unrelated_work_usable",
+    "FLOW-14/bulk_lost_response_retry",
+    "FLOW-14/delete_lost_response_retry",
+    "FLOW-14/ingest_lost_response_retry",
+    "FLOW-14/patch_lost_response_retry",
+    "FLOW-14/put_lost_response_retry",
+    "FLOW-15/successful_state_survives_owned_restart",
+    "HOST-03/embedding_unreachable_liveness",
+    "ING-F01/sql_read_before",
+    "ING-F02/sql_commit_after",
+    "ING-F02/sql_commit_before",
+    "ING-F02/sql_save_before",
+    "ING-F03/external_residual_purge_rejected",
+    "ING-F03/residual_purge",
+    "ING-F04/external_later_slice_retry_exhaustion_batch2",
+    "ING-F04/external_upsert_retry_exhaustion",
+    "ING-F04/first_exhaustion",
+    "ING-F04/first_fatal",
+    "ING-F04/later_exhaustion_batch2",
+    "ING-F04/later_fatal_batch2",
+    "ING-F05/applied_lost_ack",
+    "ING-F05/before_demotion",
+    "ING-F05/between_payloads",
+    "ING-F05/external_promotion_applied_lost_ack",
+    "ING-F06/vector_compensation_failed",
+    "ING-F07/sql_compensation_failed",
+    "ING-F08/both_compensations_failed",
+    "ING-F09/cancel_after_commit",
+    "ING-F09/cancel_after_promotion",
+    "ING-F09/cancel_after_staging",
+    "ING-F09/kill_after_commit",
+    "ING-F09/kill_after_promotion",
+    "ING-F09/kill_after_staging",
+    "ING-F10/accepted_creation_lost_to_compensation",
+    "ING-F10/same_id_both_duplicate_checks",
+    "ING-F11/recover_before_attempt_limit",
+    "ING-F11/recovery_one_attempt_too_late",
+    "ING-F12/incompatible_runtime_schema",
+    "ING-F12/missing_runtime_alias",
+    "ING-F13/retry_clears_orphan_points",
+    "ING-F13/retry_fully_compensated",
+    "ING-F14/orphan_before_early_embedding_failure",
+    "ING-F14/sql_without_points_still_conflicts",
+    "MUT-F01/patch_initial_read",
+    "MUT-F01/put_initial_read",
+    "MUT-F02/patch_first_slice",
+    "MUT-F02/patch_later_slice_batch2",
+    "MUT-F02/put_first_slice",
+    "MUT-F02/put_later_slice_batch2",
+    "MUT-F03/patch_staging_cleanup_failed",
+    "MUT-F03/put_staging_cleanup_failed",
+    "MUT-F04/patch_separate_transaction_lock",
+    "MUT-F04/put_separate_transaction_lock",
+    "MUT-F05/patch_stale_version",
+    "MUT-F05/put_stale_version",
+    "MUT-F06/patch_hard_deleted",
+    "MUT-F06/patch_soft_deleted",
+    "MUT-F06/put_hard_deleted",
+    "MUT-F06/put_soft_deleted",
+    "MUT-F07/patch_sql_commit_after",
+    "MUT-F07/patch_sql_commit_before",
+    "MUT-F07/patch_sql_save_before",
+    "MUT-F07/put_sql_commit_after",
+    "MUT-F07/put_sql_commit_before",
+    "MUT-F07/put_sql_save_before",
+    "MUT-F08/patch_phase2_cleanup_failed",
+    "MUT-F08/put_phase2_cleanup_failed",
+    "MUT-F09/patch_before_demotion_recovery",
+    "MUT-F09/patch_between_payloads_recovery",
+    "MUT-F09/put_before_demotion_recovery",
+    "MUT-F09/put_between_payloads_recovery",
+    "MUT-F10/patch_promotion_then_purge_retry",
+    "MUT-F10/put_promotion_then_purge_retry",
+    "MUT-F11/patch_cutover_exhaustion",
+    "MUT-F11/put_cutover_exhaustion",
+    "MUT-F12/patch_external_purge_lost_ack",
+    "MUT-F12/patch_promotion_applied_lost_ack",
+    "MUT-F12/patch_purge_applied_lost_ack",
+    "MUT-F12/put_external_promotion_lost_ack",
+    "MUT-F12/put_promotion_applied_lost_ack",
+    "MUT-F12/put_purge_applied_lost_ack",
+    "MUT-F13/patch_observed_cutover_blackout",
+    "MUT-F13/put_observed_cutover_blackout",
+    "MUT-F14/patch_cancel_after_commit",
+    "MUT-F14/patch_cancel_after_staging",
+    "MUT-F14/patch_cancel_between_promotion_purge",
+    "MUT-F14/patch_kill_after_commit",
+    "MUT-F14/patch_kill_after_staging",
+    "MUT-F14/patch_kill_between_promotion_purge",
+    "MUT-F14/put_cancel_after_commit",
+    "MUT-F14/put_cancel_after_staging",
+    "MUT-F14/put_cancel_between_promotion_purge",
+    "MUT-F14/put_kill_after_commit",
+    "MUT-F14/put_kill_after_staging",
+    "MUT-F14/put_kill_between_promotion_purge",
+    "MUT-F15/patch_retry_after_error",
+    "MUT-F15/put_retry_after_error",
+    "PUT-12/active_chunker_chunk",
+    "PUT-12/active_normalizer_normalize",
+    "PUT-12/active_sparse_embed",
+    "PUT-12/active_sql_commit",
+    "PUT-12/active_sql_lock",
+    "PUT-12/active_sql_read",
+    "PUT-12/active_sql_save",
+    "PUT-12/active_vector_delete_ids",
+    "PUT-12/active_vector_promote",
+    "PUT-12/active_vector_superseded",
+    "PUT-12/active_vector_upsert",
+    "PUT-12/deleted_chunker_chunk",
+    "PUT-12/deleted_normalizer_normalize",
+    "PUT-12/deleted_sparse_embed",
+    "PUT-12/deleted_sql_commit",
+    "PUT-12/deleted_sql_lock",
+    "PUT-12/deleted_sql_read",
+    "PUT-12/deleted_sql_save",
+    "PUT-12/deleted_vector_delete_ids",
+    "PUT-12/deleted_vector_promote",
+    "PUT-12/deleted_vector_superseded",
+    "PUT-12/deleted_vector_upsert"
+  ],
+  "required_mock_keys": [
+    "MOCK-01/metadata-and-reset-route",
+    "MOCK-02/missing-auth",
+    "MOCK-02/valid-reset",
+    "MOCK-02/wrong-auth",
+    "MOCK-03/seed-restoration-custom-removal-repeat",
+    "MOCK-04/ingest",
+    "MOCK-04/patch",
+    "MOCK-04/put",
+    "MOCK-05/all-deleted-bulk",
+    "MOCK-05/mixed-bulk",
+    "MOCK-05/repeat-delete",
+    "MOCK-06/patch-evaluation-without-status",
+    "MOCK-06/put-omitted-metadata",
+    "MOCK-07/restart",
+    "MOCK-07/two-independent-processes",
+    "MOCK-08/auth",
+    "MOCK-08/camel-case-envelope",
+    "MOCK-08/request-id",
+    "MOCK-08/validation"
+  ],
+  "resilience": [
+    {
+      "key": "DEP-01/post_unreachable",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-01/post_reset",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-01/post_timeout",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-02/post_401",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-02/post_429_retry",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-02/post_429_plain",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-02/post_500",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-02/post_unknown_model",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-02/post_context_limit",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-03/post_missing",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-03/post_extra",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-03/post_reordered",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-03/post_duplicate_indices",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-03/post_missing_indices",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-04/post_wrong_dimension",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-04/post_nonfinite",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-04/post_decoding",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-04/post_malformed_sparse",
+      "profile": "instrumented_fault",
+      "action": "malformed_sparse",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-05/post_normalizer",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-05/post_sparse",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-05/post_chunking_domain",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-05/post_chunking_suggestion",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-05/post_chunker_runtime",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-05/post_zero_chunks",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "POST"
+    },
+    {
+      "key": "DEP-01/put_unreachable",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-01/put_reset",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-01/put_timeout",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-02/put_401",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-02/put_429_retry",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-02/put_429_plain",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-02/put_500",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-02/put_unknown_model",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-02/put_context_limit",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-03/put_missing",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-03/put_extra",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-03/put_reordered",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-03/put_duplicate_indices",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-03/put_missing_indices",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-04/put_wrong_dimension",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-04/put_nonfinite",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-04/put_decoding",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-04/put_malformed_sparse",
+      "profile": "instrumented_fault",
+      "action": "malformed_sparse",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-05/put_normalizer",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-05/put_sparse",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-05/put_chunking_domain",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-05/put_chunking_suggestion",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-05/put_chunker_runtime",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-05/put_zero_chunks",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PUT"
+    },
+    {
+      "key": "DEP-01/patch_unreachable",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-01/patch_reset",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-01/patch_timeout",
+      "profile": "external_fault",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-02/patch_401",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-02/patch_429_retry",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-02/patch_429_plain",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-02/patch_500",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-02/patch_unknown_model",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-02/patch_context_limit",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-03/patch_missing",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-03/patch_extra",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-03/patch_reordered",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-03/patch_duplicate_indices",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-03/patch_missing_indices",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-04/patch_wrong_dimension",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-04/patch_nonfinite",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-04/patch_decoding",
+      "profile": "controlled_provider",
+      "action": "provider",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-04/patch_malformed_sparse",
+      "profile": "instrumented_fault",
+      "action": "malformed_sparse",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-05/patch_normalizer",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-05/patch_sparse",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-05/patch_chunking_domain",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-05/patch_chunking_suggestion",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-05/patch_chunker_runtime",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEP-05/patch_zero_chunks",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PATCH"
+    },
+    {
+      "key": "ING-F01/sql_read_before",
+      "profile": "instrumented_fault",
+      "action": "ingest_sql",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F02/sql_save_before",
+      "profile": "instrumented_fault",
+      "action": "ingest_sql",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F02/sql_commit_before",
+      "profile": "instrumented_fault",
+      "action": "ingest_sql",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F02/sql_commit_after",
+      "profile": "instrumented_fault",
+      "action": "ingest_sql",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F03/residual_purge",
+      "profile": "instrumented_fault",
+      "action": "ingest_vector",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F04/first_fatal",
+      "profile": "instrumented_fault",
+      "action": "ingest_slice",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F04/later_fatal_batch2",
+      "profile": "instrumented_fault",
+      "action": "ingest_slice",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F04/first_exhaustion",
+      "profile": "instrumented_fault",
+      "action": "ingest_slice",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F04/later_exhaustion_batch2",
+      "profile": "instrumented_fault",
+      "action": "ingest_slice",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F05/before_demotion",
+      "profile": "instrumented_fault",
+      "action": "ingest_vector",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F05/between_payloads",
+      "profile": "instrumented_fault",
+      "action": "ingest_vector",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F05/applied_lost_ack",
+      "profile": "instrumented_fault",
+      "action": "ingest_vector",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F06/vector_compensation_failed",
+      "profile": "instrumented_fault",
+      "action": "ingest_compensation",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F07/sql_compensation_failed",
+      "profile": "instrumented_fault",
+      "action": "ingest_compensation",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F08/both_compensations_failed",
+      "profile": "instrumented_fault",
+      "action": "ingest_compensation",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F09/kill_after_commit",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F09/kill_after_staging",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F09/kill_after_promotion",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F09/cancel_after_commit",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F09/cancel_after_staging",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F09/cancel_after_promotion",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F10/same_id_both_duplicate_checks",
+      "profile": "instrumented_fault",
+      "action": "race_ingest",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F10/accepted_creation_lost_to_compensation",
+      "profile": "instrumented_fault",
+      "action": "race_ingest",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F11/recover_before_attempt_limit",
+      "profile": "instrumented_fault",
+      "action": "ingest_slice",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F11/recovery_one_attempt_too_late",
+      "profile": "instrumented_fault",
+      "action": "ingest_slice",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F12/missing_runtime_alias",
+      "profile": "instrumented_fault",
+      "action": "alias",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F12/incompatible_runtime_schema",
+      "profile": "instrumented_fault",
+      "action": "alias",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F13/retry_fully_compensated",
+      "profile": "instrumented_fault",
+      "action": "retry_ingest",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F13/retry_clears_orphan_points",
+      "profile": "instrumented_fault",
+      "action": "retry_ingest",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F14/orphan_before_early_embedding_failure",
+      "profile": "instrumented_fault",
+      "action": "orphan_early",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F14/sql_without_points_still_conflicts",
+      "profile": "instrumented_fault",
+      "action": "sql_only_conflict",
+      "method": "POST"
+    },
+    {
+      "key": "MUT-F01/put_initial_read",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F02/put_first_slice",
+      "profile": "instrumented_fault",
+      "action": "mutation_slice",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F02/put_later_slice_batch2",
+      "profile": "instrumented_fault",
+      "action": "mutation_slice",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F03/put_staging_cleanup_failed",
+      "profile": "instrumented_fault",
+      "action": "mutation_slice",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F04/put_separate_transaction_lock",
+      "profile": "instrumented_fault",
+      "action": "lock",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F05/put_stale_version",
+      "profile": "instrumented_fault",
+      "action": "race_stale",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F06/put_hard_deleted",
+      "profile": "instrumented_fault",
+      "action": "race_missing",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F06/put_soft_deleted",
+      "profile": "instrumented_fault",
+      "action": "race_missing",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F07/put_sql_save_before",
+      "profile": "instrumented_fault",
+      "action": "mutation_sql",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F07/put_sql_commit_before",
+      "profile": "instrumented_fault",
+      "action": "mutation_sql",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F07/put_sql_commit_after",
+      "profile": "instrumented_fault",
+      "action": "mutation_sql",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F08/put_phase2_cleanup_failed",
+      "profile": "instrumented_fault",
+      "action": "mutation_sql",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F09/put_before_demotion_recovery",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F09/put_between_payloads_recovery",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F10/put_promotion_then_purge_retry",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F11/put_cutover_exhaustion",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F12/put_promotion_applied_lost_ack",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F12/put_purge_applied_lost_ack",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F13/put_observed_cutover_blackout",
+      "profile": "instrumented_fault",
+      "action": "blackout",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F14/put_kill_after_staging",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F14/put_kill_after_commit",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F14/put_kill_between_promotion_purge",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F14/put_cancel_after_staging",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F14/put_cancel_after_commit",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F14/put_cancel_between_promotion_purge",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F15/put_retry_after_error",
+      "profile": "instrumented_fault",
+      "action": "retry_mutation",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F01/patch_initial_read",
+      "profile": "instrumented_fault",
+      "action": "early",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F02/patch_first_slice",
+      "profile": "instrumented_fault",
+      "action": "mutation_slice",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F02/patch_later_slice_batch2",
+      "profile": "instrumented_fault",
+      "action": "mutation_slice",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F03/patch_staging_cleanup_failed",
+      "profile": "instrumented_fault",
+      "action": "mutation_slice",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F04/patch_separate_transaction_lock",
+      "profile": "instrumented_fault",
+      "action": "lock",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F05/patch_stale_version",
+      "profile": "instrumented_fault",
+      "action": "race_stale",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F06/patch_hard_deleted",
+      "profile": "instrumented_fault",
+      "action": "race_missing",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F06/patch_soft_deleted",
+      "profile": "instrumented_fault",
+      "action": "race_missing",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F07/patch_sql_save_before",
+      "profile": "instrumented_fault",
+      "action": "mutation_sql",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F07/patch_sql_commit_before",
+      "profile": "instrumented_fault",
+      "action": "mutation_sql",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F07/patch_sql_commit_after",
+      "profile": "instrumented_fault",
+      "action": "mutation_sql",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F08/patch_phase2_cleanup_failed",
+      "profile": "instrumented_fault",
+      "action": "mutation_sql",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F09/patch_before_demotion_recovery",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F09/patch_between_payloads_recovery",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F10/patch_promotion_then_purge_retry",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F11/patch_cutover_exhaustion",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F12/patch_promotion_applied_lost_ack",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F12/patch_purge_applied_lost_ack",
+      "profile": "instrumented_fault",
+      "action": "cutover",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F13/patch_observed_cutover_blackout",
+      "profile": "instrumented_fault",
+      "action": "blackout",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F14/patch_kill_after_staging",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F14/patch_kill_after_commit",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F14/patch_kill_between_promotion_purge",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F14/patch_cancel_after_staging",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F14/patch_cancel_after_commit",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F14/patch_cancel_between_promotion_purge",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "PATCH"
+    },
+    {
+      "key": "MUT-F15/patch_retry_after_error",
+      "profile": "instrumented_fault",
+      "action": "retry_mutation",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEL-06/separate_transaction_lock",
+      "profile": "instrumented_fault",
+      "action": "lock",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-07/sql_read_before",
+      "profile": "instrumented_fault",
+      "action": "delete_sql",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-07/sql_soft_delete_before",
+      "profile": "instrumented_fault",
+      "action": "delete_sql",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-07/sql_commit_before",
+      "profile": "instrumented_fault",
+      "action": "delete_sql",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-07/sql_commit_after",
+      "profile": "instrumented_fault",
+      "action": "delete_sql",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-08/purge_before_apply_restored",
+      "profile": "instrumented_fault",
+      "action": "delete_vector",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-09/purge_and_compensation_failed",
+      "profile": "instrumented_fault",
+      "action": "delete_vector",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-10/purge_applied_lost_ack",
+      "profile": "instrumented_fault",
+      "action": "delete_vector",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-11/compensation_ignores_separate_lock",
+      "profile": "instrumented_fault",
+      "action": "compensation_lock",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-12/kill_after_soft_delete_commit",
+      "profile": "instrumented_fault",
+      "action": "crash",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-13/no_embedding_dependency",
+      "profile": "instrumented_fault",
+      "action": "delete_no_provider",
+      "method": "DELETE"
+    },
+    {
+      "key": "DEL-13/deleted_noop_without_qdrant",
+      "profile": "instrumented_fault",
+      "action": "delete_no_qdrant",
+      "method": "DELETE"
+    },
+    {
+      "key": "BULK-06/first_locked",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-07/first_vector_failure",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-08/first_sql_failure",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-06/middle_locked",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-07/middle_vector_failure",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-08/middle_sql_failure",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-06/last_locked",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-07/last_vector_failure",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-08/last_sql_failure",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-06/all_locked",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-08/all_sql_failed",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-09/mixed_missing_lock_domain_success",
+      "profile": "instrumented_fault",
+      "action": "bulk_mixed",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-15/all_vector_failed_independent_compensation",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-17/kill_after_first_completed_item",
+      "profile": "instrumented_fault",
+      "action": "bulk_crash",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-04/put_put",
+      "profile": "instrumented_fault",
+      "action": "race_stale",
+      "method": "PUT"
+    },
+    {
+      "key": "FLOW-04/patch_patch",
+      "profile": "instrumented_fault",
+      "action": "race_stale",
+      "method": "PATCH"
+    },
+    {
+      "key": "FLOW-04/put_patch",
+      "profile": "instrumented_fault",
+      "action": "race_stale",
+      "method": "PUT"
+    },
+    {
+      "key": "FLOW-05/older_cutover_after_newer_commit",
+      "profile": "instrumented_fault",
+      "action": "race_cutover",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-06/stale_staging_after_winner_cutover",
+      "profile": "instrumented_fault",
+      "action": "race_stale",
+      "method": "PUT"
+    },
+    {
+      "key": "FLOW-07/update_staged_then_delete",
+      "profile": "instrumented_fault",
+      "action": "race_delete_update",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-07/update_committed_then_delete",
+      "profile": "instrumented_fault",
+      "action": "race_delete_update",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-07/delete_committed_then_restore",
+      "profile": "instrumented_fault",
+      "action": "race_delete_update",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-07/delete_before_purge_then_restore",
+      "profile": "instrumented_fault",
+      "action": "race_delete_update",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-08/stale_compensation_overwrites_accepted_put",
+      "profile": "instrumented_fault",
+      "action": "race_compensation",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-09/same_id_deletes_lock_then_idempotency",
+      "profile": "instrumented_fault",
+      "action": "race_delete",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-10/bulk_and_single_overlap",
+      "profile": "instrumented_fault",
+      "action": "race_bulk",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-10/overlapping_bulk_batches",
+      "profile": "instrumented_fault",
+      "action": "race_bulk",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-11/independent_ids_scheduled_mutations",
+      "profile": "instrumented_fault",
+      "action": "independent",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-12/ingest_commit_then_put",
+      "profile": "instrumented_fault",
+      "action": "race_ingest_mutation",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-12/ingest_commit_then_delete",
+      "profile": "instrumented_fault",
+      "action": "race_ingest_mutation",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-13/slow_embeddings_leave_unrelated_work_usable",
+      "profile": "instrumented_fault",
+      "action": "slow_embeddings",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-14/ingest_lost_response_retry",
+      "profile": "external_fault",
+      "action": "lost_http",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-14/put_lost_response_retry",
+      "profile": "external_fault",
+      "action": "lost_http",
+      "method": "PUT"
+    },
+    {
+      "key": "FLOW-14/patch_lost_response_retry",
+      "profile": "external_fault",
+      "action": "lost_http",
+      "method": "PATCH"
+    },
+    {
+      "key": "FLOW-14/delete_lost_response_retry",
+      "profile": "external_fault",
+      "action": "lost_http",
+      "method": "DELETE"
+    },
+    {
+      "key": "FLOW-14/bulk_lost_response_retry",
+      "profile": "external_fault",
+      "action": "lost_http",
+      "method": "POST"
+    },
+    {
+      "key": "FLOW-15/successful_state_survives_owned_restart",
+      "profile": "instrumented_fault",
+      "action": "restart",
+      "method": "POST"
+    },
+    {
+      "key": "HOST-03/embedding_unreachable_liveness",
+      "profile": "external_fault",
+      "action": "host_liveness",
+      "method": "POST"
+    },
+    {
+      "key": "API-09/production_validation",
+      "profile": "instrumented_fault",
+      "action": "debug",
+      "method": "POST"
+    },
+    {
+      "key": "API-09/production_provider",
+      "profile": "instrumented_fault",
+      "action": "debug",
+      "method": "POST"
+    },
+    {
+      "key": "API-09/development_validation",
+      "profile": "instrumented_fault",
+      "action": "debug",
+      "method": "POST"
+    },
+    {
+      "key": "API-09/development_provider",
+      "profile": "instrumented_fault",
+      "action": "debug",
+      "method": "POST"
+    },
+    {
+      "key": "API-10/fault_internal_omits_source",
+      "profile": "instrumented_fault",
+      "action": "error_source",
+      "method": "POST"
+    },
+    {
+      "key": "API-10/fault_bulk_internal_indexed_source",
+      "profile": "instrumented_fault",
+      "action": "bulk_fault",
+      "method": "POST"
+    },
+    {
+      "key": "API-11/provider_generated_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "POST"
+    },
+    {
+      "key": "API-11/provider_supplied_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "POST"
+    },
+    {
+      "key": "API-11/put_provider_generated_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "PUT"
+    },
+    {
+      "key": "API-11/put_provider_supplied_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "PUT"
+    },
+    {
+      "key": "API-11/patch_provider_generated_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "PATCH"
+    },
+    {
+      "key": "API-11/patch_provider_supplied_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "PATCH"
+    },
+    {
+      "key": "API-11/delete_qdrant_generated_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "DELETE"
+    },
+    {
+      "key": "API-11/delete_qdrant_supplied_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "DELETE"
+    },
+    {
+      "key": "API-11/bulk_qdrant_generated_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "POST"
+    },
+    {
+      "key": "API-11/bulk_qdrant_supplied_request_id",
+      "profile": "instrumented_fault",
+      "action": "correlation",
+      "method": "POST"
+    },
+    {
+      "key": "API-12/scheduled_concurrent_distinct_request_ids",
+      "profile": "instrumented_fault",
+      "action": "independent",
+      "method": "POST"
+    },
+    {
+      "key": "API-13/primary_and_compensation_error_logs",
+      "profile": "instrumented_fault",
+      "action": "error_logs",
+      "method": "POST"
+    },
+    {
+      "key": "API-14/dependency_recovery_same_process",
+      "profile": "instrumented_fault",
+      "action": "recovered",
+      "method": "POST"
+    },
+    {
+      "key": "BULK-18/exact100_partial_failure_latency",
+      "profile": "instrumented_fault",
+      "action": "bulk_latency",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F03/external_residual_purge_rejected",
+      "profile": "external_fault",
+      "action": "external_qdrant",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F04/external_upsert_retry_exhaustion",
+      "profile": "external_fault",
+      "action": "external_qdrant",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F04/external_later_slice_retry_exhaustion_batch2",
+      "profile": "external_fault",
+      "action": "external_qdrant",
+      "method": "POST"
+    },
+    {
+      "key": "ING-F05/external_promotion_applied_lost_ack",
+      "profile": "external_fault",
+      "action": "external_qdrant",
+      "method": "POST"
+    },
+    {
+      "key": "MUT-F12/put_external_promotion_lost_ack",
+      "profile": "external_fault",
+      "action": "external_qdrant",
+      "method": "PUT"
+    },
+    {
+      "key": "MUT-F12/patch_external_purge_lost_ack",
+      "profile": "external_fault",
+      "action": "external_qdrant",
+      "method": "PATCH"
+    },
+    {
+      "key": "DEL-10/external_purge_applied_lost_ack",
+      "profile": "external_fault",
+      "action": "external_qdrant",
+      "method": "DELETE"
+    },
+    {
+      "key": "PUT-12/active_sql_read",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_normalizer_normalize",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_chunker_chunk",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_sparse_embed",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_vector_upsert",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_sql_lock",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_sql_save",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_sql_commit",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_vector_promote",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_vector_superseded",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/active_vector_delete_ids",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_sql_read",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_normalizer_normalize",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_chunker_chunk",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_sparse_embed",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_vector_upsert",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_sql_lock",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_sql_save",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_sql_commit",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_vector_promote",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_vector_superseded",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    },
+    {
+      "key": "PUT-12/deleted_vector_delete_ids",
+      "profile": "instrumented_fault",
+      "action": "put_failure",
+      "method": "PUT"
+    }
+  ],
+  "mock": [
+    {
+      "key": "MOCK-01/metadata-and-reset-route",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-02/missing-auth",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-02/wrong-auth",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-02/valid-reset",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-03/seed-restoration-custom-removal-repeat",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-04/ingest",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-04/put",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-04/patch",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-05/repeat-delete",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-05/mixed-bulk",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-05/all-deleted-bulk",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-06/put-omitted-metadata",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-06/patch-evaluation-without-status",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-07/restart",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-07/two-independent-processes",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-08/auth",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-08/validation",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-08/camel-case-envelope",
+      "profile": "mock"
+    },
+    {
+      "key": "MOCK-08/request-id",
+      "profile": "mock"
+    }
+  ],
+  "source_sha256": {
+    "tests\\e2e\\non_analysis\\resilience.py": "590a2a1bafba050f6ddb2e13667b6167bb6311cc20e79f2311651ec8113b748e",
+    "tests\\e2e\\non_analysis\\proxy.py": "326e7ab7fd9490f46df81d40068ff57e7bbf3d5f729dd8f79528a4f3dd32311f",
+    "tests\\e2e\\non_analysis\\bootstrap.py": "eb734bb743ee23b70efd5800284abe6069197b27c1dc4adbb5c725ab107b77aa",
+    "tests\\e2e\\non_analysis\\test_fault_controls.py": "d97bdd0bd114ae9304eeac6ff66d0f95fc053d39e88239d245597773e239b8f3",
+    "tests\\e2e\\non_analysis\\mock_scenarios.py": "69c5acfe89f450eea79891ff9ec16f876a28c95c0361abea3f53dd670e187b05"
+  }
+}

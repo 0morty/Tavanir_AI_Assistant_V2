@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from src.infrastructure.configs.settings import db_settings
-from src.infrastructure.db import create_db_engine, create_session_factory
 from src.infrastructure.db.repositories.sql.checkpoint_repository import (
     SqlCheckpointRepository,
 )
@@ -16,11 +12,11 @@ from src.infrastructure.db.repositories.sql.skipped_suggestion_repository import
 from src.infrastructure.db.repositories.sql.suggestion_repository import (
     SqlSuggestionRepository,
 )
-from src.infrastructure.db.sql_models.base import Base
 from src.infrastructure.db.sql_models.skipped_suggestion_model import (
     SkippedSuggestionModel,
 )
 from src.infrastructure.db.unit_of_work import SqlUnitOfWork
+from tests.database_fixtures import clean_db_session
 
 from src.application.dtos import SkippedRecordDTO
 from src.domain.entities import (
@@ -29,33 +25,6 @@ from src.domain.entities import (
     SuggestionContent,
 )
 from src.domain.enums import SuggestionStatus
-
-
-@pytest.fixture
-def session_factory() -> async_sessionmaker[AsyncSession]:
-    engine = create_db_engine(db_settings.POSTGRES_URL)
-    return create_session_factory(engine)
-
-
-@asynccontextmanager
-async def clean_db_session(session_factory: async_sessionmaker[AsyncSession]):
-    async with session_factory() as session:
-        conn = await session.connection()
-        await conn.run_sync(Base.metadata.create_all)
-        await session.execute(text("DELETE FROM ingestion_checkpoints;"))
-        await session.execute(text("DELETE FROM skipped_suggestions;"))
-        await session.execute(text("DELETE FROM suggestions;"))
-        await session.commit()
-
-    async with session_factory() as session:
-        try:
-            yield session
-        finally:
-            await session.rollback()
-            await session.execute(text("DELETE FROM ingestion_checkpoints;"))
-            await session.execute(text("DELETE FROM skipped_suggestions;"))
-            await session.execute(text("DELETE FROM suggestions;"))
-            await session.commit()
 
 
 @pytest.mark.asyncio

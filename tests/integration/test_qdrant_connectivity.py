@@ -7,7 +7,7 @@ from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from src.infrastructure.configs.settings import embedding_settings, qdrant_settings
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.db, pytest.mark.usefixtures("qdrant_test_database")]
 
 
 @pytest.fixture

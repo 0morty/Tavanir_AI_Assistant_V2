@@ -1,0 +1,2 @@
+# This file is mounted into the Linux Postgres test container on Windows hosts.
+tests/support/init_test_postgres.sh text eol=lf

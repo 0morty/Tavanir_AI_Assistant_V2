@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from src.infrastructure.configs.settings import db_settings
-from src.infrastructure.db import create_db_engine, create_session_factory
 from src.infrastructure.db.repositories.sql.suggestion_repository import (
     SqlSuggestionRepository,
 )
-from src.infrastructure.db.sql_models.base import Base
 from src.infrastructure.db.unit_of_work import SqlUnitOfWork
+from tests.database_fixtures import clean_db_session
 
 from src.domain.entities import (
     CommitteeEvaluation,
@@ -26,31 +22,6 @@ from src.domain.enums import (
     SecretariatScrutiny,
     SuggestionStatus,
 )
-
-
-@pytest.fixture
-def session_factory() -> async_sessionmaker[AsyncSession]:
-    """Create session factory bound to PostgreSQL engine."""
-    engine = create_db_engine(db_settings.POSTGRES_URL)
-    return create_session_factory(engine)
-
-
-@asynccontextmanager
-async def clean_db_session(session_factory: async_sessionmaker[AsyncSession]):
-    """Async context manager that ensures table schema exists and cleans data."""
-    async with session_factory() as session:
-        conn = await session.connection()
-        await conn.run_sync(Base.metadata.create_all)
-        await session.execute(text("DELETE FROM suggestions;"))
-        await session.commit()
-
-    async with session_factory() as session:
-        try:
-            yield session
-        finally:
-            await session.rollback()
-            await session.execute(text("DELETE FROM suggestions;"))
-            await session.commit()
 
 
 def _create_sample_suggestion(
@@ -136,7 +107,10 @@ def test_mapper_roundtrip_with_secretariat_and_committee_scrutiny():
     assert model.description == "مصوب جلسه شماره ۱۲ کارگروه بهینه‌سازی."
     assert model.secretariat_scrutiny_id == 3
     assert model.secretariat_scrutiny == "ارجاع به کمیته"
-    assert model.secretariat_comment == "پس از تایید اولیه، جهت ارزیابی نهایی به کارگروه ارسال شد."
+    assert (
+        model.secretariat_comment
+        == "پس از تایید اولیه، جهت ارزیابی نهایی به کارگروه ارسال شد."
+    )
 
     hydrated = repo._to_entity(model)
     assert hydrated.id == sugg.id
@@ -145,9 +119,15 @@ def test_mapper_roundtrip_with_secretariat_and_committee_scrutiny():
     assert hydrated.evaluation.scrutiny_id == 0
     assert hydrated.evaluation.description == "مصوب جلسه شماره ۱۲ کارگروه بهینه‌سازی."
     assert hydrated.secretariat_evaluation is not None
-    assert hydrated.secretariat_evaluation.scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+    assert (
+        hydrated.secretariat_evaluation.scrutiny
+        == SecretariatScrutiny.REFER_TO_COMMITTEE
+    )
     assert hydrated.secretariat_evaluation.scrutiny_id == 3
-    assert hydrated.secretariat_evaluation.comment == "پس از تایید اولیه، جهت ارزیابی نهایی به کارگروه ارسال شد."
+    assert (
+        hydrated.secretariat_evaluation.comment
+        == "پس از تایید اولیه، جهت ارزیابی نهایی به کارگروه ارسال شد."
+    )
 
 
 def test_mapper_with_nullable_fields():
@@ -367,11 +347,20 @@ async def test_save_and_retrieve_with_scrutiny_and_secretariat_columns(
         assert retrieved.id == "SUG-DB-SCRUTINY-01"
         assert retrieved.evaluation.scrutiny == CommitteeScrutiny.APPROVED
         assert retrieved.evaluation.scrutiny_id == 0
-        assert retrieved.evaluation.description == "مصوب جلسه شماره ۸۸ با تامین اعتبار اولیه."
+        assert (
+            retrieved.evaluation.description
+            == "مصوب جلسه شماره ۸۸ با تامین اعتبار اولیه."
+        )
         assert retrieved.secretariat_evaluation is not None
-        assert retrieved.secretariat_evaluation.scrutiny == SecretariatScrutiny.REFER_TO_COMMITTEE
+        assert (
+            retrieved.secretariat_evaluation.scrutiny
+            == SecretariatScrutiny.REFER_TO_COMMITTEE
+        )
         assert retrieved.secretariat_evaluation.scrutiny_id == 3
-        assert retrieved.secretariat_evaluation.comment == "پرونده تکمیل و به کمیته ارجاع شد."
+        assert (
+            retrieved.secretariat_evaluation.comment
+            == "پرونده تکمیل و به کمیته ارجاع شد."
+        )
 
 
 @pytest.mark.asyncio
@@ -433,7 +422,12 @@ async def test_upsert_updates_scrutiny_columns(
         assert retrieved.evaluation.scrutiny_id == 1
         assert retrieved.evaluation.description == "فاقد اولویت اجرایی در سال جاری."
         assert retrieved.secretariat_evaluation is not None
-        assert retrieved.secretariat_evaluation.scrutiny == SecretariatScrutiny.OUT_OF_FRAMEWORK
+        assert (
+            retrieved.secretariat_evaluation.scrutiny
+            == SecretariatScrutiny.OUT_OF_FRAMEWORK
+        )
         assert retrieved.secretariat_evaluation.scrutiny_id == 0
-        assert retrieved.secretariat_evaluation.comment == "موضوع در حیطه اختیارات شرکت نیست."
-
+        assert (
+            retrieved.secretariat_evaluation.comment
+            == "موضوع در حیطه اختیارات شرکت نیست."
+        )

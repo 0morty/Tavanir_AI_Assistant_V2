@@ -6,6 +6,8 @@ from src.containers import Container
 from src.infrastructure.db.repositories.sql.base_sql_repository import BaseSqlRepository
 from src.infrastructure.db.unit_of_work import SqlUnitOfWork
 
+pytestmark = [pytest.mark.db, pytest.mark.usefixtures("postgres_test_database")]
+
 
 class IntegrationTestRepo(BaseSqlRepository):
     async def ping(self) -> int:

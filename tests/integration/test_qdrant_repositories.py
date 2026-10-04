@@ -30,7 +30,7 @@ from src.domain.interfaces import (
     ISuggestionVectorRepository,
 )
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.db, pytest.mark.usefixtures("qdrant_test_database")]
 
 
 @pytest.fixture

@@ -1,3 +1,4 @@
+import re
 import uuid
 from collections.abc import Sequence
 from typing import TypeGuard
@@ -13,8 +14,6 @@ from src.domain.entities import (
 )
 from src.domain.enums import (
     ChunkStatus,
-    CommitteeScrutiny,
-    SecretariatScrutiny,
     SuggestionChunkType,
 )
 from src.domain.exceptions import SuggestionChunkingError
@@ -34,6 +33,11 @@ class FieldAwareSuggestionChunker(
     boundary preservation for long essays via LangChain's RecursiveCharacterTextSplitter,
     and noise token filtering.
     """
+
+    # SQL keeps the full suggestion; inline image bytes are excluded only from vector text.
+    _INLINE_IMAGE_DATA_URI = re.compile(
+        r"data:image/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+", re.IGNORECASE
+    )
 
     DEFAULT_SEPARATORS: list[str] = ["\n\n", "\n", "؛", ".", "!", "؟", " "]
     DEFAULT_NOISE_PLACEHOLDERS: frozenset[str] = NOISE_PLACEHOLDERS
@@ -93,7 +97,11 @@ class FieldAwareSuggestionChunker(
         using LangChain's RecursiveCharacterTextSplitter under max_chunk_chars
         with overlap_chars overlap.
         """
-        text = text.strip()
+        text = self._INLINE_IMAGE_DATA_URI.sub("", text).strip()
+        if not self._is_valid_content(text):
+            raise SuggestionChunkingError(
+                "Suggestion field contains no substantive text after excluding inline image data."
+            )
         if len(text) <= self._max_chunk_chars:
             return [text]
 

@@ -76,6 +76,10 @@ async def test_analyze_suggestion_success_200(
         similar_rejected_ids=["SUG-400"],
         similar_not_accepted_ids=["SUG-500"],
         applied_statute_ids=[],
+        uncertainty="عدم قطعیت در سوابق",
+        cited_suggestion_ids=["SUG-100"],
+        is_fallback_mode=False,
+        grounding_ratio=0.5,
     )
 
     with setup_container.analyze_suggestion_use_case.override(mock_use_case):
@@ -98,6 +102,10 @@ async def test_analyze_suggestion_success_200(
                 "similarRejectedIds": ["SUG-400"],
                 "similarNotAcceptedIds": ["SUG-500"],
                 "appliedStatuteIds": [],
+                "uncertainty": "عدم قطعیت در سوابق",
+                "citedSuggestionIds": ["SUG-100"],
+                "isFallbackMode": False,
+                "groundingRatio": 0.5,
             }
             mock_use_case.execute.assert_awaited_once()
 

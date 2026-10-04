@@ -32,6 +32,10 @@ from src.application.exceptions import (
     LLMBaseError,
     LLMConfigurationError,
     LLMConnectionError,
+    LLMInvalidCitationError,
+    LLMOutputParseError,
+    LLMOutputSchemaError,
+    LLMUnknownCitationError,
     PromptBudgetExceededError,
     RerankerAPIError,
     RerankerBaseError,
@@ -232,6 +236,26 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
     LLMBaseError: ErrorSpec(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         code="LLM_CONFIGURATION_ERROR",
+        default_pointer=None,
+    ),
+    LLMOutputParseError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="GENERATION_FAILED",
+        default_pointer=None,
+    ),
+    LLMOutputSchemaError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="GENERATION_FAILED",
+        default_pointer=None,
+    ),
+    LLMInvalidCitationError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="GENERATION_FAILED",
+        default_pointer=None,
+    ),
+    LLMUnknownCitationError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="GENERATION_FAILED",
         default_pointer=None,
     ),
     PromptBudgetExceededError: ErrorSpec(

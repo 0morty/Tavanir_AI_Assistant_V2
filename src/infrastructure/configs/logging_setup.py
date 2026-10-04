@@ -1,3 +1,4 @@
+import io
 import logging
 import sys
 
@@ -75,6 +76,14 @@ def configure_logging() -> None:
         foreign_pre_chain=shared_processors,
         processors=renderer_processors,
     )
+
+    # 3.5 Reconfigure standard streams for UTF-8 resilience (Windows fix)
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+            except Exception:
+                pass
 
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setFormatter(stdout_formatter)

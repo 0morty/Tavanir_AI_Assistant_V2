@@ -1,6 +1,9 @@
 """Provider-neutral final Generation orchestration."""
 
 from src.application.dtos import GenerationInput, GenerationResult
+from src.application.interfaces.i_generate_suggestion_use_case import (
+    IGenerateSuggestionUseCase,
+)
 from src.application.interfaces.i_llm_client import ILLMClient
 from src.application.interfaces.i_llm_request_builder import ILLMRequestBuilder
 from src.application.interfaces.i_output_parser import IOutputParser
@@ -9,7 +12,7 @@ from src.application.interfaces.i_suggestion_prompt_preparer import (
 )
 
 
-class GenerateSuggestionUseCase:
+class GenerateSuggestionUseCase(IGenerateSuggestionUseCase):
     """Prepare fitted evidence, invoke a chat model, and validate its result."""
 
     def __init__(

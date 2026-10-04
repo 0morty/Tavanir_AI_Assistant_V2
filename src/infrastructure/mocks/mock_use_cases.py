@@ -101,6 +101,10 @@ class MockAnalyzeSuggestionUseCase(AnalyzeSuggestionUseCase):
                 "statute-law-1398-art-4",
                 "statute-tavanir-circular-402",
             ],
+            uncertainty="ارزیابی بر اساس سوابق آزمایشی انجام پذیرفت.",
+            cited_suggestion_ids=["SUG-100"],
+            is_fallback_mode=False,
+            grounding_ratio=0.5,
         )
 
 

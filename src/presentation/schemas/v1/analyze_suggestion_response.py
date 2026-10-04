@@ -38,6 +38,22 @@ class AnalyzeSuggestionDataResponse(BaseResponseModel):
         default_factory=list,
         description="IDs of applicable statutory documents and regulatory articles",
     )
+    uncertainty: str | None = Field(
+        default=None,
+        description="Explicit uncertainty or knowledge gaps identified by the model",
+    )
+    cited_suggestion_ids: list[str] = Field(
+        default_factory=list,
+        description="IDs of similar suggestions cited in the analysis text",
+    )
+    is_fallback_mode: bool = Field(
+        default=False,
+        description="Whether heuristic/RRF fallback mode was active during candidate ranking",
+    )
+    grounding_ratio: float = Field(
+        default=0.0,
+        description="Ratio of cited suggestions to the total active candidate pool [0.0, 1.0]",
+    )
 
 
 # Alias for backward and naming consistency

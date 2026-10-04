@@ -4,6 +4,9 @@ from src.application.interfaces.i_compressible_section import CompressibleSectio
 from src.application.interfaces.i_context_builder import IContextBuilder
 from src.application.interfaces.i_demand_allocator import IDemandAllocator
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
+from src.application.interfaces.i_generate_suggestion_use_case import (
+    IGenerateSuggestionUseCase,
+)
 from src.application.interfaces.i_historical_suggestion_extractor import (
     IHistoricalSuggestionExtractor,
 )

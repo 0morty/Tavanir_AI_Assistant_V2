@@ -98,6 +98,10 @@ async def test_mock_analyze_suggestion_success(client: AsyncClient):
     assert isinstance(data["similarExecutedIds"], list)
     assert "appliedStatuteIds" in data
     assert len(data["appliedStatuteIds"]) > 0
+    assert data["uncertainty"] == "ارزیابی بر اساس سوابق آزمایشی انجام پذیرفت."
+    assert data["citedSuggestionIds"] == ["SUG-100"]
+    assert data["isFallbackMode"] is False
+    assert data["groundingRatio"] == 0.5
 
 
 @pytest.mark.asyncio

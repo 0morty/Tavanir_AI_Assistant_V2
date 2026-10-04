@@ -35,6 +35,12 @@ class AnalyzeSuggestionResponse:
     # 3. Applicable Statutes & Distances
     applied_statute_ids: list[str] = field(default_factory=list)
 
+    # 4. Decision Support, Uncertainty & Citation Telemetry
+    uncertainty: str | None = None
+    cited_suggestion_ids: list[str] = field(default_factory=list)
+    is_fallback_mode: bool = False
+    grounding_ratio: float = 0.0
+
 
 @dataclass(frozen=True)
 class SectionProcessingResult:

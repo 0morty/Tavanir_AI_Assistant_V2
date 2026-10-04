@@ -8,7 +8,6 @@ import structlog
 from src.application.dtos import (
     AnalyzeSuggestionDTO,
     AnalyzeSuggestionResponse,
-    ContextBuilderResult,
     CurrentSuggestionInput,
     GenerationInput,
     RerankCandidate,
@@ -22,9 +21,9 @@ from src.application.exceptions import (
     RerankerProtocolError,
 )
 from src.application.interfaces import (
+    IGenerateSuggestionUseCase,
     IHybridEmbeddingService,
     IReranker,
-    ISuggestionPromptPreparer,
     ITextNormalizer,
     IUnitOfWork,
 )
@@ -61,7 +60,9 @@ def _build_placeholder_analysis(total_candidates: int) -> str:
     )
 
 
-def _build_empty_response() -> AnalyzeSuggestionResponse:
+def _build_empty_response(
+    is_fallback_mode: bool = False,
+) -> AnalyzeSuggestionResponse:
     """Creates a standardized empty response with zero-candidate diagnostic placeholder and empty partition lists."""
     return AnalyzeSuggestionResponse(
         analysis=_build_placeholder_analysis(total_candidates=0),
@@ -71,6 +72,10 @@ def _build_empty_response() -> AnalyzeSuggestionResponse:
         similar_rejected_ids=[],
         similar_not_accepted_ids=[],
         applied_statute_ids=[],
+        uncertainty="هیچ سابقه سازمانی مرتبطی برای ارزیابی این پیشنهاد یافت نشد.",
+        cited_suggestion_ids=[],
+        is_fallback_mode=is_fallback_mode,
+        grounding_ratio=0.0,
     )
 
 
@@ -90,7 +95,7 @@ class AnalyzeSuggestionUseCase:
     9. Cross-Encoder Reranking: Rerank full query against unique candidate chunks with degraded fallback to RRF.
     10. Max-Passage (MaxP) Pooling: Select winning chunks, gate thresholds, slice top-N per status partition.
     11. PostgreSQL Hydration: Validate active master entities and reconstruct descending score order.
-    12. Prompt Preparation & Response Assembly: Token-budget prompt preparation and structured response.
+    12. Generation Delegation & Response Assembly: Orchestrate LLM generation and structured response.
     """
 
     def __init__(
@@ -100,7 +105,7 @@ class AnalyzeSuggestionUseCase:
         vector_repo: ISuggestionVectorRepository,
         reranker: IReranker,
         uow: IUnitOfWork,
-        prompt_preparer: ISuggestionPromptPreparer,
+        generator: IGenerateSuggestionUseCase,
         solution_global_limit: int = 40,
         problem_global_limit: int = 25,
         title_global_limit: int = 15,
@@ -108,18 +113,15 @@ class AnalyzeSuggestionUseCase:
         pending_probe_limit: int = 10,
         top_n_per_status: int = 3,
         min_score_threshold: float | None = 0.0,
-        max_prompt_tokens: int = 4096,
     ) -> None:
-        if prompt_preparer is None:
-            raise TypeError("prompt_preparer must not be None.")
-        if max_prompt_tokens <= 0:
-            raise ValueError("max_prompt_tokens must be positive.")
+        if generator is None:
+            raise TypeError("generator must not be None.")
         self._normalizer = normalizer
         self._embedding_service = embedding_service
         self._vector_repo = vector_repo
         self._reranker = reranker
         self._uow = uow
-        self._prompt_preparer = prompt_preparer
+        self._generator = generator
         self._solution_global_limit = solution_global_limit
         self._problem_global_limit = problem_global_limit
         self._title_global_limit = title_global_limit
@@ -127,7 +129,6 @@ class AnalyzeSuggestionUseCase:
         self._pending_probe_limit = pending_probe_limit
         self._top_n_per_status = top_n_per_status
         self._min_score_threshold = min_score_threshold
-        self._max_prompt_tokens = max_prompt_tokens
 
     async def execute(self, dto: AnalyzeSuggestionDTO) -> AnalyzeSuggestionResponse:
         # Step 1: Enforce domain invariants upfront
@@ -163,7 +164,7 @@ class AnalyzeSuggestionUseCase:
         # Step 6: Zero-Hits Short-Circuit Guard
         if not raw_hits:
             await logger.ainfo("suggestion_analysis_zero_vector_hits_short_circuit")
-            return _build_empty_response()
+            return _build_empty_response(is_fallback_mode=False)
 
         # Step 7 & 8: Deduplicate chunks and format rerank candidates
         unique_chunks = self._deduplicate_chunks(raw_hits)
@@ -211,10 +212,10 @@ class AnalyzeSuggestionUseCase:
                 "suggestion_analysis_short_circuit_zero_active_candidates",
                 retrieved_hits_count=len(all_winning_ids),
             )
-            return _build_empty_response()
+            return _build_empty_response(is_fallback_mode=is_fallback_mode)
 
-        # Step 12: Prompt Preparation & Final Response Assembly
-        prompt_result = self._prepare_generation_prompt(
+        # Step 12: Generation Delegation & Final Response Assembly
+        generation_input = self._build_generation_input(
             norm_title=norm_title,
             norm_problem=norm_problem,
             norm_solution=norm_solution,
@@ -222,6 +223,29 @@ class AnalyzeSuggestionUseCase:
             all_winning_candidates=all_winning_candidates,
             hydrated_map=hydrated_map,
         )
+
+        generation_result = await self._generator.execute(generation_input)
+
+        # Extract domain suggestion IDs, deduplicate preserving order, filter by active pool
+        raw_cited_ids = list(
+            dict.fromkeys(
+                c.id
+                for c in generation_result.citations
+                if isinstance(c, SimilarSuggestionInput)
+            )
+        )
+        all_active_ids = {
+            cid for id_list in active_partitions.values() for cid in id_list
+        }
+        cited_ids = [cid for cid in raw_cited_ids if cid in all_active_ids]
+
+        total_active_pool = len(all_active_ids)
+        if total_active_pool > 0:
+            grounding_ratio = min(
+                1.0, max(0.0, round(len(cited_ids) / total_active_pool, 2))
+            )
+        else:
+            grounding_ratio = 0.0
 
         await logger.ainfo(
             "suggestion_analysis_completed_successfully",
@@ -231,18 +255,22 @@ class AnalyzeSuggestionUseCase:
             pending_count=len(similar_pending_ids),
             rejected_count=len(similar_rejected_ids),
             not_accepted_count=len(similar_not_accepted_ids),
-            prompt_tokens=prompt_result.total_tokens,
+            citations_count=len(cited_ids),
             is_fallback_mode=is_fallback_mode,
         )
 
         return AnalyzeSuggestionResponse(
-            analysis=prompt_result.prompt,
+            analysis=generation_result.answer,
             similar_executed_ids=similar_executed_ids,
             similar_approved_ids=similar_approved_ids,
             similar_pending_ids=similar_pending_ids,
             similar_rejected_ids=similar_rejected_ids,
             similar_not_accepted_ids=similar_not_accepted_ids,
             applied_statute_ids=[],
+            uncertainty=generation_result.uncertainty,
+            cited_suggestion_ids=cited_ids,
+            is_fallback_mode=is_fallback_mode,
+            grounding_ratio=grounding_ratio,
         )
 
     # region Helpers
@@ -442,16 +470,16 @@ class AnalyzeSuggestionUseCase:
             for status in SuggestionStatus
         }
 
-    def _prepare_generation_prompt(
-        self,
+    @staticmethod
+    def _build_generation_input(
         norm_title: str,
         norm_problem: str,
         norm_solution: str,
         norm_context: str | None,
         all_winning_candidates: list[PooledSuggestionCandidate],
         hydrated_map: dict[str, Suggestion],
-    ) -> ContextBuilderResult:
-        """Sorts active candidates globally by winning score, prepares prompt DTOs, and builds the prompt."""
+    ) -> GenerationInput:
+        """Sorts active candidates globally by winning score and prepares GenerationInput."""
         active_candidates = [
             c for c in all_winning_candidates if c.suggestion_id in hydrated_map
         ]
@@ -482,10 +510,7 @@ class AnalyzeSuggestionUseCase:
             similar_suggestions=similar_inputs,
         )
 
-        return self._prompt_preparer.prepare(
-            generation_input,
-            max_prompt_tokens=self._max_prompt_tokens,
-        )
+        return generation_input
 
     # endregion
 

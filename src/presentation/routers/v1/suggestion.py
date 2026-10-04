@@ -61,6 +61,10 @@ async def analyze_suggestion(
         similar_rejected_ids=result.similar_rejected_ids,
         similar_not_accepted_ids=result.similar_not_accepted_ids,
         applied_statute_ids=result.applied_statute_ids,
+        uncertainty=result.uncertainty,
+        cited_suggestion_ids=result.cited_suggestion_ids,
+        is_fallback_mode=result.is_fallback_mode,
+        grounding_ratio=result.grounding_ratio,
     )
     return SuccessResponse.create(data=response_data, status=status.HTTP_200_OK)
 

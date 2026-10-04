@@ -78,3 +78,52 @@ def test_fastapi_health_endpoint():
     data = response.json()
     assert data["status"] == "ok"
     assert data["service"] == "tavanir-ai-assistant-v2"
+
+
+def test_logging_handles_persian_alphabet_characters_without_encode_error():
+    """Verify logging Persian alphabet characters (like 'ب') does not raise UnicodeEncodeError."""
+    configure_logging()
+    import structlog
+
+    log = structlog.get_logger("test_persian_logger")
+    log.warning(
+        "skipping_invalid_suggestion",
+        reason="Suggestion title must contain substantive content, got 'ب'.",
+        suggestion_id="2181//95",
+    )
+
+
+def test_logging_handles_zwnj_characters_without_encode_error():
+    """Verify logging Zero-Width Non-Joiner (ZWNJ / نیم‌فاصله) does not raise UnicodeEncodeError."""
+    configure_logging()
+    import structlog
+
+    log = structlog.get_logger("test_persian_logger")
+    log.info(
+        "persian_zwnj_log",
+        title="پیشنهاد‌های سازمانی و بهره‌وری شبکه",
+    )
+
+
+def test_logging_handles_persian_numerals_without_encode_error():
+    """Verify logging Persian numerals does not raise UnicodeEncodeError."""
+    configure_logging()
+    import structlog
+
+    log = structlog.get_logger("test_persian_logger")
+    log.info(
+        "persian_numerals_log",
+        count="۱۲۳۴۵",
+    )
+
+
+def test_logging_exception_traceback_with_persian_message_no_encode_error():
+    """Verify logging exception tracebacks with Persian descriptions does not raise UnicodeEncodeError."""
+    configure_logging()
+    import structlog
+
+    log = structlog.get_logger("test_persian_logger")
+    try:
+        raise ValueError("خطای آزمایشی در پردازش پیشنهاد")
+    except Exception as exc:
+        log.exception("caught_persian_exception", error=str(exc))

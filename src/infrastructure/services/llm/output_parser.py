@@ -29,8 +29,18 @@ class GenerationOutputParser(IOutputParser):
     ) -> GenerationResult:
         if not isinstance(raw_output, str) or not raw_output.strip():
             raise LLMOutputParseError("Final LLM output must be non-empty JSON text")
+
+        clean_raw = raw_output.strip()
+        if clean_raw.startswith("```"):
+            lines = clean_raw.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            clean_raw = "\n".join(lines).strip()
+
         try:
-            output = json.loads(raw_output)
+            output = json.loads(clean_raw)
         except json.JSONDecodeError as exc:
             raise LLMOutputParseError("Final LLM output is not valid JSON") from exc
 
@@ -48,9 +58,9 @@ class GenerationOutputParser(IOutputParser):
             raise TypeError("citation_map must be a retained citation mapping")
 
         uncertainty = output.get("uncertainty")
-        if uncertainty is not None and (
-            not isinstance(uncertainty, str) or not uncertainty.strip()
-        ):
+        if isinstance(uncertainty, str):
+            uncertainty = uncertainty.strip() or None
+        elif uncertainty is not None:
             raise LLMOutputSchemaError("uncertainty must be a non-blank string or null")
 
         resolved: dict[str, GenerationChunk | SimilarSuggestionInput] = {}

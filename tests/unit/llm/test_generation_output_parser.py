@@ -97,7 +97,7 @@ class GenerationOutputParserTests(unittest.TestCase):
             ("", LLMOutputParseError),
             ("   ", LLMOutputParseError),
             ('{"answer":', LLMOutputParseError),
-            ('```json\n{"answer": "yes", "citations": []}\n```', LLMOutputParseError),
+            ('```json\n{"answer":\n```', LLMOutputParseError),
             ('["answer", "citations"]', LLMOutputSchemaError),
         )
         for raw, error_type in cases:
@@ -174,6 +174,21 @@ class GenerationOutputParserTests(unittest.TestCase):
         )
         self.assertIs(result.citations[0], suggestion)
         self.assertIsNone(result.uncertainty)
+
+    def test_output_parser_strips_markdown_code_fences_cleanly(self) -> None:
+        raw = '```json\n{"answer": "clean answer", "citations": []}\n```'
+        result = self.parser.parse(raw, citation_map=self.retained)
+        self.assertEqual(result.answer, "clean answer")
+        self.assertEqual(result.citations, [])
+
+    def test_output_parser_normalizes_empty_string_uncertainty_to_none(self) -> None:
+        for val in ("", "   ", None):
+            with self.subTest(uncertainty=val):
+                raw = json.dumps(
+                    {"answer": "clean answer", "citations": [], "uncertainty": val}
+                )
+                result = self.parser.parse(raw, citation_map=self.retained)
+                self.assertIsNone(result.uncertainty)
 
 
 if __name__ == "__main__":

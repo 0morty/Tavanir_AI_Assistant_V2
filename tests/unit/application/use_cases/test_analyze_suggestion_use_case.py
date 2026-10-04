@@ -11,13 +11,17 @@ from src.containers import Container
 
 from src.application.dtos import (
     AnalyzeSuggestionDTO,
-    ContextBuilderResult,
+    AnalyzeSuggestionResponse,
+    GenerationResult,
+    SimilarSuggestionInput,
     GenerationInput,
     RerankCandidate,
     RerankedCandidate,
 )
 from src.application.exceptions import (
     InsufficientEvidenceBudgetError,
+    LLMConnectionError,
+    LLMOutputParseError,
     PromptBudgetExceededError,
     RerankerAPIError,
     RerankerConnectionError,
@@ -28,7 +32,7 @@ from src.application.exceptions import (
 from src.application.interfaces import (
     IHybridEmbeddingService,
     IReranker,
-    ISuggestionPromptPreparer,
+    IGenerateSuggestionUseCase,
     ITextNormalizer,
     IUnitOfWork,
 )
@@ -169,14 +173,18 @@ def mock_uow(mock_suggestion_repo: ISuggestionRepository) -> IUnitOfWork:
 
 
 @pytest.fixture
-def mock_prompt_preparer() -> ISuggestionPromptPreparer:
-    mock = MagicMock(spec=ISuggestionPromptPreparer)
-    mock.prepare = MagicMock(
-        return_value=ContextBuilderResult(
-            prompt="## PREPARED PROMPT TEXT",
-            sections=(),
-            budget_tokens=4096,
-            total_tokens=150,
+def mock_prompt_preparer(mock_generator: IGenerateSuggestionUseCase) -> IGenerateSuggestionUseCase:
+    return mock_generator
+
+
+@pytest.fixture
+def mock_generator() -> IGenerateSuggestionUseCase:
+    mock = MagicMock(spec=IGenerateSuggestionUseCase)
+    mock.execute = AsyncMock(
+        return_value=GenerationResult(
+            answer="## PREPARED PROMPT TEXT",
+            citations=[],
+            uncertainty=None,
         )
     )
     return mock
@@ -199,7 +207,7 @@ async def test_analyze_suggestion_full_tri_track_retrieval_success(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     # Setup retrieval hits with collision across Track 1 and Track 2
@@ -322,7 +330,7 @@ async def test_analyze_suggestion_full_tri_track_retrieval_success(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
         solution_global_limit=40,
         problem_global_limit=25,
         title_global_limit=15,
@@ -366,7 +374,7 @@ async def test_analyze_suggestion_full_tri_track_retrieval_success(
     assert result.similar_not_accepted_ids == []
     assert result.applied_statute_ids == []
     assert result.analysis == "## PREPARED PROMPT TEXT"
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_called_once()
+    mock_generator.execute.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -376,7 +384,7 @@ async def test_analyze_suggestion_zero_hits_short_circuits(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     # All 5 tracks return empty
@@ -388,7 +396,7 @@ async def test_analyze_suggestion_zero_hits_short_circuits(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
@@ -398,7 +406,7 @@ async def test_analyze_suggestion_zero_hits_short_circuits(
     # Reranker, UoW, and prompt preparer were NEVER called
     cast(AsyncMock, mock_reranker.rerank).assert_not_called()
     cast(AsyncMock, mock_uow.suggestions.get_by_ids).assert_not_called()
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
 
     # Empty lists returned with placeholder analysis
     assert result.similar_executed_ids == []
@@ -417,7 +425,7 @@ async def test_analyze_suggestion_reranker_connection_error_fallback(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -445,7 +453,7 @@ async def test_analyze_suggestion_reranker_connection_error_fallback(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     # Should not raise; degrades gracefully to RRF
@@ -455,7 +463,7 @@ async def test_analyze_suggestion_reranker_connection_error_fallback(
     mock_uow.suggestions.get_by_ids.assert_called_once_with(
         ["SUG-001"], include_deleted=False
     )
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_called_once()
+    mock_generator.execute.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -465,7 +473,7 @@ async def test_analyze_suggestion_reranker_overloaded_fallback(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -490,12 +498,12 @@ async def test_analyze_suggestion_reranker_overloaded_fallback(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
     assert result.similar_executed_ids == ["SUG-001"]
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_called_once()
+    mock_generator.execute.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -505,7 +513,7 @@ async def test_analyze_suggestion_reranker_api_error_fallback(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -530,12 +538,12 @@ async def test_analyze_suggestion_reranker_api_error_fallback(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
     assert result.similar_executed_ids == ["SUG-001"]
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_called_once()
+    mock_generator.execute.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -545,7 +553,7 @@ async def test_analyze_suggestion_reranker_validation_error_propagates(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -567,13 +575,13 @@ async def test_analyze_suggestion_reranker_validation_error_propagates(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     with pytest.raises(RerankerValidationError, match="Invalid payload format"):
         await use_case.execute(valid_dto)
 
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -583,7 +591,7 @@ async def test_analyze_suggestion_filters_soft_deleted_and_preserves_score_order
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     # 3 hits across executed suggestions
@@ -658,7 +666,7 @@ async def test_analyze_suggestion_filters_soft_deleted_and_preserves_score_order
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
@@ -666,7 +674,7 @@ async def test_analyze_suggestion_filters_soft_deleted_and_preserves_score_order
     # SUG-200 was filtered out.
     # Score order must be preserved: SUG-100 (0.95) must precede SUG-300 (0.75), despite SQL returning SUG-300 first!
     assert result.similar_executed_ids == ["SUG-100", "SUG-300"]
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_called_once()
+    mock_generator.execute.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -676,7 +684,7 @@ async def test_analyze_suggestion_validates_domain_noise_and_short_content(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
 ) -> None:
     use_case = AnalyzeSuggestionUseCase(
         normalizer=mock_normalizer,
@@ -684,7 +692,7 @@ async def test_analyze_suggestion_validates_domain_noise_and_short_content(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     # Noise placeholder in solution
@@ -707,7 +715,7 @@ async def test_analyze_suggestion_validates_domain_noise_and_short_content(
     with pytest.raises(InvalidSuggestionContentError):
         await use_case.execute(short_dto)
 
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
 
 
 # ==============================================================================
@@ -722,7 +730,7 @@ async def test_analyze_suggestion_invokes_prompt_preparer_with_normalized_fields
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -755,13 +763,13 @@ async def test_analyze_suggestion_invokes_prompt_preparer_with_normalized_fields
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     await use_case.execute(valid_dto)
 
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_called_once()
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
+    mock_generator.execute.assert_awaited_once()
+    call_args = mock_generator.execute.call_args
     gen_input: GenerationInput = call_args[0][0]
     curr = gen_input.current_suggestion
 
@@ -778,14 +786,13 @@ async def test_analyze_suggestion_populates_analysis_with_prepared_prompt(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
-    cast(MagicMock, mock_prompt_preparer.prepare).return_value = ContextBuilderResult(
-        prompt="## CUSTOM_GENERATED_PROMPT_ABC_123",
-        sections=(),
-        budget_tokens=4096,
-        total_tokens=250,
+    mock_generator.execute.return_value = GenerationResult(
+        answer="## CUSTOM_GENERATED_PROMPT_ABC_123",
+        citations=[],
+        uncertainty=None,
     )
     hit = _make_search_result(
         "c-1",
@@ -817,7 +824,7 @@ async def test_analyze_suggestion_populates_analysis_with_prepared_prompt(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
@@ -831,7 +838,7 @@ async def test_analyze_suggestion_passes_raw_logits_to_similar_input(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit1 = _make_search_result(
@@ -884,13 +891,13 @@ async def test_analyze_suggestion_passes_raw_logits_to_similar_input(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
         min_score_threshold=None,
     )
 
     await use_case.execute(valid_dto)
 
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
+    call_args = mock_generator.execute.call_args
     gen_input: GenerationInput = call_args[0][0]
     similar_inputs = gen_input.similar_suggestions
 
@@ -908,7 +915,7 @@ async def test_analyze_suggestion_maps_hydrated_fields_accurately(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -950,12 +957,12 @@ async def test_analyze_suggestion_maps_hydrated_fields_accurately(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     await use_case.execute(valid_dto)
 
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
+    call_args = mock_generator.execute.call_args
     gen_input: GenerationInput = call_args[0][0]
     sim_item = gen_input.similar_suggestions[0]
 
@@ -975,7 +982,7 @@ async def test_analyze_suggestion_none_or_empty_context_title_mapping(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
 ) -> None:
     dto_no_context = AnalyzeSuggestionDTO(
         title="عنوان پیشنهاد تستی",
@@ -1013,24 +1020,24 @@ async def test_analyze_suggestion_none_or_empty_context_title_mapping(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     await use_case.execute(dto_no_context)
 
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
+    call_args = mock_generator.execute.call_args
     gen_input: GenerationInput = call_args[0][0]
     assert gen_input.current_suggestion.context_title is None
 
 
 @pytest.mark.asyncio
-async def test_analyze_suggestion_passes_configured_max_prompt_tokens(
+async def test_analyze_suggestion_delegates_to_generator_with_valid_input(
     mock_normalizer: ITextNormalizer,
     mock_embedding_service: IHybridEmbeddingService,
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -1063,15 +1070,17 @@ async def test_analyze_suggestion_passes_configured_max_prompt_tokens(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
-        max_prompt_tokens=2048,
+        generator=mock_generator,
     )
 
     await use_case.execute(valid_dto)
 
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
-    passed_max_tokens = call_args.kwargs.get("max_prompt_tokens") or call_args[0][1]
-    assert passed_max_tokens == 2048
+    mock_generator.execute.assert_awaited_once()
+    call_args = mock_generator.execute.call_args
+    gen_input: GenerationInput = call_args[0][0]
+    assert gen_input.current_suggestion.title == f"normalized_{valid_dto.title}"
+    assert len(gen_input.similar_suggestions) == 1
+    assert gen_input.similar_suggestions[0].id == "SUG-1"
 
 
 # ==============================================================================
@@ -1086,7 +1095,7 @@ async def test_analyze_suggestion_orders_candidates_by_global_score_desc(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     # 3 hits across different statuses: PENDING, EXECUTED, REJECTED
@@ -1158,13 +1167,13 @@ async def test_analyze_suggestion_orders_candidates_by_global_score_desc(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
         min_score_threshold=None,
     )
 
     await use_case.execute(valid_dto)
 
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
+    call_args = mock_generator.execute.call_args
     gen_input: GenerationInput = call_args[0][0]
     similar_inputs = gen_input.similar_suggestions
 
@@ -1179,7 +1188,7 @@ async def test_analyze_suggestion_orders_mixed_positive_and_negative_scores(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hits = [
@@ -1240,14 +1249,14 @@ async def test_analyze_suggestion_orders_mixed_positive_and_negative_scores(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
         top_n_per_status=5,
         min_score_threshold=None,
     )
 
     await use_case.execute(valid_dto)
 
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
+    call_args = mock_generator.execute.call_args
     gen_input: GenerationInput = call_args[0][0]
     similar_inputs = gen_input.similar_suggestions
 
@@ -1262,7 +1271,7 @@ async def test_analyze_suggestion_handles_equal_scores_deterministically(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit1 = _make_search_result(
@@ -1315,7 +1324,7 @@ async def test_analyze_suggestion_handles_equal_scores_deterministically(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     # Must complete without sorting crash
@@ -1330,7 +1339,7 @@ async def test_analyze_suggestion_single_winning_chunk_per_parent(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     # 2 different chunks for the SAME parent SUG-1
@@ -1380,12 +1389,12 @@ async def test_analyze_suggestion_single_winning_chunk_per_parent(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     await use_case.execute(valid_dto)
 
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
+    call_args = mock_generator.execute.call_args
     gen_input: GenerationInput = call_args[0][0]
     similar_inputs = gen_input.similar_suggestions
 
@@ -1402,7 +1411,7 @@ async def test_analyze_suggestion_enforces_top_n_per_status_slicing(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     # 5 hits all EXECUTED
@@ -1443,7 +1452,7 @@ async def test_analyze_suggestion_enforces_top_n_per_status_slicing(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
         top_n_per_status=3,  # Top-N is 3
     )
 
@@ -1468,7 +1477,7 @@ async def test_analyze_suggestion_zero_active_db_records_bypasses_prompt_prepare
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -1505,13 +1514,13 @@ async def test_analyze_suggestion_zero_active_db_records_bypasses_prompt_prepare
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
 
     # Must short-circuit without calling prompt preparer
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
     assert result.similar_executed_ids == []
     assert "تعداد 0 پیشنهاد" in result.analysis
 
@@ -1523,7 +1532,7 @@ async def test_analyze_suggestion_missing_db_records_filtered_cleanly(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -1556,13 +1565,13 @@ async def test_analyze_suggestion_missing_db_records_filtered_cleanly(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
 
     # Should cleanly short-circuit
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
     assert result.similar_executed_ids == []
     assert "تعداد 0 پیشنهاد" in result.analysis
 
@@ -1574,7 +1583,7 @@ async def test_analyze_suggestion_all_below_min_score_threshold_bypasses_prepare
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -1606,14 +1615,14 @@ async def test_analyze_suggestion_all_below_min_score_threshold_bypasses_prepare
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
         min_score_threshold=0.5,
     )
 
     result = await use_case.execute(valid_dto)
 
     # All below threshold -> short-circuits
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
     cast(AsyncMock, mock_uow.suggestions.get_by_ids).assert_not_called()
     assert result.similar_executed_ids == []
     assert "تعداد 0 پیشنهاد" in result.analysis
@@ -1626,7 +1635,7 @@ async def test_analyze_suggestion_single_active_candidate_survives(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit1 = _make_search_result(
@@ -1680,14 +1689,14 @@ async def test_analyze_suggestion_single_active_candidate_survives(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
 
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_called_once()
+    mock_generator.execute.assert_awaited_once()
     assert result.similar_executed_ids == ["SUG-1"]
-    call_args = cast(MagicMock, mock_prompt_preparer.prepare).call_args
+    call_args = mock_generator.execute.call_args
     gen_input: GenerationInput = call_args[0][0]
     assert len(gen_input.similar_suggestions) == 1
     assert gen_input.similar_suggestions[0].id == "SUG-1"
@@ -1705,7 +1714,7 @@ async def test_analyze_suggestion_insufficient_evidence_budget_propagates(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -1732,9 +1741,7 @@ async def test_analyze_suggestion_insufficient_evidence_budget_propagates(
         return_value=[_make_suggestion("SUG-1", SuggestionStatus.EXECUTED)]
     )
 
-    cast(
-        MagicMock, mock_prompt_preparer.prepare
-    ).side_effect = InsufficientEvidenceBudgetError(
+    mock_generator.execute.side_effect = InsufficientEvidenceBudgetError(
         "Remaining budget cannot fit highest-ranked item."
     )
 
@@ -1744,7 +1751,7 @@ async def test_analyze_suggestion_insufficient_evidence_budget_propagates(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     with pytest.raises(InsufficientEvidenceBudgetError):
@@ -1758,7 +1765,7 @@ async def test_analyze_suggestion_prompt_budget_exceeded_propagates(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -1785,9 +1792,7 @@ async def test_analyze_suggestion_prompt_budget_exceeded_propagates(
         return_value=[_make_suggestion("SUG-1", SuggestionStatus.EXECUTED)]
     )
 
-    cast(
-        MagicMock, mock_prompt_preparer.prepare
-    ).side_effect = PromptBudgetExceededError("Fixed sections exceed budget.")
+    mock_generator.execute.side_effect = PromptBudgetExceededError("Fixed sections exceed budget.")
 
     use_case = AnalyzeSuggestionUseCase(
         normalizer=mock_normalizer,
@@ -1795,7 +1800,7 @@ async def test_analyze_suggestion_prompt_budget_exceeded_propagates(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     with pytest.raises(PromptBudgetExceededError):
@@ -1809,7 +1814,7 @@ async def test_analyze_suggestion_reranker_protocol_or_limit_fallback_prepares_p
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -1836,12 +1841,12 @@ async def test_analyze_suggestion_reranker_protocol_or_limit_fallback_prepares_p
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     result = await use_case.execute(valid_dto)
     assert result.similar_executed_ids == ["SUG-1"]
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_called_once()
+    mock_generator.execute.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1851,7 +1856,7 @@ async def test_analyze_suggestion_normalizer_failure_fails_fast(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     mock_normalizer.normalize_async = AsyncMock(
@@ -1864,14 +1869,14 @@ async def test_analyze_suggestion_normalizer_failure_fails_fast(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     with pytest.raises(RuntimeError, match="Normalizer failed"):
         await use_case.execute(valid_dto)
 
     cast(AsyncMock, mock_vector_repo.search_suggestions).assert_not_called()
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1881,7 +1886,7 @@ async def test_analyze_suggestion_embedding_failure_fails_fast(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     mock_embedding_service.embed_query = AsyncMock(
@@ -1894,14 +1899,14 @@ async def test_analyze_suggestion_embedding_failure_fails_fast(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     with pytest.raises(RuntimeError, match="Embedding service"):
         await use_case.execute(valid_dto)
 
     cast(AsyncMock, mock_vector_repo.search_suggestions).assert_not_called()
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1911,7 +1916,7 @@ async def test_analyze_suggestion_vector_repo_failure_fails_fast(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     mock_vector_repo.search_suggestions = AsyncMock(
@@ -1924,14 +1929,14 @@ async def test_analyze_suggestion_vector_repo_failure_fails_fast(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     with pytest.raises(RuntimeError, match="Qdrant cluster unavailable"):
         await use_case.execute(valid_dto)
 
     cast(AsyncMock, mock_reranker.rerank).assert_not_called()
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1941,7 +1946,7 @@ async def test_analyze_suggestion_uow_database_failure_fails_fast(
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
+    mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
     hit = _make_search_result(
@@ -1975,13 +1980,13 @@ async def test_analyze_suggestion_uow_database_failure_fails_fast(
         vector_repo=mock_vector_repo,
         reranker=mock_reranker,
         uow=mock_uow,
-        prompt_preparer=mock_prompt_preparer,
+        generator=mock_generator,
     )
 
     with pytest.raises(RuntimeError, match="PostgreSQL pool"):
         await use_case.execute(valid_dto)
 
-    cast(MagicMock, mock_prompt_preparer.prepare).assert_not_called()
+    mock_generator.execute.assert_not_awaited()
 
 
 # ==============================================================================
@@ -1989,57 +1994,27 @@ async def test_analyze_suggestion_uow_database_failure_fails_fast(
 # ==============================================================================
 
 
-def test_analyze_suggestion_constructor_requires_prompt_preparer(
+def test_analyze_suggestion_constructor_requires_generator(
     mock_normalizer: ITextNormalizer,
     mock_embedding_service: IHybridEmbeddingService,
     mock_vector_repo: ISuggestionVectorRepository,
     mock_reranker: IReranker,
     mock_uow: IUnitOfWork,
 ) -> None:
-    with pytest.raises(TypeError, match="prompt_preparer must not be None"):
+    with pytest.raises(TypeError, match="generator must not be None"):
         AnalyzeSuggestionUseCase(
             normalizer=mock_normalizer,
             embedding_service=mock_embedding_service,
             vector_repo=mock_vector_repo,
             reranker=mock_reranker,
             uow=mock_uow,
-            prompt_preparer=cast(Any, None),
+            generator=cast(Any, None),
         )
 
 
-def test_analyze_suggestion_constructor_validates_max_prompt_tokens(
-    mock_normalizer: ITextNormalizer,
-    mock_embedding_service: IHybridEmbeddingService,
-    mock_vector_repo: ISuggestionVectorRepository,
-    mock_reranker: IReranker,
-    mock_uow: IUnitOfWork,
-    mock_prompt_preparer: ISuggestionPromptPreparer,
-) -> None:
-    with pytest.raises(ValueError, match="max_prompt_tokens must be positive"):
-        AnalyzeSuggestionUseCase(
-            normalizer=mock_normalizer,
-            embedding_service=mock_embedding_service,
-            vector_repo=mock_vector_repo,
-            reranker=mock_reranker,
-            uow=mock_uow,
-            prompt_preparer=mock_prompt_preparer,
-            max_prompt_tokens=0,
-        )
-
-    with pytest.raises(ValueError, match="max_prompt_tokens must be positive"):
-        AnalyzeSuggestionUseCase(
-            normalizer=mock_normalizer,
-            embedding_service=mock_embedding_service,
-            vector_repo=mock_vector_repo,
-            reranker=mock_reranker,
-            uow=mock_uow,
-            prompt_preparer=mock_prompt_preparer,
-            max_prompt_tokens=-100,
-        )
-
-
-def test_container_resolves_analyze_suggestion_use_case_with_preparer() -> None:
+def test_container_resolves_analyze_suggestion_use_case_with_generator() -> None:
     from dependency_injector import providers
+    from src.application.interfaces import ILLMClient
     from src.domain.context.tokenizer import Tokenizer
 
     class LocalFakeTokenizer(Tokenizer):
@@ -2063,8 +2038,378 @@ def test_container_resolves_analyze_suggestion_use_case_with_preparer() -> None:
         providers.Object(MagicMock(spec=ISuggestionVectorRepository))
     )
     container.unit_of_work.override(providers.Object(MagicMock(spec=IUnitOfWork)))
+    container.llm_client.override(providers.Object(MagicMock(spec=ILLMClient)))
     use_case = container.analyze_suggestion_use_case()
 
     assert isinstance(use_case, AnalyzeSuggestionUseCase)
-    assert isinstance(use_case._prompt_preparer, ISuggestionPromptPreparer)
-    assert use_case._max_prompt_tokens == 4096
+    assert isinstance(use_case._generator, IGenerateSuggestionUseCase)
+
+
+def _setup_active_candidates(
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    suggestion_ids: list[str],
+) -> None:
+    hits = []
+    reranked = []
+    suggestions = []
+    for i, sid in enumerate(suggestion_ids, 1):
+        cid = f"chunk-{sid}"
+        hits.append(
+            _make_search_result(
+                cid,
+                sid,
+                f"راهکار {sid}",
+                SuggestionChunkType.SOLUTION,
+                SuggestionStatus.EXECUTED,
+                0.9 - (i * 0.05),
+            )
+        )
+        reranked.append(
+            RerankedCandidate(
+                candidate_id=cid,
+                retrieval_rank=i,
+                retrieval_score=0.9 - (i * 0.05),
+                rerank_score=2.0 - (i * 0.1),
+                reranked_rank=i,
+            )
+        )
+        suggestions.append(_make_suggestion(sid, SuggestionStatus.EXECUTED))
+    mock_vector_repo.search_suggestions = AsyncMock(return_value=hits)
+    mock_reranker.rerank = AsyncMock(return_value=reranked)
+    mock_uow.suggestions.get_by_ids = AsyncMock(return_value=suggestions)
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_empty_citations_yields_zero_grounding_ratio(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"])
+    mock_generator.execute.return_value = GenerationResult(
+        answer="تحلیل بدون ارجاع",
+        citations=[],
+        uncertainty=None,
+    )
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    res = await use_case.execute(valid_dto)
+    assert res.cited_suggestion_ids == []
+    assert res.grounding_ratio == 0.0
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_all_evidence_cited_yields_perfect_grounding_ratio(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"])
+    mock_generator.execute.return_value = GenerationResult(
+        answer="تحلیل با ارجاع کامل",
+        citations=[
+            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
+            SimilarSuggestionInput(id="SUG-2", status=SuggestionStatus.EXECUTED, title="t2", problem="p2", solution="s2", similarity=0.9),
+        ],
+        uncertainty=None,
+    )
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    res = await use_case.execute(valid_dto)
+    assert res.cited_suggestion_ids == ["SUG-1", "SUG-2"]
+    assert res.grounding_ratio == 1.0
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_partial_citations_calculates_correct_rounded_ratio(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2", "SUG-3"])
+    mock_generator.execute.return_value = GenerationResult(
+        answer="تحلیل با ارجاع جزئی",
+        citations=[
+            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
+        ],
+        uncertainty=None,
+    )
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    res = await use_case.execute(valid_dto)
+    assert res.cited_suggestion_ids == ["SUG-1"]
+    assert res.grounding_ratio == 0.33
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_duplicate_llm_citations_deduplicated_preserving_order(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"])
+    mock_generator.execute.return_value = GenerationResult(
+        answer="تحلیل با ارجاعات تکراری",
+        citations=[
+            SimilarSuggestionInput(id="SUG-2", status=SuggestionStatus.EXECUTED, title="t2", problem="p2", solution="s2", similarity=0.9),
+            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
+            SimilarSuggestionInput(id="SUG-2", status=SuggestionStatus.EXECUTED, title="t2", problem="p2", solution="s2", similarity=0.9),
+        ],
+        uncertainty=None,
+    )
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    res = await use_case.execute(valid_dto)
+    assert res.cited_suggestion_ids == ["SUG-2", "SUG-1"]
+    assert res.grounding_ratio == 1.0
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_unretrieved_citation_ids_isolated_and_filtered(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1"])
+    mock_generator.execute.return_value = GenerationResult(
+        answer="تحلیل با ارجاع ساختگی",
+        citations=[
+            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
+            SimilarSuggestionInput(id="HALLUCINATED-999", status=SuggestionStatus.EXECUTED, title="fake", problem="fake", solution="fake", similarity=0.5),
+        ],
+        uncertainty=None,
+    )
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    res = await use_case.execute(valid_dto)
+    assert res.cited_suggestion_ids == ["SUG-1"]
+    assert res.grounding_ratio == 1.0
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_citation_type_safety_filters_non_suggestion_chunks(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1"])
+    mock_generator.execute.return_value = GenerationResult(
+        answer="تحلیل با انواع مختلف ارجاع",
+        citations=[
+            cast(Any, "raw-string-citation"),
+            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
+        ],
+        uncertainty=None,
+    )
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    res = await use_case.execute(valid_dto)
+    assert res.cited_suggestion_ids == ["SUG-1"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_uncertainty_field_preservation_null_and_non_null(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1"])
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    # Non-null uncertainty
+    mock_generator.execute.return_value = GenerationResult(
+        answer="تحلیل با عدم قطعیت",
+        citations=[],
+        uncertainty="داده‌های عملکردی در دسترس نیست.",
+    )
+    res1 = await use_case.execute(valid_dto)
+    assert res1.uncertainty == "داده‌های عملکردی در دسترس نیست."
+
+    # Null uncertainty
+    mock_generator.execute.return_value = GenerationResult(
+        answer="تحلیل بدون عدم قطعیت",
+        citations=[],
+        uncertainty=None,
+    )
+    res2 = await use_case.execute(valid_dto)
+    assert res2.uncertainty is None
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_rrf_fallback_preserved_when_zero_db_records_survive(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    hit = _make_search_result("c-1", "SUG-1", "sol", SuggestionChunkType.SOLUTION, SuggestionStatus.EXECUTED, 0.9)
+    mock_vector_repo.search_suggestions = AsyncMock(return_value=[hit])
+    mock_reranker.rerank = AsyncMock(side_effect=RerankerConnectionError("TEI unreachable"))
+    mock_uow.suggestions.get_by_ids = AsyncMock(return_value=[])
+
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    res = await use_case.execute(valid_dto)
+    assert res.is_fallback_mode is True
+    assert res.uncertainty == "هیچ سابقه سازمانی مرتبطی برای ارزیابی این پیشنهاد یافت نشد."
+    assert res.grounding_ratio == 0.0
+    mock_generator.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_rrf_fallback_propagates_to_successful_generation_response(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    hit = _make_search_result("c-1", "SUG-1", "sol", SuggestionChunkType.SOLUTION, SuggestionStatus.EXECUTED, 0.9)
+    mock_vector_repo.search_suggestions = AsyncMock(return_value=[hit])
+    mock_reranker.rerank = AsyncMock(side_effect=RerankerConnectionError("TEI unreachable"))
+    mock_uow.suggestions.get_by_ids = AsyncMock(return_value=[_make_suggestion("SUG-1", SuggestionStatus.EXECUTED)])
+
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    res = await use_case.execute(valid_dto)
+    assert res.is_fallback_mode is True
+    mock_generator.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_llm_provider_errors_propagate_fail_fast(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1"])
+    mock_generator.execute.side_effect = LLMConnectionError("vLLM connection refused")
+
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    with pytest.raises(LLMConnectionError, match="vLLM connection refused"):
+        await use_case.execute(valid_dto)
+
+
+@pytest.mark.asyncio
+async def test_analyze_suggestion_output_parser_errors_propagate_fail_fast(
+    mock_normalizer: ITextNormalizer,
+    mock_embedding_service: IHybridEmbeddingService,
+    mock_vector_repo: ISuggestionVectorRepository,
+    mock_reranker: IReranker,
+    mock_uow: IUnitOfWork,
+    mock_generator: IGenerateSuggestionUseCase,
+    valid_dto: AnalyzeSuggestionDTO,
+) -> None:
+    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1"])
+    mock_generator.execute.side_effect = LLMOutputParseError("Invalid json")
+
+    use_case = AnalyzeSuggestionUseCase(
+        normalizer=mock_normalizer,
+        embedding_service=mock_embedding_service,
+        vector_repo=mock_vector_repo,
+        reranker=mock_reranker,
+        uow=mock_uow,
+        generator=mock_generator,
+    )
+    with pytest.raises(LLMOutputParseError, match="Invalid json"):
+        await use_case.execute(valid_dto)

@@ -20,6 +20,7 @@ from src.application.interfaces import (
     IContextBuilder,
     IDemandAllocator,
     IDenseEmbedder,
+    IGenerateSuggestionUseCase,
     IHistoricalSuggestionExtractor,
     IHybridEmbeddingService,
     ILLMClient,
@@ -38,9 +39,6 @@ from src.application.interfaces import (
 )
 from src.application.interfaces.i_output_parser import IOutputParser
 from src.application.llm import LLMRequestBuilder
-from src.application.use_cases.generate_suggestion_use_case import (
-    GenerateSuggestionUseCase,
-)
 from src.application.prompt import (
     SuggestionAnalysisPromptConfig,
     SuggestionPromptPreparer,
@@ -58,6 +56,9 @@ from src.application.use_cases import (
     ExtractAndIngestHistoricalSuggestionsUseCase,
     IngestSuggestionUseCase,
     UpdateSuggestionUseCase,
+)
+from src.application.use_cases.generate_suggestion_use_case import (
+    GenerateSuggestionUseCase,
 )
 from src.domain.context.tokenizer import Tokenizer
 from src.domain.interfaces import (
@@ -275,21 +276,21 @@ class Container(containers.DeclarativeContainer):
     )
 
     # 5b. Staging Suggestion Vector Repository (Batch Ingestion -> Physical Target Collection)
-    staging_suggestion_vector_repository: providers.Provider[ISuggestionVectorRepository] = (
-        providers.Factory(
-            QdrantSuggestionRepository,
-            client=qdrant_client,
-            collection_name=qdrant_settings.QDRANT_SUGGESTION_COLLECTION,
-            dense_vector_name=qdrant_settings.QDRANT_DENSE_VECTOR_NAME,
-            sparse_vector_name=qdrant_settings.QDRANT_SPARSE_VECTOR_NAME,
-            default_dense_dim=embedding_settings.EMBEDDING_DIMENSION,
-            batch_size=qdrant_settings.QDRANT_BATCH_SIZE,
-            dense_score_threshold=qdrant_settings.QDRANT_DENSE_SCORE_THRESHOLD,
-            sparse_score_threshold=qdrant_settings.QDRANT_SPARSE_SCORE_THRESHOLD,
-            max_retries=qdrant_settings.QDRANT_MAX_RETRIES,
-            retry_base_delay=qdrant_settings.QDRANT_RETRY_BASE_DELAY,
-            retry_max_delay=qdrant_settings.QDRANT_RETRY_MAX_DELAY,
-        )
+    staging_suggestion_vector_repository: providers.Provider[
+        ISuggestionVectorRepository
+    ] = providers.Factory(
+        QdrantSuggestionRepository,
+        client=qdrant_client,
+        collection_name=qdrant_settings.QDRANT_SUGGESTION_COLLECTION,
+        dense_vector_name=qdrant_settings.QDRANT_DENSE_VECTOR_NAME,
+        sparse_vector_name=qdrant_settings.QDRANT_SPARSE_VECTOR_NAME,
+        default_dense_dim=embedding_settings.EMBEDDING_DIMENSION,
+        batch_size=qdrant_settings.QDRANT_BATCH_SIZE,
+        dense_score_threshold=qdrant_settings.QDRANT_DENSE_SCORE_THRESHOLD,
+        sparse_score_threshold=qdrant_settings.QDRANT_SPARSE_SCORE_THRESHOLD,
+        max_retries=qdrant_settings.QDRANT_MAX_RETRIES,
+        retry_base_delay=qdrant_settings.QDRANT_RETRY_BASE_DELAY,
+        retry_max_delay=qdrant_settings.QDRANT_RETRY_MAX_DELAY,
     )
 
     # 6. Qdrant Admin Service
@@ -490,7 +491,7 @@ class Container(containers.DeclarativeContainer):
         )
     )
 
-    generate_suggestion_use_case: providers.Provider[GenerateSuggestionUseCase] = (
+    generate_suggestion_use_case: providers.Provider[IGenerateSuggestionUseCase] = (
         providers.Factory(
             GenerateSuggestionUseCase,
             prompt_preparer=suggestion_prompt_preparer,
@@ -529,7 +530,7 @@ class Container(containers.DeclarativeContainer):
             vector_repo=suggestion_vector_repository,
             reranker=reranker,
             uow=unit_of_work,
-            prompt_preparer=suggestion_prompt_preparer,
+            generator=generate_suggestion_use_case,
             solution_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_SOLUTION_LIMIT,
             problem_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_PROBLEM_LIMIT,
             title_global_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_TITLE_LIMIT,
@@ -537,6 +538,5 @@ class Container(containers.DeclarativeContainer):
             pending_probe_limit=suggestion_analysis_settings.SUGGESTION_ANALYSIS_PENDING_PROBE_LIMIT,
             top_n_per_status=suggestion_analysis_settings.SUGGESTION_ANALYSIS_TOP_N_PER_STATUS,
             min_score_threshold=suggestion_analysis_settings.SUGGESTION_ANALYSIS_MIN_SCORE_THRESHOLD,
-            max_prompt_tokens=suggestion_analysis_settings.SUGGESTION_ANALYSIS_MAX_PROMPT_TOKENS,
         )
     )

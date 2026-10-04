@@ -103,4 +103,24 @@ def test_analyze_suggestion_data_response_camel_case_serialization():
         "similarRejectedIds": ["SUG-401"],
         "similarNotAcceptedIds": ["SUG-501"],
         "appliedStatuteIds": ["STAT-01"],
+        "uncertainty": None,
+        "citedSuggestionIds": [],
+        "isFallbackMode": False,
+        "groundingRatio": 0.0,
     }
+
+
+def test_analyze_suggestion_data_response_with_decision_support_fields():
+    resp = AnalyzeSuggestionDataResponse(
+        analysis="## تحلیل جامع",
+        similar_executed_ids=["SUG-101"],
+        uncertainty="عدم قطعیت در تامین قطعات",
+        cited_suggestion_ids=["SUG-101"],
+        is_fallback_mode=True,
+        grounding_ratio=1.0,
+    )
+    dumped = resp.model_dump(by_alias=True)
+    assert dumped["uncertainty"] == "عدم قطعیت در تامین قطعات"
+    assert dumped["citedSuggestionIds"] == ["SUG-101"]
+    assert dumped["isFallbackMode"] is True
+    assert dumped["groundingRatio"] == 1.0

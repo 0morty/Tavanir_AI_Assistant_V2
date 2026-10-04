@@ -456,22 +456,53 @@ class AnalyzeSuggestionUseCase:
             return {r.id: r for r in hydrated_records if not r.is_deleted}
 
     @staticmethod
+    def _is_valid_candidate(
+        cand: PooledSuggestionCandidate,
+        hydrated_map: dict[str, Suggestion] | Suggestion | None,
+    ) -> bool:
+        """
+        Validates that candidate is active and matches PostgreSQL master version.
+        Guarantees elimination of F-14 (Semantic Read-Skew) during worker downtime/lag.
+        """
+        if isinstance(hydrated_map, dict):
+            entity = hydrated_map.get(cand.suggestion_id)
+        else:
+            entity = hydrated_map
+        if entity is None or entity.is_deleted:
+            return False
+
+        entity_version = getattr(entity, "version", 1)
+        cand_version = getattr(cand, "version", 1)
+        if entity_version != cand_version:
+            logger.warning(
+                "candidate_version_skew_detected",
+                suggestion_id=cand.suggestion_id,
+                qdrant_version=cand_version,
+                sql_version=entity_version,
+            )
+            return False
+
+        return True
+
+    @classmethod
     def _filter_active_status_partitions(
+        cls,
         partition_map: dict[SuggestionStatus, list[PooledSuggestionCandidate]],
         hydrated_map: dict[str, Suggestion],
     ) -> dict[SuggestionStatus, list[str]]:
-        """Filters partitioned candidates to only active, hydrated master suggestions."""
+        """Filters partitioned candidates to only active, version-matched master suggestions."""
         return {
             status: [
                 cand.suggestion_id
                 for cand in partition_map[status]
-                if cand.suggestion_id in hydrated_map
+                if cls._is_valid_candidate(cand, hydrated_map)
             ]
             for status in SuggestionStatus
         }
 
-    @staticmethod
+    @classmethod
     def _build_generation_input(
+        cls,
         norm_title: str,
         norm_problem: str,
         norm_solution: str,
@@ -481,7 +512,7 @@ class AnalyzeSuggestionUseCase:
     ) -> GenerationInput:
         """Sorts active candidates globally by winning score and prepares GenerationInput."""
         active_candidates = [
-            c for c in all_winning_candidates if c.suggestion_id in hydrated_map
+            c for c in all_winning_candidates if cls._is_valid_candidate(c, hydrated_map)
         ]
         active_candidates.sort(key=lambda c: c.winning_score, reverse=True)
 

@@ -131,5 +131,30 @@ class IVectorRepository(ABC, Generic[TMetadata]):
         """
         pass
 
+    @abstractmethod
+    async def activate_version_chunks(
+        self, parent_id: str, target_version: int
+    ) -> None:
+        """
+        Promotes chunks to ACTIVE strictly where parent_id = parent_id and version == target_version.
+        Idempotent: repeating cutover will never demote active target version points.
+
+        Raises:
+            VectorStorageError: If activation fails.
+        """
+        pass
+
+    @abstractmethod
+    async def delete_obsolete_version_chunks(
+        self, parent_id: str, max_version_exclusive: int
+    ) -> None:
+        """
+        Deletes chunks where parent_id = parent_id and version < max_version_exclusive.
+
+        Raises:
+            VectorStorageError: If cleanup fails.
+        """
+        pass
+
 
 __all__ = ["IVectorRepository"]

@@ -259,6 +259,25 @@ class SuggestionAnalysisSettings(BaseSettings):
     SUGGESTION_ANALYSIS_MAX_PROMPT_TOKENS: int = 4096
 
 
+class RedisSettings(BaseSettings):
+    model_config = _base_config
+
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 7379
+    REDIS_PASSWORD: str | None = None
+    REDIS_DB: int = 0
+
+
+class WorkerSettingsConfig(BaseSettings):
+    model_config = _base_config
+
+    JOB_TIMEOUT: int = 300
+    MAX_RETRIES: int = 5
+    MAX_JOBS: int = 10
+    RETRY_BASE_DELAY_SECONDS: float = 2.0
+    HEALTH_CHECK_INTERVAL: int = 10
+
+
 core_settings = CoreSettings()
 llm_settings = LLMSettings()
 generation_settings = GenerationSettings()
@@ -272,3 +291,5 @@ mssql_settings = MssqlSettings()
 historical_ingestion_settings = HistoricalIngestionSettings()
 reranker_settings = RerankerSettings()
 suggestion_analysis_settings = SuggestionAnalysisSettings()
+redis_settings = RedisSettings()
+worker_settings = WorkerSettingsConfig()

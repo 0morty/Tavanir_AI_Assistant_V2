@@ -686,6 +686,7 @@ async def test_container_reranker_wiring():
 
     container = Container()
     container.tokenizer.override(MagicMock())
+    container.arq_redis_pool.override(MagicMock())
     await cast(Any, container.init_resources())
     try:
         reranker = await cast(Any, container.reranker())

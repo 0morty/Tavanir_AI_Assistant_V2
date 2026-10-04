@@ -13,6 +13,9 @@ from src.application.use_cases.extract_and_ingest_historical_suggestions_use_cas
 from src.application.use_cases.ingest_suggestion_use_case import (
     IngestSuggestionUseCase,
 )
+from src.application.use_cases.process_outbox_event_use_case import (
+    ProcessOutboxEventUseCase,
+)
 from src.application.use_cases.update_suggestion_use_case import (
     UpdateSuggestionUseCase,
 )
@@ -24,4 +27,5 @@ __all__ = [
     "UpdateSuggestionUseCase",
     "DeleteSuggestionUseCase",
     "BulkDeleteSuggestionsUseCase",
+    "ProcessOutboxEventUseCase",
 ]

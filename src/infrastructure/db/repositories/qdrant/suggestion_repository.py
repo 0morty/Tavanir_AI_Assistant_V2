@@ -87,6 +87,7 @@ class QdrantSuggestionRepository(
             "committee_scrutiny_id": models.PayloadSchemaType.INTEGER,
             "secretariat_scrutiny": models.PayloadSchemaType.KEYWORD,
             "secretariat_scrutiny_id": models.PayloadSchemaType.INTEGER,
+            "version": models.PayloadSchemaType.INTEGER,
         }
 
     async def search_suggestions(

@@ -12,9 +12,13 @@ from src.application.interfaces.i_skipped_suggestion_repository import (
     ISkippedSuggestionRepository,
 )
 from src.application.interfaces.i_unit_of_work import IUnitOfWork
+from src.domain.interfaces.i_outbox_repository import IOutboxRepository
 from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
 from src.infrastructure.db.repositories.sql.checkpoint_repository import (
     SqlCheckpointRepository,
+)
+from src.infrastructure.db.repositories.sql.outbox_repository import (
+    SqlOutboxRepository,
 )
 from src.infrastructure.db.repositories.sql.skipped_suggestion_repository import (
     SqlSkippedSuggestionRepository,
@@ -45,11 +49,15 @@ class SqlUnitOfWork(IUnitOfWork):
         skipped_repo_factory: Callable[
             [AsyncSession], ISkippedSuggestionRepository
         ] = SqlSkippedSuggestionRepository,
+        outbox_repo_factory: Callable[
+            [AsyncSession], IOutboxRepository
+        ] = SqlOutboxRepository,
     ) -> None:
         self._session_factory = session_factory
         self._suggestion_repo_factory = suggestion_repo_factory
         self._checkpoint_repo_factory = checkpoint_repo_factory
         self._skipped_repo_factory = skipped_repo_factory
+        self._outbox_repo_factory = outbox_repo_factory
         self._session: AsyncSession | None = None
         self._repo_cache: dict[Any, Any] = {}
         self._committed = False
@@ -77,6 +85,11 @@ class SqlUnitOfWork(IUnitOfWork):
     def skipped_suggestions(self) -> ISkippedSuggestionRepository:
         """Access the skipped suggestions repository bound to the active transaction."""
         return self.get_repository(self._skipped_repo_factory)
+
+    @property
+    def outbox(self) -> IOutboxRepository:
+        """Access the outbox repository bound to the active transaction."""
+        return self.get_repository(self._outbox_repo_factory)
 
     def get_repository(self, repo_cls: Callable[[AsyncSession], RepoT]) -> RepoT:
         """

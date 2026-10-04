@@ -1,18 +1,16 @@
 from collections.abc import Sequence
+from datetime import datetime
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
-from src.application.interfaces.i_dense_embedder import IDenseEmbedder
-from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
-from src.application.interfaces.i_text_normalizer import ITextNormalizer
-from src.application.services.hybrid_embedding_service import HybridEmbeddingService
 
 from src.application.dtos import (
     BulkDeleteSuggestionsDTO,
     PatchSuggestionDTO,
     UpdateSuggestionDTO,
 )
-from src.application.interfaces import IUnitOfWork
+from src.application.interfaces import ITaskQueueService, ITextNormalizer, IUnitOfWork
 from src.application.use_cases import (
     BulkDeleteSuggestionsUseCase,
     DeleteSuggestionUseCase,
@@ -21,8 +19,8 @@ from src.application.use_cases import (
 from src.domain.entities import (
     Chunk,
     CommitteeEvaluation,
-    DenseVector,
-    SparseVector,
+    OutboxEvent,
+    ShamsiDate,
     Suggestion,
     SuggestionChunk,
     SuggestionChunkMetadata,
@@ -37,12 +35,11 @@ from src.domain.enums import (
 from src.domain.exceptions import (
     SuggestionNotFoundError,
     SuggestionProcessingConflictError,
-    VectorStorageError,
 )
 from src.domain.interfaces import (
+    IOutboxRepository,
     ISuggestionChunker,
     ISuggestionRepository,
-    ISuggestionVectorRepository,
 )
 
 
@@ -51,9 +48,8 @@ class FakeSuggestionRepo(ISuggestionRepository):
         self.suggestions: dict[str, Suggestion] = {
             s.id: s for s in (initial_suggestions or [])
         }
-        self.save_called = False
+        self.saved_entities: list[Suggestion] = []
         self.soft_delete_called = False
-        self.fail_save = False
 
     async def get_by_id(
         self, suggestion_id: str, include_deleted: bool = False
@@ -76,10 +72,8 @@ class FakeSuggestionRepo(ISuggestionRepository):
         return results
 
     async def save(self, suggestion: Suggestion) -> None:
-        if self.fail_save:
-            raise RuntimeError("PostgreSQL connection failure on save")
         self.suggestions[suggestion.id] = suggestion
-        self.save_called = True
+        self.saved_entities.append(suggestion)
 
     async def save_batch(self, suggestions: Sequence[Suggestion]) -> None:
         for s in suggestions:
@@ -96,12 +90,58 @@ class FakeSuggestionRepo(ISuggestionRepository):
         s = self.suggestions.get(suggestion_id)
         if s:
             s.mark_deleted()
+            s.version += 1
             self.soft_delete_called = True
+
+
+class FakeOutboxRepo(IOutboxRepository):
+    def __init__(self):
+        self.saved_events: list[OutboxEvent] = []
+
+    async def append(self, event: OutboxEvent) -> None:
+        self.saved_events.append(event)
+
+    async def get_by_id(self, event_id: UUID) -> OutboxEvent | None:
+        for ev in self.saved_events:
+            if ev.id == event_id:
+                return ev
+        return None
+
+    async def get_for_processing(self, event_id: UUID) -> OutboxEvent | None:
+        return None
+
+    async def update_status(
+        self,
+        event_id: UUID,
+        status: str,
+        error: str | None = None,
+        retry_count: int | None = None,
+    ) -> None:
+        pass
+
+    async def fetch_stale_events(
+        self, stuck_before: datetime, limit: int = 100
+    ) -> list[OutboxEvent]:
+        return []
+
+    async def fetch_pending_events(
+        self, created_before: datetime, limit: int = 100
+    ) -> list[OutboxEvent]:
+        return []
+
+    async def fetch_failed_for_retry(
+        self, created_after: datetime, max_retries: int = 20, limit: int = 100
+    ) -> list[OutboxEvent]:
+        return []
+
+    async def prune_completed(self, before: datetime) -> int:
+        return 0
 
 
 class FakeUoW(IUnitOfWork):
     def __init__(self, repo: FakeSuggestionRepo, lock_succeeds: bool = True):
         self._repo = repo
+        self._outbox = FakeOutboxRepo()
         self._lock_succeeds = lock_succeeds
         self.lock_keys: list[int] = []
         self.committed = False
@@ -110,6 +150,10 @@ class FakeUoW(IUnitOfWork):
     @property
     def suggestions(self) -> FakeSuggestionRepo:
         return self._repo
+
+    @property
+    def outbox(self) -> FakeOutboxRepo:
+        return self._outbox
 
     @property
     def checkpoints(self) -> AsyncMock:
@@ -128,6 +172,15 @@ class FakeUoW(IUnitOfWork):
 
     async def rollback(self) -> None:
         self.rolled_back = True
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            await self.rollback()
+        else:
+            await self.commit()
 
 
 class FakeNormalizer(ITextNormalizer):
@@ -158,217 +211,140 @@ class FakeChunker(ISuggestionChunker):
                 content=document.content.title,
                 metadata=metadata,
                 chunk_status=ChunkStatus.ACTIVE,
+                version=document.version,
             )
         ]
 
 
-class FakeDenseEmbedder(IDenseEmbedder):
-    @property
-    def embedding_dimension(self) -> int:
-        return 3
-
-    async def embed(self, text: str) -> DenseVector:
-        return (0.1, 0.2, 0.3)
-
-    async def embed_batch(self, texts: Sequence[str]) -> list[DenseVector]:
-        return [(0.1, 0.2, 0.3) for _ in texts]
-
-    async def embed_documents(
-        self, texts: Sequence[str], truncate: bool = True
-    ) -> list[list[float]]:
-        return [[0.1, 0.2, 0.3] for _ in texts]
-
-    async def embed_query(self, query: str, truncate: bool = True) -> list[float]:
-        return [0.1, 0.2, 0.3]
-
-
-class FakeSparseEmbedder(ISparseEmbedder):
-    def embed_sparse(self, text: str) -> SparseVector:
-        return SparseVector(indices=[1, 2], values=[0.5, 0.8])
-
-    def embed_sparse_batch(self, texts: Sequence[str]) -> list[SparseVector]:
-        return [SparseVector(indices=[1, 2], values=[0.5, 0.8]) for _ in texts]
-
-    async def embed_document(self, text: str) -> SparseVector:
-        return SparseVector(indices=[1, 2], values=[1.0, 0.5])
-
-    async def embed_documents(self, texts: Sequence[str]) -> list[SparseVector]:
-        return [SparseVector(indices=[1, 2], values=[1.0, 0.5]) for _ in texts]
-
-    async def embed_query(self, query: str) -> SparseVector:
-        return SparseVector(indices=[1, 2], values=[1.0, 0.5])
-
-
-class FakeVectorRepo(ISuggestionVectorRepository):
-    def __init__(self, fail_delete: bool = False):
-        self.staged_chunks: list[SuggestionChunk] = []
-        self.deleted_parent_ids: list[str] = []
-        self.deleted_chunk_ids: list[str] = []
-        self.activated_parent_ids: list[str] = []
-        self.superseded_calls: list[tuple[str, list[str]]] = []
-        self.fail_delete = fail_delete
-
-    async def provision_collection(self, dense_dimension: int | None = None) -> None:
-        pass
-
-    async def upsert_chunk(self, chunk: Chunk[SuggestionChunkMetadata]) -> None:
-        pass
-
-    async def upsert_chunks_batch(
-        self, chunks: Sequence[Chunk[SuggestionChunkMetadata]]
-    ) -> None:
-        self.staged_chunks.extend(chunks)  # type: ignore
-
-    async def delete_chunks_by_parent_id(self, parent_id: str) -> None:
-        if self.fail_delete:
-            raise VectorStorageError("Qdrant cluster unreachable for delete")
-        self.deleted_parent_ids.append(parent_id)
-
-    async def delete_chunks_by_parent_ids(self, parent_ids: Sequence[str]) -> None:
-        self.deleted_parent_ids.extend(parent_ids)
-
-    async def delete_staging_chunks(self, parent_id: str) -> None:
-        pass
-
-    async def activate_staging_chunks(self, parent_id: str) -> None:
-        self.activated_parent_ids.append(parent_id)
-
-    async def activate_staging_chunks_batch(self, parent_ids: Sequence[str]) -> None:
-        self.activated_parent_ids.extend(parent_ids)
-
-    async def delete_deprecated_chunks(self, parent_id: str) -> None:
-        pass
-
-    async def delete_chunks_by_ids(self, chunk_ids: Sequence[str]) -> None:
-        self.deleted_chunk_ids.extend(chunk_ids)
-
-    async def delete_superseded_chunks(
-        self, parent_id: str, active_chunk_ids: Sequence[str]
-    ) -> None:
-        self.superseded_calls.append((parent_id, list(active_chunk_ids)))
-
-    async def search_suggestions(self, *args, **kwargs):
-        return []
-
-
 def create_sample_suggestion(
-    suggestion_id: str = "sugg-1", is_deleted: bool = False, version: int = 1
+    suggestion_id: str, is_deleted: bool = False, version: int = 1
 ) -> Suggestion:
     return Suggestion(
         id=suggestion_id,
         content=SuggestionContent(
-            title="عنوان تست",
-            problem="شرح مشکل اولیه",
-            solution="راهکار اولیه",
+            title="عنوان تستی معتبر",
+            problem="شرح مشکل معتبر جهت تست",
+            solution="ارایه راهکار مهندسی دقیق",
         ),
         evaluation=CommitteeEvaluation(
             status=SuggestionStatus.APPROVED,
             scrutiny=CommitteeScrutiny.APPROVED,
-            description="شرح بررسی اولیه",
+            description="تایید در جلسه",
         ),
+        date=ShamsiDate("1402/01/01"),
+        context_title="شرکت توزیع",
         is_deleted=is_deleted,
         version=version,
     )
 
 
-# --- Tests for UpdateSuggestionUseCase ---
-
-
+# region PUT Tests
 @pytest.mark.asyncio
-async def test_update_put_success_increments_version_and_activates_chunks():
-    existing = create_sample_suggestion("sugg-1", version=1)
+async def test_update_put_success_increments_version_and_saves_outbox():
+    existing = create_sample_suggestion("sugg-put-1", version=1)
     repo = FakeSuggestionRepo([existing])
     uow = FakeUoW(repo, lock_succeeds=True)
-    vector_repo = FakeVectorRepo()
-    embedding_service = HybridEmbeddingService(
-        FakeDenseEmbedder(), FakeSparseEmbedder()
-    )
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
     use_case = UpdateSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=embedding_service,
-        vector_repo=vector_repo,
+        task_queue=mock_task_queue,
     )
 
     dto = UpdateSuggestionDTO(
-        suggestion_id="sugg-1",
-        title="عنوان بروزرسانی شده",
-        problem="شرح مشکل جدید",
-        solution="راهکار جدید",
+        suggestion_id="sugg-put-1",
+        title="عنوان به روز رسانی شده",
+        problem="شرح مشکل به روز شده",
+        solution="راهکار به روز شده",
         status=SuggestionStatus.EXECUTED,
     )
 
-    result = await use_case.execute_put(dto)
+    response = await use_case.execute_put(dto)
 
-    assert result.suggestion_id == "sugg-1"
-    assert result.version == 2
-    assert result.status == "UPDATED"
+    assert response.suggestion_id == "sugg-put-1"
+    assert response.status == "UPDATED"
+    assert response.version == 2
+
+    # Verify SQL record saved with version 2
+    assert len(uow.suggestions.saved_entities) == 1
+    updated_sql = repo.suggestions["sugg-put-1"]
+    assert updated_sql.version == 2
+    assert updated_sql.content.title == "عنوان به روز رسانی شده"
+    assert updated_sql.evaluation.status == SuggestionStatus.EXECUTED
+
+    # Verify Outbox event saved with version 2
+    assert len(uow.outbox.saved_events) == 1
+    saved_event = uow.outbox.saved_events[0]
+    assert saved_event.resource_type == "SUGGESTION"
+    assert saved_event.resource_id == "sugg-put-1"
+    assert saved_event.event_type == "SUGGESTION_UPDATED"
+    assert saved_event.version == 2
+    assert saved_event.status == "PENDING"
+
+    # Verify atomic commit
     assert uow.committed is True
-    assert "sugg-1" in vector_repo.activated_parent_ids
-    assert len(vector_repo.superseded_calls) == 1
 
-    saved = repo.suggestions["sugg-1"]
-    assert saved.content.title == "عنوان بروزرسانی شده"
-    assert saved.evaluation.status == SuggestionStatus.EXECUTED
-    assert saved.version == 2
-    assert saved.is_deleted is False
+    # Verify task enqueued
+    mock_task_queue.enqueue_task.assert_awaited_once_with(
+        "process_outbox_event_task",
+        event_id=str(saved_event.id),
+        deduplication_id=str(saved_event.id),
+    )
 
 
 @pytest.mark.asyncio
 async def test_update_put_restores_soft_deleted_suggestion():
-    existing = create_sample_suggestion("sugg-deleted", is_deleted=True, version=3)
+    existing = create_sample_suggestion("sugg-put-del", is_deleted=True, version=2)
     repo = FakeSuggestionRepo([existing])
     uow = FakeUoW(repo, lock_succeeds=True)
-    vector_repo = FakeVectorRepo()
-    embedding_service = HybridEmbeddingService(
-        FakeDenseEmbedder(), FakeSparseEmbedder()
-    )
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
     use_case = UpdateSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=embedding_service,
-        vector_repo=vector_repo,
+        task_queue=mock_task_queue,
     )
 
     dto = UpdateSuggestionDTO(
-        suggestion_id="sugg-deleted",
+        suggestion_id="sugg-put-del",
         title="عنوان پیشنهاد احیا شده",
-        problem="مشکل جدید احیا شده",
-        solution="راهکار احیا شده",
-        status=SuggestionStatus.APPROVED,
+        problem="شرح مشکل",
+        solution="راهکار",
+        status=SuggestionStatus.PENDING,
     )
 
-    result = await use_case.execute_put(dto)
+    response = await use_case.execute_put(dto)
 
-    assert result.version == 4
-    saved = repo.suggestions["sugg-deleted"]
-    assert saved.is_deleted is False
+    assert response.version == 3
+    updated_sql = repo.suggestions["sugg-put-del"]
+    assert updated_sql.is_deleted is False
+    assert updated_sql.version == 3
+    assert len(uow.outbox.saved_events) == 1
+    assert uow.outbox.saved_events[0].version == 3
 
 
 @pytest.mark.asyncio
 async def test_update_put_non_existent_raises_404():
     repo = FakeSuggestionRepo([])
     uow = FakeUoW(repo)
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+
     use_case = UpdateSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=FakeVectorRepo(),
+        task_queue=mock_task_queue,
     )
 
     dto = UpdateSuggestionDTO(
-        suggestion_id="missing-id",
-        title="عنوان پیشنهاد تست",
-        problem="شرح مشکل سازمانی برای بررسی",
-        solution="ارائه راهکار عملیاتی پیشنهادی",
-        status=SuggestionStatus.PENDING,
+        suggestion_id="sugg-missing",
+        title="عنوان",
+        problem="مشکل",
+        solution="راهکار",
+        status=SuggestionStatus.APPROVED,
     )
 
     with pytest.raises(SuggestionNotFoundError):
@@ -376,152 +352,63 @@ async def test_update_put_non_existent_raises_404():
 
 
 @pytest.mark.asyncio
-async def test_update_lock_contention_cleans_staged_chunks_and_raises_409():
-    existing = create_sample_suggestion("sugg-locked", version=1)
+async def test_update_lock_contention_raises_409():
+    existing = create_sample_suggestion("sugg-lock")
     repo = FakeSuggestionRepo([existing])
-    # Simulate lock acquisition failure (e.g. concurrent request holds lock)
     uow = FakeUoW(repo, lock_succeeds=False)
-    vector_repo = FakeVectorRepo()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
     use_case = UpdateSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
+        task_queue=mock_task_queue,
     )
 
     dto = UpdateSuggestionDTO(
-        suggestion_id="sugg-locked",
-        title="تست بروزرسانی قفل",
-        problem="شرح مشکل سازمانی برای بررسی",
-        solution="ارائه راهکار عملیاتی پیشنهادی",
+        suggestion_id="sugg-lock",
+        title="عنوان",
+        problem="مشکل",
+        solution="راهکار",
         status=SuggestionStatus.APPROVED,
     )
 
     with pytest.raises(SuggestionProcessingConflictError):
         await use_case.execute_put(dto)
 
-    # Verify newly staged chunks in Qdrant were deleted to leave zero trace
-    assert "chunk-sugg-locked-1" in vector_repo.deleted_chunk_ids
-    assert uow.committed is False
+
+# endregion
 
 
-@pytest.mark.asyncio
-async def test_update_version_mismatch_raises_409():
-    existing = create_sample_suggestion("sugg-race", version=1)
-    repo = FakeSuggestionRepo([existing])
-    uow = FakeUoW(repo, lock_succeeds=True)
-    vector_repo = FakeVectorRepo()
-
-    use_case = UpdateSuggestionUseCase(
-        uow=uow,
-        normalizer=FakeNormalizer(),
-        chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
-    )
-
-    dto = UpdateSuggestionDTO(
-        suggestion_id="sugg-race",
-        title="تست مسابقه نسخه",
-        problem="شرح مشکل سازمانی برای بررسی",
-        solution="ارائه راهکار عملیاتی پیشنهادی",
-        status=SuggestionStatus.APPROVED,
-    )
-
-    # Simulate another worker updating the record to version 2 while Phase 1 was running
-    async def simulate_race(chunks):
-        existing.version = 2
-
-    use_case._embedding_service.embed_chunks = AsyncMock(side_effect=simulate_race)
-
-    with pytest.raises(SuggestionProcessingConflictError):
-        await use_case.execute_put(dto)
-
-    assert "chunk-sugg-race-1" in vector_repo.deleted_chunk_ids
-
-
-@pytest.mark.asyncio
-async def test_update_put_phase3_retries_transient_failure_and_succeeds():
-    existing = create_sample_suggestion("sugg-retry", version=1)
-    repo = FakeSuggestionRepo([existing])
-    uow = FakeUoW(repo, lock_succeeds=True)
-    vector_repo = FakeVectorRepo()
-
-    # Fail on first activation attempt, succeed on second attempt
-    activation_attempts = 0
-
-    async def flaky_activate(suggestion_id: str):
-        nonlocal activation_attempts
-        activation_attempts += 1
-        if activation_attempts == 1:
-            raise VectorStorageError("Temporary Qdrant connection timeout")
-
-    vector_repo.activate_staging_chunks = AsyncMock(side_effect=flaky_activate)
-
-    use_case = UpdateSuggestionUseCase(
-        uow=uow,
-        normalizer=FakeNormalizer(),
-        chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
-    )
-
-    dto = UpdateSuggestionDTO(
-        suggestion_id="sugg-retry",
-        title="تست تاب‌آوری بازآزمایی",
-        problem="شرح مشکل برای بررسی قابلیت بازیابی",
-        solution="ارائه راهکار عملیاتی پیشنهادی",
-        status=SuggestionStatus.APPROVED,
-    )
-
-    res = await use_case.execute_put(dto)
-
-    assert res.suggestion_id == "sugg-retry"
-    assert res.version == 2
-    assert activation_attempts == 2
-    assert len(vector_repo.superseded_calls) == 1
-    assert vector_repo.superseded_calls[0][0] == "sugg-retry"
-
-
+# region PATCH Tests
 @pytest.mark.asyncio
 async def test_update_patch_success_overlays_only_provided_fields():
     existing = create_sample_suggestion("sugg-patch", version=1)
     repo = FakeSuggestionRepo([existing])
     uow = FakeUoW(repo, lock_succeeds=True)
-    vector_repo = FakeVectorRepo()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
     use_case = UpdateSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
+        task_queue=mock_task_queue,
     )
 
     dto = PatchSuggestionDTO(
         suggestion_id="sugg-patch",
-        title="فقط عنوان عوض شده",
-        # problem and solution are omitted / None
+        title="عنوان به روز شده فقط",
     )
 
-    result = await use_case.execute_patch(dto)
+    response = await use_case.execute_patch(dto)
 
-    assert result.version == 2
-    saved = repo.suggestions["sugg-patch"]
-    assert saved.content.title == "فقط عنوان عوض شده"
-    # problem and solution preserved
-    assert saved.content.problem == "شرح مشکل اولیه"
-    assert saved.content.solution == "راهکار اولیه"
+    assert response.status == "UPDATED"
+    assert response.version == 2
+    updated = repo.suggestions["sugg-patch"]
+    assert updated.content.title == "عنوان به روز شده فقط"
+    assert updated.content.problem == "شرح مشکل معتبر جهت تست"  # Preserved
+    assert len(uow.outbox.saved_events) == 1
+    assert uow.outbox.saved_events[0].version == 2
 
 
 @pytest.mark.asyncio
@@ -529,160 +416,143 @@ async def test_update_patch_rejects_soft_deleted_record():
     existing = create_sample_suggestion("sugg-del", is_deleted=True, version=1)
     repo = FakeSuggestionRepo([existing])
     uow = FakeUoW(repo)
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+
     use_case = UpdateSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=FakeVectorRepo(),
+        task_queue=mock_task_queue,
     )
 
     dto = PatchSuggestionDTO(
         suggestion_id="sugg-del",
-        title="تلاش برای پچ رکورد حذف شده",
+        title="عنوان جدید",
     )
 
     with pytest.raises(SuggestionNotFoundError):
         await use_case.execute_patch(dto)
 
 
-# --- Tests for DeleteSuggestionUseCase ---
+# endregion
 
 
+# region DELETE Tests
 @pytest.mark.asyncio
-async def test_delete_success_soft_deletes_and_purges_vectors():
-    existing = create_sample_suggestion("sugg-del-1", is_deleted=False)
+async def test_delete_success_soft_deletes_and_saves_outbox():
+    existing = create_sample_suggestion("sugg-del-1", is_deleted=False, version=1)
     repo = FakeSuggestionRepo([existing])
     uow = FakeUoW(repo, lock_succeeds=True)
-    vector_repo = FakeVectorRepo()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
-    use_case = DeleteSuggestionUseCase(uow=uow, vector_repo=vector_repo)
-    result = await use_case.execute("sugg-del-1")
+    use_case = DeleteSuggestionUseCase(
+        uow=uow,
+        task_queue=mock_task_queue,
+    )
 
-    assert result.suggestion_id == "sugg-del-1"
-    assert result.status == "DELETED"
-    assert existing.is_deleted is True
-    assert "sugg-del-1" in vector_repo.deleted_parent_ids
-    assert uow.committed is True
+    response = await use_case.execute("sugg-del-1")
+
+    assert response.suggestion_id == "sugg-del-1"
+    assert response.status == "DELETED"
+    assert repo.suggestions["sugg-del-1"].is_deleted is True
+    assert repo.suggestions["sugg-del-1"].version == 2
+
+    # Verify Outbox event created
+    assert len(uow.outbox.saved_events) == 1
+    event = uow.outbox.saved_events[0]
+    assert event.resource_id == "sugg-del-1"
+    assert event.event_type == "SUGGESTION_DELETED"
+    assert event.version == 2
+
+    # Verify task enqueued
+    mock_task_queue.enqueue_task.assert_awaited_once_with(
+        "process_outbox_event_task",
+        event_id=str(event.id),
+        deduplication_id=str(event.id),
+    )
 
 
 @pytest.mark.asyncio
 async def test_delete_idempotent_for_already_deleted_suggestion():
-    existing = create_sample_suggestion("sugg-del-2", is_deleted=True)
+    existing = create_sample_suggestion("sugg-del-2", is_deleted=True, version=2)
     repo = FakeSuggestionRepo([existing])
     uow = FakeUoW(repo, lock_succeeds=True)
-    vector_repo = FakeVectorRepo()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
-    use_case = DeleteSuggestionUseCase(uow=uow, vector_repo=vector_repo)
-    result = await use_case.execute("sugg-del-2")
+    use_case = DeleteSuggestionUseCase(
+        uow=uow,
+        task_queue=mock_task_queue,
+    )
 
-    assert result.status == "DELETED"
-    # Should not attempt second Qdrant delete since it was already deleted
-    assert "sugg-del-2" not in vector_repo.deleted_parent_ids
+    response = await use_case.execute("sugg-del-2")
+
+    assert response.status == "DELETED"
+    # Idempotent: should NOT re-enqueue or create extra outbox event
+    assert len(uow.outbox.saved_events) == 0
+    mock_task_queue.enqueue_task.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_delete_not_found_raises_404():
     repo = FakeSuggestionRepo([])
     uow = FakeUoW(repo)
-    use_case = DeleteSuggestionUseCase(uow=uow, vector_repo=FakeVectorRepo())
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+
+    use_case = DeleteSuggestionUseCase(
+        uow=uow,
+        task_queue=mock_task_queue,
+    )
 
     with pytest.raises(SuggestionNotFoundError):
-        await use_case.execute("non-existent-id")
+        await use_case.execute("sugg-nonexistent")
 
 
-@pytest.mark.asyncio
-async def test_delete_qdrant_failure_restores_sql_record():
-    existing = create_sample_suggestion("sugg-del-fail", is_deleted=False)
-    repo = FakeSuggestionRepo([existing])
-    uow = FakeUoW(repo, lock_succeeds=True)
-    # Simulate Qdrant purge failure
-    vector_repo = FakeVectorRepo(fail_delete=True)
-
-    use_case = DeleteSuggestionUseCase(uow=uow, vector_repo=vector_repo)
-
-    with pytest.raises(VectorStorageError):
-        await use_case.execute("sugg-del-fail")
-
-    # SQL compensation: record should be restored to is_deleted = False
-    assert existing.is_deleted is False
-    assert existing.version == 2
-    assert len(uow.lock_keys) == 2  # Once for delete, once for compensation
+# endregion
 
 
-@pytest.mark.asyncio
-async def test_delete_qdrant_failure_compensation_lock_contention_still_raises_vector_error():
-    existing = create_sample_suggestion("sugg-del-fail-2", is_deleted=False)
-    repo = FakeSuggestionRepo([existing])
-    attempts = 0
-
-    class FlakyLockUoW(FakeUoW):
-        async def try_acquire_advisory_lock(self, lock_key: int) -> bool:
-            nonlocal attempts
-            attempts += 1
-            self.lock_keys.append(lock_key)
-            return attempts == 1
-
-    uow = FlakyLockUoW(repo)
-    vector_repo = FakeVectorRepo(fail_delete=True)
-
-    use_case = DeleteSuggestionUseCase(uow=uow, vector_repo=vector_repo)
-
-    with pytest.raises(VectorStorageError):
-        await use_case.execute("sugg-del-fail-2")
-
-    assert attempts == 2
-
-
-# --- Tests for BulkDeleteSuggestionsUseCase ---
-
-
+# region BULK DELETE Tests
 @pytest.mark.asyncio
 async def test_bulk_delete_all_succeed():
     s1 = create_sample_suggestion("s1")
     s2 = create_sample_suggestion("s2")
     repo = FakeSuggestionRepo([s1, s2])
     uow = FakeUoW(repo)
-    vector_repo = FakeVectorRepo()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
-    del_use_case = DeleteSuggestionUseCase(uow=uow, vector_repo=vector_repo)
-    bulk_use_case = BulkDeleteSuggestionsUseCase(delete_use_case=del_use_case)
+    delete_use_case = DeleteSuggestionUseCase(uow=uow, task_queue=mock_task_queue)
+    bulk_use_case = BulkDeleteSuggestionsUseCase(delete_use_case=delete_use_case)
 
     dto = BulkDeleteSuggestionsDTO(suggestion_ids=["s1", "s2"])
-    result = await bulk_use_case.execute(dto)
+    response = await bulk_use_case.execute(dto)
 
-    assert result.total_requested == 2
-    assert result.total_deleted == 2
-    assert result.total_failed == 0
-    assert result.deleted_ids == ["s1", "s2"]
-    assert len(result.errors) == 0
+    assert response.total_deleted == 2
+    assert response.total_failed == 0
+    assert len(response.errors) == 0
+    assert repo.suggestions["s1"].is_deleted is True
+    assert repo.suggestions["s2"].is_deleted is True
 
 
 @pytest.mark.asyncio
 async def test_bulk_delete_partial_success_isolates_errors_with_pointers():
     s1 = create_sample_suggestion("s1")
-    # s2 does not exist
     s3 = create_sample_suggestion("s3")
     repo = FakeSuggestionRepo([s1, s3])
     uow = FakeUoW(repo)
-    vector_repo = FakeVectorRepo()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
-    del_use_case = DeleteSuggestionUseCase(uow=uow, vector_repo=vector_repo)
-    bulk_use_case = BulkDeleteSuggestionsUseCase(delete_use_case=del_use_case)
+    delete_use_case = DeleteSuggestionUseCase(uow=uow, task_queue=mock_task_queue)
+    bulk_use_case = BulkDeleteSuggestionsUseCase(delete_use_case=delete_use_case)
 
-    dto = BulkDeleteSuggestionsDTO(suggestion_ids=["s1", "s2", "s3"])
-    result = await bulk_use_case.execute(dto)
+    dto = BulkDeleteSuggestionsDTO(suggestion_ids=["s1", "s2_missing", "s3"])
+    response = await bulk_use_case.execute(dto)
 
-    assert result.total_requested == 3
-    assert result.total_deleted == 2
-    assert result.total_failed == 1
-    assert result.deleted_ids == ["s1", "s3"]
+    assert response.total_deleted == 2
+    assert response.total_failed == 1
+    assert len(response.errors) == 1
+    failure = response.errors[0]
+    assert failure.suggestion_id == "s2_missing"
+    assert failure.code == "SUGGESTION_NOT_FOUND"
+    assert failure.source_pointer == "/data/suggestionIds/1"
 
-    assert len(result.errors) == 1
-    err = result.errors[0]
-    assert err.suggestion_id == "s2"
-    assert err.index == 1
-    assert err.code == "SUGGESTION_NOT_FOUND"
-    assert err.source_pointer == "/data/suggestionIds/1"
+
+# endregion

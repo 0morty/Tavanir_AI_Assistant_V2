@@ -4,6 +4,9 @@ from src.infrastructure.db.repositories.sql.base_sql_repository import (
 from src.infrastructure.db.repositories.sql.checkpoint_repository import (
     SqlCheckpointRepository,
 )
+from src.infrastructure.db.repositories.sql.outbox_repository import (
+    SqlOutboxRepository,
+)
 from src.infrastructure.db.repositories.sql.skipped_suggestion_repository import (
     SqlSkippedSuggestionRepository,
 )
@@ -16,5 +19,6 @@ __all__ = [
     "SqlSuggestionRepository",
     "SqlCheckpointRepository",
     "SqlSkippedSuggestionRepository",
+    "SqlOutboxRepository",
 ]
 

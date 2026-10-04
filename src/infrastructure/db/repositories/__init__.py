@@ -6,6 +6,7 @@ from src.infrastructure.db.repositories.qdrant import (
 from src.infrastructure.db.repositories.sql import (
     BaseSqlRepository,
     SqlCheckpointRepository,
+    SqlOutboxRepository,
     SqlSkippedSuggestionRepository,
     SqlSuggestionRepository,
 )
@@ -18,4 +19,5 @@ __all__ = [
     "SqlSuggestionRepository",
     "SqlCheckpointRepository",
     "SqlSkippedSuggestionRepository",
+    "SqlOutboxRepository",
 ]

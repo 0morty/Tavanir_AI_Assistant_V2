@@ -163,6 +163,10 @@ class FakeUoW(IUnitOfWork):
     def skipped_suggestions(self) -> ISkippedSuggestionRepository:
         return self._skipped
 
+    @property
+    def outbox(self) -> AsyncMock:
+        return AsyncMock()
+
     async def try_acquire_advisory_lock(self, lock_key: int) -> bool:
         return True
 
@@ -299,6 +303,16 @@ class FakeVectorRepo(ISuggestionVectorRepository):
 
     async def delete_superseded_chunks(
         self, parent_id: str, active_chunk_ids: Sequence[str]
+    ) -> None:
+        pass
+
+    async def activate_version_chunks(
+        self, parent_id: str, target_version: int
+    ) -> None:
+        self.activated_parent_ids.append(parent_id)
+
+    async def delete_obsolete_version_chunks(
+        self, parent_id: str, max_version_exclusive: int
     ) -> None:
         pass
 

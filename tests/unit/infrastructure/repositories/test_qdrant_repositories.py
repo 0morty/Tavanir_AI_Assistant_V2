@@ -130,7 +130,7 @@ async def test_provision_collection_when_collection_not_exists(
     assert (
         mock_qdrant_client.create_collection.call_args.kwargs["on_disk_payload"] is True
     )
-    assert mock_qdrant_client.create_payload_index.await_count == 8
+    assert mock_qdrant_client.create_payload_index.await_count == 9
 
 
 async def test_provision_collection_raises_domain_error_on_fatal_failure(

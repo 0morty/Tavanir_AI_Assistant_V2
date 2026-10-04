@@ -1,19 +1,18 @@
 # pyright: reportIncompatibleMethodOverride=false
 from collections.abc import Sequence
+from datetime import datetime
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
-from src.application.interfaces.i_dense_embedder import IDenseEmbedder
-from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
-from src.application.interfaces.i_text_normalizer import ITextNormalizer
-from src.application.services.hybrid_embedding_service import HybridEmbeddingService
 from src.application.use_cases.ingest_suggestion_use_case import IngestSuggestionUseCase
 
 from src.application.dtos import CreateSuggestionDTO, IngestSuggestionResponseDTO
-from src.application.interfaces import IUnitOfWork
+from src.application.interfaces import ITaskQueueService, ITextNormalizer, IUnitOfWork
 from src.domain.entities import (
     Chunk,
     CommitteeEvaluation,
+    OutboxEvent,
     SparseVector,
     Suggestion,
     SuggestionChunk,
@@ -31,37 +30,93 @@ from src.domain.exceptions import (
     InvalidSuggestionContentError,
     SuggestionAlreadyExistsError,
     SuggestionChunkingError,
-    VectorStorageError,
 )
 from src.domain.interfaces import (
     IChunkingStrategy,
+    IOutboxRepository,
     ISuggestionRepository,
-    ISuggestionVectorRepository,
 )
 
 
 class FakeSuggestionRepository(ISuggestionRepository):
-    get_by_id: AsyncMock = AsyncMock()
-    get_by_ids: AsyncMock = AsyncMock()
-    save: AsyncMock = AsyncMock()
-    save_batch: AsyncMock = AsyncMock()
-    delete: AsyncMock = AsyncMock()
-    delete_batch: AsyncMock = AsyncMock()
-    soft_delete: AsyncMock = AsyncMock()
-
     def __init__(self, existing_suggestion: Suggestion | None = None):
-        self.get_by_id = AsyncMock(return_value=existing_suggestion)
-        self.get_by_ids = AsyncMock(return_value=[])
-        self.save = AsyncMock()
-        self.save_batch = AsyncMock()
-        self.delete = AsyncMock()
-        self.delete_batch = AsyncMock()
-        self.soft_delete = AsyncMock()
+        self._existing = existing_suggestion
+        self.saved_entities: list[Suggestion] = []
+
+    async def get_by_id(
+        self, suggestion_id: str, include_deleted: bool = False
+    ) -> Suggestion | None:
+        return self._existing
+
+    async def get_by_ids(
+        self, ids: Sequence[str], include_deleted: bool = False
+    ) -> Sequence[Suggestion]:
+        return []
+
+    async def save(self, entity: Suggestion) -> None:
+        self.saved_entities.append(entity)
+
+    async def save_batch(self, entities: Sequence[Suggestion]) -> None:
+        self.saved_entities.extend(entities)
+
+    async def delete(self, entity_id: str) -> bool:
+        return True
+
+    async def delete_batch(self, entity_ids: Sequence[str]) -> int:
+        return len(entity_ids)
+
+    async def soft_delete(self, entity_id: str) -> bool:
+        return True
+
+
+class FakeOutboxRepository(IOutboxRepository):
+    def __init__(self):
+        self.saved_events: list[OutboxEvent] = []
+
+    async def append(self, event: OutboxEvent) -> None:
+        self.saved_events.append(event)
+
+    async def get_by_id(self, event_id: UUID) -> OutboxEvent | None:
+        for ev in self.saved_events:
+            if ev.id == event_id:
+                return ev
+        return None
+
+    async def get_for_processing(self, event_id: UUID) -> OutboxEvent | None:
+        return None
+
+    async def update_status(
+        self,
+        event_id: UUID,
+        status: str,
+        error: str | None = None,
+        retry_count: int | None = None,
+    ) -> None:
+        pass
+
+    async def fetch_stale_events(
+        self, stuck_before: datetime, limit: int = 100
+    ) -> list[OutboxEvent]:
+        return []
+
+    async def fetch_pending_events(
+        self, created_before: datetime, limit: int = 100
+    ) -> list[OutboxEvent]:
+        return []
+
+    async def fetch_failed_for_retry(
+        self, created_after: datetime, max_retries: int = 20, limit: int = 100
+    ) -> list[OutboxEvent]:
+        return []
+
+    async def prune_completed(self, before: datetime) -> int:
+        return 0
 
 
 class FakeUoW(IUnitOfWork):
     def __init__(self, existing_suggestion: Suggestion | None = None):
         self._suggestions = FakeSuggestionRepository(existing_suggestion)
+        self._outbox = FakeOutboxRepository()
         self._checkpoints = AsyncMock()
         self._skipped = AsyncMock()
         self.committed = False
@@ -70,6 +125,10 @@ class FakeUoW(IUnitOfWork):
     @property
     def suggestions(self) -> FakeSuggestionRepository:
         return self._suggestions
+
+    @property
+    def outbox(self) -> FakeOutboxRepository:
+        return self._outbox
 
     @property
     def checkpoints(self) -> AsyncMock:
@@ -87,6 +146,15 @@ class FakeUoW(IUnitOfWork):
 
     async def rollback(self) -> None:
         self.rolled_back = True
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            await self.rollback()
+        else:
+            await self.commit()
 
 
 class FakeNormalizer(ITextNormalizer):
@@ -120,107 +188,12 @@ class FakeChunker(IChunkingStrategy[Suggestion, SuggestionChunkMetadata]):
                     sub_index=0,
                     status=document.evaluation.status,
                 ),
-            ),
-            Chunk[SuggestionChunkMetadata](
-                chunk_id="chunk-2",
-                parent_id=document.id,
-                content=document.content.problem,
-                metadata=SuggestionChunkMetadata(
-                    chunk_type=SuggestionChunkType.PROBLEM,
-                    sub_index=0,
-                    status=document.evaluation.status,
-                ),
-            ),
-            Chunk[SuggestionChunkMetadata](
-                chunk_id="chunk-3",
-                parent_id=document.id,
-                content=document.content.solution,
-                metadata=SuggestionChunkMetadata(
-                    chunk_type=SuggestionChunkType.SOLUTION,
-                    sub_index=0,
-                    status=document.evaluation.status,
-                ),
-            ),
+                dense_vector=[0.1] * 10,
+                sparse_vector=SparseVector(indices=[1], values=[1.0]),
+                chunk_status=ChunkStatus.ACTIVE,
+                version=1,
+            )
         ]
-
-
-class FakeDenseEmbedder(IDenseEmbedder):
-    @property
-    def embedding_dimension(self) -> int:
-        return 3
-
-    async def embed_documents(
-        self, texts: Sequence[str], truncate: bool = True
-    ) -> list[list[float]]:
-        return [[0.1, 0.2, 0.3] for _ in texts]
-
-    async def embed_query(self, query: str, truncate: bool = True) -> list[float]:
-        return [0.1, 0.2, 0.3]
-
-
-class FakeSparseEmbedder(ISparseEmbedder):
-    async def embed_document(self, text: str) -> SparseVector:
-        return SparseVector(indices=[1, 2], values=[1.0, 0.5])
-
-    async def embed_documents(self, texts: Sequence[str]) -> list[SparseVector]:
-        return [SparseVector(indices=[1, 2], values=[1.0, 0.5]) for _ in texts]
-
-    async def embed_query(self, query: str) -> SparseVector:
-        return SparseVector(indices=[1, 2], values=[1.0, 0.5])
-
-
-class FakeVectorRepo(ISuggestionVectorRepository):
-    upsert_chunks_batch: AsyncMock = AsyncMock()
-    delete_chunks_by_parent_id: AsyncMock = AsyncMock()
-    delete_chunks_by_parent_ids: AsyncMock = AsyncMock()
-    activate_staging_chunks: AsyncMock = AsyncMock()
-    activate_staging_chunks_batch: AsyncMock = AsyncMock()
-    delete_chunks_by_ids: AsyncMock = AsyncMock()
-    delete_superseded_chunks: AsyncMock = AsyncMock()
-
-    def __init__(
-        self,
-        fail_upsert: bool = False,
-        fail_delete: bool = False,
-        fail_activate: bool = False,
-    ):
-        self.fail_upsert = fail_upsert
-        self.fail_delete = fail_delete
-        self.fail_activate = fail_activate
-        self.upsert_chunks_batch = AsyncMock()
-        if fail_upsert:
-            self.upsert_chunks_batch.side_effect = VectorStorageError(
-                "Qdrant cluster unavailable"
-            )
-        self.delete_chunks_by_parent_id = AsyncMock()
-        if fail_delete:
-            self.delete_chunks_by_parent_id.side_effect = VectorStorageError(
-                "Qdrant cluster unreachable for delete"
-            )
-        self.delete_chunks_by_parent_ids = AsyncMock()
-        self.activate_staging_chunks = AsyncMock()
-        if fail_activate:
-            self.activate_staging_chunks.side_effect = VectorStorageError(
-                "Qdrant payload activation failed"
-            )
-        self.activate_staging_chunks_batch = AsyncMock()
-        self.delete_chunks_by_ids = AsyncMock()
-        self.delete_superseded_chunks = AsyncMock()
-
-    async def provision_collection(self, dense_dimension: int | None = None) -> None:
-        pass
-
-    async def upsert_chunk(self, chunk: Chunk[SuggestionChunkMetadata]) -> None:
-        pass
-
-    async def delete_staging_chunks(self, parent_id: str) -> None:
-        pass
-
-    async def delete_deprecated_chunks(self, parent_id: str) -> None:
-        pass
-
-    async def search_suggestions(self, *args, **kwargs):
-        return []
 
 
 @pytest.fixture
@@ -228,13 +201,13 @@ def valid_dto() -> CreateSuggestionDTO:
     return CreateSuggestionDTO(
         suggestion_id="sugg-101",
         title="عنوان پیشنهاد تست سیستم",
-        problem="شرح مشکل سازمانی با جزییات کامل و کافی",
-        solution="ارائه راهکار عملیاتی با کیفیت و استاندارد",
+        problem="شرح مشکل سازمانی با جزییات کامل و دقیق جهت ذخیره سازی در پایگاه داده",
+        solution="ارایه راهکار مهندسی و بهینه برای حل مشکل شبکه توزیع نیروی برق",
         status=SuggestionStatus.APPROVED,
         committee_scrutiny=CommitteeScrutiny.APPROVED,
-        description="مصوب جهت پیاده‌سازی آزمایشی",
-        shamsi_date="1402/08/15",
-        context_title="توزیع نیروی برق",
+        description="مصوب جلسه کمیته فنی",
+        shamsi_date="1402/05/20",
+        context_title="شرکت توزیع نیروی برق",
         committee_scrutiny_id=0,
     )
 
@@ -242,102 +215,80 @@ def valid_dto() -> CreateSuggestionDTO:
 @pytest.mark.asyncio
 async def test_successful_ingestion_flow(valid_dto):
     uow = FakeUoW()
-    normalizer = FakeNormalizer()
-    chunker = FakeChunker()
-    dense = FakeDenseEmbedder()
-    sparse = FakeSparseEmbedder()
-    embedding_service = HybridEmbeddingService(dense, sparse)
-    vector_repo = FakeVectorRepo()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+    mock_task_queue.enqueue = AsyncMock()
 
     use_case = IngestSuggestionUseCase(
         uow=uow,
-        normalizer=normalizer,
-        chunker=chunker,
-        embedding_service=embedding_service,
-        vector_repo=vector_repo,
+        normalizer=FakeNormalizer(),
+        chunker=FakeChunker(),
+        task_queue=mock_task_queue,
     )
 
-    result = await use_case.execute(valid_dto)
+    response = await use_case.execute(valid_dto)
 
-    assert isinstance(result, IngestSuggestionResponseDTO)
-    assert result.suggestion_id == "sugg-101"
-    assert result.chunks_count == 3
-    assert result.status == "CREATED"
+    assert isinstance(response, IngestSuggestionResponseDTO)
+    assert response.suggestion_id == "sugg-101"
+    assert response.status == "CREATED"
+    assert response.chunks_count == 1
 
-    # Verify short-lived pre-check called
-    uow.suggestions.get_by_id.assert_awaited_once_with("sugg-101", include_deleted=True)
-
-    # Verify SQL save called with normalized entity
-    uow.suggestions.save.assert_awaited_once()
-    saved_entity: Suggestion = uow.suggestions.save.call_args[0][0]
+    # Verify atomic PostgreSQL persistence: suggestion + outbox saved
+    assert len(uow.suggestions.saved_entities) == 1
+    saved_entity: Suggestion = uow.suggestions.saved_entities[0]
     assert saved_entity.id == "sugg-101"
-    assert saved_entity.content.title == "عنوان پیشنهاد تست سیستم"
+    assert saved_entity.version == 1
 
-    # Verify pre-emptive Qdrant purge was executed prior to upsert
-    vector_repo.delete_chunks_by_parent_id.assert_any_await("sugg-101")
+    assert len(uow.outbox.saved_events) == 1
+    saved_event: OutboxEvent = uow.outbox.saved_events[0]
+    assert saved_event.resource_type == "SUGGESTION"
+    assert saved_event.resource_id == "sugg-101"
+    assert saved_event.event_type == "SUGGESTION_INGESTED"
+    assert saved_event.version == 1
+    assert saved_event.status == "PENDING"
 
-    # Verify Qdrant batch upsert called with fully embedded chunks tagged as STAGING
-    vector_repo.upsert_chunks_batch.assert_awaited_once()
-    upserted_chunks = vector_repo.upsert_chunks_batch.call_args[0][0]
-    assert len(upserted_chunks) == 3
-    for chunk in upserted_chunks:
-        assert chunk.chunk_status == ChunkStatus.STAGING
-        assert chunk.dense_vector == [0.1, 0.2, 0.3]
-        assert chunk.sparse_vector == SparseVector(indices=[1, 2], values=[1.0, 0.5])
+    # Verify UoW committed
+    assert uow.committed is True
 
-    # Verify atomic staging activation
-    vector_repo.activate_staging_chunks.assert_awaited_once_with("sugg-101")
+    # Verify background task enqueued (fire-and-forget)
+    mock_task_queue.enqueue_task.assert_awaited_once_with(
+        "process_outbox_event_task",
+        event_id=str(saved_event.id),
+        deduplication_id=str(saved_event.id),
+    )
 
 
 @pytest.mark.asyncio
 async def test_ingestion_flow_with_secretariat_and_committee_evaluations():
     uow = FakeUoW()
-    normalizer = FakeNormalizer()
-    chunker = FakeChunker()
-    dense = FakeDenseEmbedder()
-    sparse = FakeSparseEmbedder()
-    embedding_service = HybridEmbeddingService(dense, sparse)
-    vector_repo = FakeVectorRepo()
-
-    dto = CreateSuggestionDTO(
-        suggestion_id="sugg-sec-01",
-        title="عنوان تست با دبیرخانه",
-        problem="شرح مشکل سازمانی معتبر و استاندارد",
-        solution="ارائه راهکار اجرایی معتبر و استاندارد",
-        status=SuggestionStatus.APPROVED,
-        committee_scrutiny=CommitteeScrutiny.APPROVED,
-        description="مصوب جلسه کمیته فنی",
-        committee_scrutiny_id=0,
-        secretariat_scrutiny=SecretariatScrutiny.REFER_TO_COMMITTEE,
-        secretariat_comment="تایید اولیه دبیرخانه و ارجاع",
-        secretariat_scrutiny_id=3,
-        shamsi_date="1402/10/01",
-        context_title="معاونت منابع انسانی",
-    )
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
     use_case = IngestSuggestionUseCase(
         uow=uow,
-        normalizer=normalizer,
-        chunker=chunker,
-        embedding_service=embedding_service,
-        vector_repo=vector_repo,
+        normalizer=FakeNormalizer(),
+        chunker=FakeChunker(),
+        task_queue=mock_task_queue,
     )
 
-    result = await use_case.execute(dto)
-    assert result.suggestion_id == "sugg-sec-01"
-    assert result.status == "CREATED"
-
-    saved_entity: Suggestion = uow.suggestions.save.call_args[0][0]
-    assert saved_entity.evaluation.scrutiny == CommitteeScrutiny.APPROVED
-    assert saved_entity.evaluation.scrutiny_id == 0
-    assert saved_entity.evaluation.description == "مصوب جلسه کمیته فنی"
-    assert saved_entity.secretariat_evaluation is not None
-    assert (
-        saved_entity.secretariat_evaluation.scrutiny
-        == SecretariatScrutiny.REFER_TO_COMMITTEE
+    dto = CreateSuggestionDTO(
+        suggestion_id="sugg-103",
+        title="عنوان پیشنهاد با ارزیابی دوگانه",
+        problem="شرح مشکل دقیق و کامل سازمانی جهت بررسی توسط ارزیاب",
+        solution="ارایه راهکار مهندسی دقیق برای حل مشکل",
+        status=SuggestionStatus.PENDING,
+        committee_scrutiny=CommitteeScrutiny.APPROVED,
+        description="توضیحات کمیته",
+        secretariat_scrutiny=SecretariatScrutiny.SEND_TO_APPROVER,
+        secretariat_comment="توضیحات دبیرخانه",
     )
-    assert saved_entity.secretariat_evaluation.scrutiny_id == 3
-    assert saved_entity.secretariat_evaluation.comment == "تایید اولیه دبیرخانه و ارجاع"
+
+    response = await use_case.execute(dto)
+
+    assert response.suggestion_id == "sugg-103"
+    assert response.status == "CREATED"
+    assert len(uow.suggestions.saved_entities) == 1
+    assert uow.suggestions.saved_entities[0].version == 1
+    assert len(uow.outbox.saved_events) == 1
+    mock_task_queue.enqueue_task.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -349,187 +300,100 @@ async def test_duplicate_suggestion_raises_conflict(valid_dto):
             problem="مشکل قبلی ثبت شده",
             solution="راهکار قبلی ثبت شده",
         ),
-        evaluation=CommitteeEvaluation(
-            status=SuggestionStatus.APPROVED, scrutiny=None, description=None
-        ),
-        date=None,
-        context_title=None,
+        evaluation=CommitteeEvaluation(status=SuggestionStatus.APPROVED),
     )
     uow = FakeUoW(existing_suggestion=existing)
-    vector_repo = FakeVectorRepo()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
 
     use_case = IngestSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
+        task_queue=mock_task_queue,
     )
 
     with pytest.raises(SuggestionAlreadyExistsError) as exc_info:
         await use_case.execute(valid_dto)
 
     assert "sugg-101" in str(exc_info.value)
-    assert exc_info.value.pointer == "/data/suggestionId"
-    # Gatekeeper verification: neither SQL nor Qdrant mutations/deletions occurred
-    uow.suggestions.save.assert_not_called()
-    vector_repo.upsert_chunks_batch.assert_not_called()
-    vector_repo.delete_chunks_by_parent_id.assert_not_called()
+    assert len(uow.suggestions.saved_entities) == 0
+    assert len(uow.outbox.saved_events) == 0
+    mock_task_queue.enqueue_task.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_invalid_content_raises_domain_error():
     uow = FakeUoW()
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+
     use_case = IngestSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=FakeVectorRepo(),
+        task_queue=mock_task_queue,
     )
 
-    # Problem is noise placeholder
     bad_dto = CreateSuggestionDTO(
         suggestion_id="sugg-102",
         title="عنوان معتبر و استاندارد",
-        problem="ندارد",
+        problem="ندارد",  # noise placeholder
         solution="راهکار معتبر و استاندارد سازمانی",
-        status=SuggestionStatus.PENDING,
+        status=SuggestionStatus.APPROVED,
     )
 
-    with pytest.raises(InvalidSuggestionContentError) as exc_info:
+    with pytest.raises(InvalidSuggestionContentError):
         await use_case.execute(bad_dto)
 
-    assert exc_info.value.pointer == "/data/problem"
-    uow.suggestions.save.assert_not_called()
+    assert len(uow.suggestions.saved_entities) == 0
+    assert len(uow.outbox.saved_events) == 0
+    mock_task_queue.enqueue_task.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_empty_chunks_raises_chunking_error(valid_dto):
     uow = FakeUoW()
-    chunker = FakeChunker(return_chunks=[])
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+
     use_case = IngestSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
-        chunker=chunker,
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=FakeVectorRepo(),
+        chunker=FakeChunker(return_chunks=[]),
+        task_queue=mock_task_queue,
     )
 
-    with pytest.raises(SuggestionChunkingError) as exc_info:
+    with pytest.raises(SuggestionChunkingError):
         await use_case.execute(valid_dto)
 
-    assert "0 chunks" in str(exc_info.value)
-    uow.suggestions.save.assert_not_called()
+    assert len(uow.suggestions.saved_entities) == 0
+    assert len(uow.outbox.saved_events) == 0
+    mock_task_queue.enqueue_task.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_qdrant_failure_triggers_compensating_deletion(valid_dto):
+async def test_enqueue_failure_does_not_fail_http_response(valid_dto):
+    """
+    If Redis/ARQ is temporarily unreachable during enqueue, the HTTP request
+    still succeeds because the outbox event is safely persisted in PostgreSQL (ADR-002, FIX-ME).
+    """
     uow = FakeUoW()
-    vector_repo = FakeVectorRepo(fail_upsert=True)
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+    mock_task_queue.enqueue_task = AsyncMock(
+        side_effect=ConnectionError("Redis connection refused")
+    )
 
     use_case = IngestSuggestionUseCase(
         uow=uow,
         normalizer=FakeNormalizer(),
         chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
+        task_queue=mock_task_queue,
     )
 
-    with pytest.raises(VectorStorageError) as exc_info:
-        await use_case.execute(valid_dto)
+    # Must succeed despite enqueue failure
+    response = await use_case.execute(valid_dto)
 
-    assert "Qdrant cluster unavailable" in str(exc_info.value)
-
-    # SQL save was called first
-    uow.suggestions.save.assert_awaited_once()
-    # Compensating Qdrant delete was called (both pre-emptive and rollback)
-    assert vector_repo.delete_chunks_by_parent_id.await_count >= 1
-    # Compensating SQL delete was called to rollback
-    uow.suggestions.delete.assert_awaited_once_with("sugg-101")
-
-
-@pytest.mark.asyncio
-async def test_compensating_deletion_failure_does_not_mask_qdrant_error(valid_dto):
-    uow = FakeUoW()
-    uow.suggestions.delete.side_effect = RuntimeError(
-        "Database connection dropped during rollback"
-    )
-    vector_repo = FakeVectorRepo(fail_upsert=True)
-
-    use_case = IngestSuggestionUseCase(
-        uow=uow,
-        normalizer=FakeNormalizer(),
-        chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
-    )
-
-    # Must raise original VectorStorageError, NOT the RuntimeError from compensation
-    with pytest.raises(VectorStorageError) as exc_info:
-        await use_case.execute(valid_dto)
-
-    assert "Qdrant cluster unavailable" in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_qdrant_cleanup_failure_does_not_block_sql_rollback(valid_dto):
-    uow = FakeUoW()
-    # Qdrant fails on upsert; pre-emptive delete succeeds, but compensating delete fails
-    vector_repo = FakeVectorRepo(fail_upsert=True)
-    vector_repo.delete_chunks_by_parent_id.side_effect = [
-        None,
-        VectorStorageError("Qdrant cluster unreachable for rollback delete"),
-    ]
-
-    use_case = IngestSuggestionUseCase(
-        uow=uow,
-        normalizer=FakeNormalizer(),
-        chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
-    )
-
-    with pytest.raises(VectorStorageError) as exc_info:
-        await use_case.execute(valid_dto)
-
-    # SQL rollback MUST still be called even if Qdrant cleanup fails
-    uow.suggestions.delete.assert_awaited_once_with("sugg-101")
-    assert "Qdrant cluster unavailable" in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_qdrant_activation_failure_triggers_compensation(valid_dto):
-    uow = FakeUoW()
-    # Upsert succeeds, but activation fails
-    vector_repo = FakeVectorRepo(fail_upsert=False, fail_activate=True)
-
-    use_case = IngestSuggestionUseCase(
-        uow=uow,
-        normalizer=FakeNormalizer(),
-        chunker=FakeChunker(),
-        embedding_service=HybridEmbeddingService(
-            FakeDenseEmbedder(), FakeSparseEmbedder()
-        ),
-        vector_repo=vector_repo,
-    )
-
-    with pytest.raises(VectorStorageError) as exc_info:
-        await use_case.execute(valid_dto)
-
-    assert "Qdrant payload activation failed" in str(exc_info.value)
-    # Both SQL and Qdrant compensation called
-    vector_repo.delete_chunks_by_parent_id.assert_awaited()
-    uow.suggestions.delete.assert_awaited_once_with("sugg-101")
+    assert response.suggestion_id == "sugg-101"
+    assert response.status == "CREATED"
+    assert len(uow.suggestions.saved_entities) == 1
+    assert uow.suggestions.saved_entities[0].version == 1
+    assert len(uow.outbox.saved_events) == 1
+    assert uow.committed is True

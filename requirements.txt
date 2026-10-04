@@ -73,3 +73,5 @@ openai>=1.60.0
 pymssql>=2.4.0
 tqdm>=4.67.0
 transformers==4.57.1
+arq==0.26.1
+redis==5.2.1

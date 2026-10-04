@@ -273,3 +273,21 @@ class RerankerProtocolError(RerankerBaseError):
 
 
 # endregion
+
+
+# region Task Queue Exceptions
+
+
+class TaskQueueError(ApplicationError):
+    """Base exception for asynchronous task queue failures."""
+
+    pass
+
+
+class CommandNotRegisteredError(TaskQueueError):
+    """Raised when an unregistered task name is dispatched to the background worker."""
+
+    pass
+
+
+# endregion

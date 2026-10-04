@@ -4,13 +4,26 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import ClassVar, Generic, TypeAlias, TypeVar, get_origin, get_type_hints
+from datetime import datetime, timezone
+from typing import (
+    Any,
+    ClassVar,
+    Generic,
+    TypeAlias,
+    TypeVar,
+    get_origin,
+    get_type_hints,
+)
+from uuid import UUID
 
 from src.domain.enums import (
     AuthorityLevel,
     ChunkStatus,
     CommitteeScrutiny,
     HistoryRole,
+    OutboxEventStatus,
+    OutboxEventType,
+    OutboxResourceType,
     RegulatoryDocumentType,
     SecretariatScrutiny,
     SuggestionChunkType,
@@ -227,6 +240,7 @@ class Chunk(Generic[TMetadata]):
     dense_vector: DenseVector | None = None
     sparse_vector: SparseVector | None = None
     chunk_status: ChunkStatus = ChunkStatus.ACTIVE
+    version: int = 1
 
     def __post_init__(self):
         if not self.chunk_id or not self.chunk_id.strip():
@@ -313,7 +327,10 @@ class ReferenceDetails:
             ):
                 continue
             if isinstance(declared_type, str) and declared_type.split("[")[0] in {
-                "ClassVar", "typing.ClassVar", "InitVar", "dataclasses.InitVar"
+                "ClassVar",
+                "typing.ClassVar",
+                "InitVar",
+                "dataclasses.InitVar",
             }:
                 continue
             try:
@@ -395,6 +412,38 @@ class GenerationChunk:
     reference: Reference | None = None
 
 
+@dataclass
+class OutboxEvent:
+    """Domain representation of a transactional outbox record."""
+
+    id: UUID
+    resource_type: OutboxResourceType
+    resource_id: str
+    event_type: OutboxEventType
+    version: int
+    payload: dict[str, Any]
+    status: OutboxEventStatus = OutboxEventStatus.PENDING
+    retry_count: int = 0
+    last_error: str | None = None
+    locked_at: datetime | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    processed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.resource_type, str) and not isinstance(
+            self.resource_type, OutboxResourceType
+        ):
+            self.resource_type = OutboxResourceType(self.resource_type)
+        if isinstance(self.event_type, str) and not isinstance(
+            self.event_type, OutboxEventType
+        ):
+            self.event_type = OutboxEventType(self.event_type)
+        if isinstance(self.status, str) and not isinstance(
+            self.status, OutboxEventStatus
+        ):
+            self.status = OutboxEventStatus(self.status)
+
+
 __all__ = [
     "ShamsiDate",
     "SuggestionContent",
@@ -416,5 +465,6 @@ __all__ = [
     "Reference",
     "GenerationChunk",
     "HistoryMessage",
+    "OutboxEvent",
     "NOISE_PLACEHOLDERS",
 ]

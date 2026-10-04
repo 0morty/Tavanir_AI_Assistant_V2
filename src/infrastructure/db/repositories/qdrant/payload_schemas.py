@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+
 from pydantic import BaseModel, ConfigDict
 
 from src.domain.entities import (
@@ -31,6 +33,7 @@ class BaseChunkPayloadDTO(BaseModel):
     parent_id: str
     content: str
     chunk_status: str = ChunkStatus.ACTIVE.value
+    version: int = 1
     parent_content: str | None = None
 
 
@@ -85,6 +88,7 @@ class SuggestionChunkPayloadDTO(BaseChunkPayloadDTO):
             content=chunk.content,
             parent_content=chunk.parent_content,
             chunk_status=chunk.chunk_status.value,
+            version=chunk.version,
             chunk_type=chunk.metadata.chunk_type.value,
             sub_index=chunk.metadata.sub_index,
             status=chunk.metadata.status.title_fa if chunk.metadata.status else None,
@@ -99,27 +103,19 @@ class SuggestionChunkPayloadDTO(BaseChunkPayloadDTO):
     def to_domain(self, score: float = 0.0) -> SuggestionSearchResult:
         com_enum: CommitteeScrutiny | None = None
         if self.committee_scrutiny_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 com_enum = CommitteeScrutiny.from_code(self.committee_scrutiny_id)
-            except Exception:
-                pass
         elif self.committee_scrutiny:
-            try:
+            with contextlib.suppress(Exception):
                 com_enum = CommitteeScrutiny.from_string(self.committee_scrutiny)
-            except Exception:
-                pass
 
         sec_enum: SecretariatScrutiny | None = None
         if self.secretariat_scrutiny_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 sec_enum = SecretariatScrutiny.from_code(self.secretariat_scrutiny_id)
-            except Exception:
-                pass
         elif self.secretariat_scrutiny:
-            try:
+            with contextlib.suppress(Exception):
                 sec_enum = SecretariatScrutiny.from_string(self.secretariat_scrutiny)
-            except Exception:
-                pass
 
         metadata = SuggestionChunkMetadata(
             chunk_type=SuggestionChunkType(self.chunk_type),
@@ -139,6 +135,7 @@ class SuggestionChunkPayloadDTO(BaseChunkPayloadDTO):
             metadata=metadata,
             parent_content=self.parent_content,
             chunk_status=ChunkStatus(self.chunk_status),
+            version=self.version,
         )
         return SearchResultChunk[SuggestionChunkMetadata](chunk=chunk, score=score)
 

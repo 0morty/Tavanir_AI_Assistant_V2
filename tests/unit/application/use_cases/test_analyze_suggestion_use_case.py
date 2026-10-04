@@ -11,12 +11,11 @@ from src.containers import Container
 
 from src.application.dtos import (
     AnalyzeSuggestionDTO,
-    AnalyzeSuggestionResponse,
-    GenerationResult,
-    SimilarSuggestionInput,
     GenerationInput,
+    GenerationResult,
     RerankCandidate,
     RerankedCandidate,
+    SimilarSuggestionInput,
 )
 from src.application.exceptions import (
     InsufficientEvidenceBudgetError,
@@ -30,9 +29,9 @@ from src.application.exceptions import (
     RerankerValidationError,
 )
 from src.application.interfaces import (
+    IGenerateSuggestionUseCase,
     IHybridEmbeddingService,
     IReranker,
-    IGenerateSuggestionUseCase,
     ITextNormalizer,
     IUnitOfWork,
 )
@@ -116,6 +115,10 @@ class FakeUoW(IUnitOfWork):
     def skipped_suggestions(self) -> AsyncMock:
         return AsyncMock()
 
+    @property
+    def outbox(self) -> AsyncMock:
+        return AsyncMock()
+
     async def commit(self) -> None:
         self.committed = True
 
@@ -173,7 +176,9 @@ def mock_uow(mock_suggestion_repo: ISuggestionRepository) -> IUnitOfWork:
 
 
 @pytest.fixture
-def mock_prompt_preparer(mock_generator: IGenerateSuggestionUseCase) -> IGenerateSuggestionUseCase:
+def mock_prompt_preparer(
+    mock_generator: IGenerateSuggestionUseCase,
+) -> IGenerateSuggestionUseCase:
     return mock_generator
 
 
@@ -1792,7 +1797,9 @@ async def test_analyze_suggestion_prompt_budget_exceeded_propagates(
         return_value=[_make_suggestion("SUG-1", SuggestionStatus.EXECUTED)]
     )
 
-    mock_generator.execute.side_effect = PromptBudgetExceededError("Fixed sections exceed budget.")
+    mock_generator.execute.side_effect = PromptBudgetExceededError(
+        "Fixed sections exceed budget."
+    )
 
     use_case = AnalyzeSuggestionUseCase(
         normalizer=mock_normalizer,
@@ -2014,8 +2021,9 @@ def test_analyze_suggestion_constructor_requires_generator(
 
 def test_container_resolves_analyze_suggestion_use_case_with_generator() -> None:
     from dependency_injector import providers
-    from src.application.interfaces import ILLMClient
     from src.domain.context.tokenizer import Tokenizer
+
+    from src.application.interfaces import ILLMClient
 
     class LocalFakeTokenizer(Tokenizer):
         @property
@@ -2091,7 +2099,9 @@ async def test_analyze_suggestion_empty_citations_yields_zero_grounding_ratio(
     mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
-    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"])
+    _setup_active_candidates(
+        mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"]
+    )
     mock_generator.execute.return_value = GenerationResult(
         answer="تحلیل بدون ارجاع",
         citations=[],
@@ -2120,12 +2130,28 @@ async def test_analyze_suggestion_all_evidence_cited_yields_perfect_grounding_ra
     mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
-    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"])
+    _setup_active_candidates(
+        mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"]
+    )
     mock_generator.execute.return_value = GenerationResult(
         answer="تحلیل با ارجاع کامل",
         citations=[
-            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
-            SimilarSuggestionInput(id="SUG-2", status=SuggestionStatus.EXECUTED, title="t2", problem="p2", solution="s2", similarity=0.9),
+            SimilarSuggestionInput(
+                id="SUG-1",
+                status=SuggestionStatus.EXECUTED,
+                title="t1",
+                problem="p1",
+                solution="s1",
+                similarity=1.0,
+            ),
+            SimilarSuggestionInput(
+                id="SUG-2",
+                status=SuggestionStatus.EXECUTED,
+                title="t2",
+                problem="p2",
+                solution="s2",
+                similarity=0.9,
+            ),
         ],
         uncertainty=None,
     )
@@ -2152,11 +2178,20 @@ async def test_analyze_suggestion_partial_citations_calculates_correct_rounded_r
     mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
-    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2", "SUG-3"])
+    _setup_active_candidates(
+        mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2", "SUG-3"]
+    )
     mock_generator.execute.return_value = GenerationResult(
         answer="تحلیل با ارجاع جزئی",
         citations=[
-            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
+            SimilarSuggestionInput(
+                id="SUG-1",
+                status=SuggestionStatus.EXECUTED,
+                title="t1",
+                problem="p1",
+                solution="s1",
+                similarity=1.0,
+            ),
         ],
         uncertainty=None,
     )
@@ -2183,13 +2218,36 @@ async def test_analyze_suggestion_duplicate_llm_citations_deduplicated_preservin
     mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
-    _setup_active_candidates(mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"])
+    _setup_active_candidates(
+        mock_vector_repo, mock_reranker, mock_uow, ["SUG-1", "SUG-2"]
+    )
     mock_generator.execute.return_value = GenerationResult(
         answer="تحلیل با ارجاعات تکراری",
         citations=[
-            SimilarSuggestionInput(id="SUG-2", status=SuggestionStatus.EXECUTED, title="t2", problem="p2", solution="s2", similarity=0.9),
-            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
-            SimilarSuggestionInput(id="SUG-2", status=SuggestionStatus.EXECUTED, title="t2", problem="p2", solution="s2", similarity=0.9),
+            SimilarSuggestionInput(
+                id="SUG-2",
+                status=SuggestionStatus.EXECUTED,
+                title="t2",
+                problem="p2",
+                solution="s2",
+                similarity=0.9,
+            ),
+            SimilarSuggestionInput(
+                id="SUG-1",
+                status=SuggestionStatus.EXECUTED,
+                title="t1",
+                problem="p1",
+                solution="s1",
+                similarity=1.0,
+            ),
+            SimilarSuggestionInput(
+                id="SUG-2",
+                status=SuggestionStatus.EXECUTED,
+                title="t2",
+                problem="p2",
+                solution="s2",
+                similarity=0.9,
+            ),
         ],
         uncertainty=None,
     )
@@ -2220,8 +2278,22 @@ async def test_analyze_suggestion_unretrieved_citation_ids_isolated_and_filtered
     mock_generator.execute.return_value = GenerationResult(
         answer="تحلیل با ارجاع ساختگی",
         citations=[
-            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
-            SimilarSuggestionInput(id="HALLUCINATED-999", status=SuggestionStatus.EXECUTED, title="fake", problem="fake", solution="fake", similarity=0.5),
+            SimilarSuggestionInput(
+                id="SUG-1",
+                status=SuggestionStatus.EXECUTED,
+                title="t1",
+                problem="p1",
+                solution="s1",
+                similarity=1.0,
+            ),
+            SimilarSuggestionInput(
+                id="HALLUCINATED-999",
+                status=SuggestionStatus.EXECUTED,
+                title="fake",
+                problem="fake",
+                solution="fake",
+                similarity=0.5,
+            ),
         ],
         uncertainty=None,
     )
@@ -2253,7 +2325,14 @@ async def test_analyze_suggestion_citation_type_safety_filters_non_suggestion_ch
         answer="تحلیل با انواع مختلف ارجاع",
         citations=[
             cast(Any, "raw-string-citation"),
-            SimilarSuggestionInput(id="SUG-1", status=SuggestionStatus.EXECUTED, title="t1", problem="p1", solution="s1", similarity=1.0),
+            SimilarSuggestionInput(
+                id="SUG-1",
+                status=SuggestionStatus.EXECUTED,
+                title="t1",
+                problem="p1",
+                solution="s1",
+                similarity=1.0,
+            ),
         ],
         uncertainty=None,
     )
@@ -2317,9 +2396,18 @@ async def test_analyze_suggestion_rrf_fallback_preserved_when_zero_db_records_su
     mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
-    hit = _make_search_result("c-1", "SUG-1", "sol", SuggestionChunkType.SOLUTION, SuggestionStatus.EXECUTED, 0.9)
+    hit = _make_search_result(
+        "c-1",
+        "SUG-1",
+        "sol",
+        SuggestionChunkType.SOLUTION,
+        SuggestionStatus.EXECUTED,
+        0.9,
+    )
     mock_vector_repo.search_suggestions = AsyncMock(return_value=[hit])
-    mock_reranker.rerank = AsyncMock(side_effect=RerankerConnectionError("TEI unreachable"))
+    mock_reranker.rerank = AsyncMock(
+        side_effect=RerankerConnectionError("TEI unreachable")
+    )
     mock_uow.suggestions.get_by_ids = AsyncMock(return_value=[])
 
     use_case = AnalyzeSuggestionUseCase(
@@ -2332,7 +2420,9 @@ async def test_analyze_suggestion_rrf_fallback_preserved_when_zero_db_records_su
     )
     res = await use_case.execute(valid_dto)
     assert res.is_fallback_mode is True
-    assert res.uncertainty == "هیچ سابقه سازمانی مرتبطی برای ارزیابی این پیشنهاد یافت نشد."
+    assert (
+        res.uncertainty == "هیچ سابقه سازمانی مرتبطی برای ارزیابی این پیشنهاد یافت نشد."
+    )
     assert res.grounding_ratio == 0.0
     mock_generator.execute.assert_not_awaited()
 
@@ -2347,10 +2437,21 @@ async def test_analyze_suggestion_rrf_fallback_propagates_to_successful_generati
     mock_generator: IGenerateSuggestionUseCase,
     valid_dto: AnalyzeSuggestionDTO,
 ) -> None:
-    hit = _make_search_result("c-1", "SUG-1", "sol", SuggestionChunkType.SOLUTION, SuggestionStatus.EXECUTED, 0.9)
+    hit = _make_search_result(
+        "c-1",
+        "SUG-1",
+        "sol",
+        SuggestionChunkType.SOLUTION,
+        SuggestionStatus.EXECUTED,
+        0.9,
+    )
     mock_vector_repo.search_suggestions = AsyncMock(return_value=[hit])
-    mock_reranker.rerank = AsyncMock(side_effect=RerankerConnectionError("TEI unreachable"))
-    mock_uow.suggestions.get_by_ids = AsyncMock(return_value=[_make_suggestion("SUG-1", SuggestionStatus.EXECUTED)])
+    mock_reranker.rerank = AsyncMock(
+        side_effect=RerankerConnectionError("TEI unreachable")
+    )
+    mock_uow.suggestions.get_by_ids = AsyncMock(
+        return_value=[_make_suggestion("SUG-1", SuggestionStatus.EXECUTED)]
+    )
 
     use_case = AnalyzeSuggestionUseCase(
         normalizer=mock_normalizer,

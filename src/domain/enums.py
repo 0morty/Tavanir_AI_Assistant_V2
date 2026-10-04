@@ -225,3 +225,38 @@ class OverflowStrategy(str, Enum):
 class AuthorityLevel(str, Enum):
     BINDING = "binding"  # الزامی
     GUIDANCE = "guidance"  # ارشادی / توصیه‌ای
+
+
+class OutboxResourceType(str, Enum):
+    """Resource domain types managed by transactional outbox."""
+
+    SUGGESTION = "SUGGESTION"
+    STATUTE = "STATUTE"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class OutboxEventType(str, Enum):
+    """Supported outbox event types dispatched to asynchronous projection handlers."""
+
+    SUGGESTION_INGESTED = "SUGGESTION_INGESTED"
+    SUGGESTION_UPDATED = "SUGGESTION_UPDATED"
+    SUGGESTION_DELETED = "SUGGESTION_DELETED"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class OutboxEventStatus(str, Enum):
+    """Lifecycle statuses for outbox events."""
+
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    SUPERSEDED = "SUPERSEDED"
+    DEAD_LETTER = "DEAD_LETTER"
+
+    def __str__(self) -> str:
+        return self.value

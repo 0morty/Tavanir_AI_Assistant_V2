@@ -3,6 +3,7 @@ from src.domain.interfaces.i_chunking_strategy import (
     IRegulatoryChunker,
     ISuggestionChunker,
 )
+from src.domain.interfaces.i_outbox_repository import IOutboxRepository
 from src.domain.interfaces.i_regulatory_vector_repository import (
     IRegulatoryVectorRepository,
 )
@@ -20,4 +21,5 @@ __all__ = [
     "ISuggestionVectorRepository",
     "IRegulatoryVectorRepository",
     "ISuggestionRepository",
+    "IOutboxRepository",
 ]

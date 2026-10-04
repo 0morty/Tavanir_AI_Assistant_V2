@@ -552,5 +552,73 @@ class QdrantBaseVectorRepository(IVectorRepository[TMetadata], ABC):
                 f"Failed to delete superseded chunks for parent_id='{parent_id}': {e}"
             ) from e
 
+    async def activate_version_chunks(
+        self, parent_id: str, target_version: int
+    ) -> None:
+        """
+        Promotes chunks to ACTIVE strictly where parent_id = parent_id and version == target_version.
+        Idempotent: repeating cutover will never demote active target version points.
+        """
+        try:
+            await self._client.set_payload(
+                collection_name=self._collection_name,
+                payload={"chunk_status": ChunkStatus.ACTIVE.value},
+                points=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="parent_id", match=models.MatchValue(value=parent_id)
+                        ),
+                        models.FieldCondition(
+                            key="version", match=models.MatchValue(value=target_version)
+                        ),
+                    ]
+                ),
+            )
+            logger.debug(
+                f"Activated version {target_version} chunks for parent_id='{parent_id}' in '{self._collection_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to activate version {target_version} chunks for parent_id='{parent_id}' in '{self._collection_name}': {e}",
+                exc_info=True,
+            )
+            raise VectorStorageError(
+                f"Failed to activate version {target_version} chunks for parent_id='{parent_id}': {e}"
+            ) from e
+
+    async def delete_obsolete_version_chunks(
+        self, parent_id: str, max_version_exclusive: int
+    ) -> None:
+        """
+        Deletes chunks where parent_id = parent_id and version < max_version_exclusive.
+        """
+        try:
+            qdrant_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="parent_id", match=models.MatchValue(value=parent_id)
+                    ),
+                    models.FieldCondition(
+                        key="version",
+                        range=models.Range(lt=float(max_version_exclusive)),
+                    ),
+                ]
+            )
+            await self._client.delete(
+                collection_name=self._collection_name,
+                points_selector=models.FilterSelector(filter=qdrant_filter),
+            )
+            logger.debug(
+                f"Deleted chunks with version < {max_version_exclusive} for parent_id='{parent_id}' from '{self._collection_name}'"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to delete obsolete version chunks for parent_id='{parent_id}': {e}",
+                exc_info=True,
+            )
+            raise VectorStorageError(
+                f"Failed to delete obsolete version chunks for parent_id='{parent_id}': {e}"
+            ) from e
+
 
 __all__ = ["QdrantBaseVectorRepository"]

@@ -1,8 +1,12 @@
-from src.application.context.sections import CompressibleSection, ReferencedCollectionSection
+from src.application.context.sections import (
+    CompressibleSection,
+    ReferencedCollectionSection,
+)
 from src.application.context.sections.output_format_section import OutputFormatSection
 from src.domain.context.tokenizer import Tokenizer
-from src.domain.entities import GenerationChunk, Reference
 from src.infrastructure.services.summarizers import FakeSummarizer
+
+from src.domain.entities import GenerationChunk, Reference
 
 
 class FakeTokenizer(Tokenizer):
@@ -18,6 +22,9 @@ class FakeTokenizer(Tokenizer):
 
 
 class PlainCollectionSection(ReferencedCollectionSection):
+    def __init__(self, *args, cite_items: bool = False, **kwargs) -> None:
+        super().__init__(*args, cite_items=cite_items, **kwargs)
+
     @property
     def section_type(self) -> str:
         return "TEST-COLLECTION"
@@ -33,13 +40,18 @@ class FluentReference(Reference):
 
 
 def _chunks(*contents: str) -> list[GenerationChunk]:
-    return [GenerationChunk(str(index), content) for index, content in enumerate(contents)]
+    return [
+        GenerationChunk(str(index), content) for index, content in enumerate(contents)
+    ]
 
 
 def test_plain_text_within_capacity_is_returned_unchanged():
     section = OutputFormatSection("short content")
     prepared = section.prepare()
-    assert section.truncate(prepared, 100, tokenizer=FakeTokenizer()).content == "short content"
+    assert (
+        section.truncate(prepared, 100, tokenizer=FakeTokenizer()).content
+        == "short content"
+    )
     assert section.prepare() == prepared
 
 
@@ -52,11 +64,16 @@ def test_plain_text_exceeding_capacity_is_truncated():
 
 
 def test_plain_text_truncate_empty_or_zero_capacity():
-    assert OutputFormatSection("").truncate(
-        OutputFormatSection("").prepare(), 100, tokenizer=FakeTokenizer()
-    ).content == ""
+    assert (
+        OutputFormatSection("")
+        .truncate(OutputFormatSection("").prepare(), 100, tokenizer=FakeTokenizer())
+        .content
+        == ""
+    )
     section = OutputFormatSection("abcdef")
-    assert section.truncate(section.prepare(), 0, tokenizer=FakeTokenizer()).content == ""
+    assert (
+        section.truncate(section.prepare(), 0, tokenizer=FakeTokenizer()).content == ""
+    )
 
 
 def test_plain_text_summarize_delegates_to_summarizer():
@@ -95,7 +112,8 @@ def test_collection_summarize_processes_items_independently():
     result = section.summarize(prepared, 30)
     assert result.content == "[fake-summarizer-output]\n\n[fake-summarizer-output]"
     assert [item.content for item in result.items] == [
-        "[fake-summarizer-output]", "[fake-summarizer-output]"
+        "[fake-summarizer-output]",
+        "[fake-summarizer-output]",
     ]
     assert [item.content for item in section.items] == ["ab", "cd"]
 

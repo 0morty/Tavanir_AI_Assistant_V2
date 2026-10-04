@@ -1,0 +1,68 @@
+# Always use the test configuration explicitly:
+# docker compose --env-file .env.test -f docker-compose.test.yaml up -d --wait
+name: tavanir-tests
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    labels:
+      tavanir.environment: test
+    ports:
+      - "127.0.0.1:${TEST_POSTGRES_PORT:-7442}:5432"
+    environment:
+      POSTGRES_USER: test_admin
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_ADMIN_PASSWORD:?Set TEST_POSTGRES_ADMIN_PASSWORD in .env.test}
+      POSTGRES_DB: ${TEST_POSTGRES_DB:-tavanir_test_db}
+      TEST_POSTGRES_USERNAME: ${TEST_POSTGRES_USERNAME:-tavanir_test}
+      TEST_POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:?Set TEST_POSTGRES_PASSWORD in .env.test}
+      TEST_ENVIRONMENT_ID: ${TEST_ENVIRONMENT_ID:?Set TEST_ENVIRONMENT_ID in .env.test}
+    volumes:
+      - postgres_test_storage:/var/lib/postgresql/data
+      - ./tests/support/init_test_postgres.sh:/docker-entrypoint-initdb.d/10-test-environment.sh:ro
+    networks:
+      - test_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_admin -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  qdrant:
+    image: qdrant/qdrant:v1.17.1
+    restart: "no"
+    labels:
+      tavanir.environment: test
+    ports:
+      - "127.0.0.1:${TEST_QDRANT_PORT:-7343}:6333"
+      - "127.0.0.1:${TEST_QDRANT_GRPC_PORT:-7344}:6334"
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__API_KEY: ${TEST_QDRANT_API_KEY:?Set TEST_QDRANT_API_KEY in .env.test}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant_test_storage:/qdrant/storage
+    networks:
+      - test_network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333 && echo -e \"GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && cat <&3 | grep -q \"200 OK\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+networks:
+  test_network:
+    driver: bridge
+    labels:
+      tavanir.environment: test
+
+volumes:
+  postgres_test_storage:
+    labels:
+      tavanir.environment: test
+  qdrant_test_storage:
+    labels:
+      tavanir.environment: test

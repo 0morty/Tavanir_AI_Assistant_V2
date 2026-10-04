@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from src.application.interfaces.i_skipped_suggestion_repository import (
         ISkippedSuggestionRepository,
     )
+    from src.domain.interfaces.i_outbox_repository import IOutboxRepository
     from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
 
 
@@ -49,6 +50,12 @@ class IUnitOfWork(ABC):
     @abstractmethod
     def skipped_suggestions(self) -> ISkippedSuggestionRepository:
         """Skipped suggestions repository port bound to this transactional boundary."""
+        pass
+
+    @property
+    @abstractmethod
+    def outbox(self) -> IOutboxRepository:
+        """Outbox repository port bound to this transactional boundary."""
         pass
 
     @abstractmethod

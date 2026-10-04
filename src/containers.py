@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable
 
 import httpx
+from arq.connections import ArqRedis
 from dependency_injector import containers, providers
 from openai import AsyncOpenAI
 from qdrant_client import AsyncQdrantClient
@@ -32,6 +33,7 @@ from src.application.interfaces import (
     IReranker,
     ISparseEmbedder,
     ISuggestionPromptPreparer,
+    ITaskQueueService,
     ITemplateValidator,
     ITextNormalizer,
     ITextSummarizer,
@@ -49,12 +51,19 @@ from src.application.reference.deterministic_reference_generator import (
 from src.application.reference.reference_cache import ReferenceCache
 from src.application.reference.template_validator import TemplateValidator
 from src.application.services import HybridEmbeddingService
+from src.application.services.outbox import OutboxHandlerRegistry
+from src.application.services.outbox.handlers import (
+    IngestSuggestionVectorsHandler,
+    PurgeSuggestionVectorsHandler,
+    UpdateSuggestionVectorsHandler,
+)
 from src.application.use_cases import (
     AnalyzeSuggestionUseCase,
     BulkDeleteSuggestionsUseCase,
     DeleteSuggestionUseCase,
     ExtractAndIngestHistoricalSuggestionsUseCase,
     IngestSuggestionUseCase,
+    ProcessOutboxEventUseCase,
     UpdateSuggestionUseCase,
 )
 from src.application.use_cases.generate_suggestion_use_case import (
@@ -68,6 +77,7 @@ from src.domain.interfaces import (
 )
 from src.infrastructure.configs.llm_provider_configs import AsyncOpenAIClientFactory
 from src.infrastructure.configs.settings import (
+    RedisSettings,
     bm25_settings,
     db_settings,
     embedding_settings,
@@ -75,6 +85,7 @@ from src.infrastructure.configs.settings import (
     historical_ingestion_settings,
     mssql_settings,
     qdrant_settings,
+    redis_settings,
     reranker_settings,
     suggestion_analysis_settings,
 )
@@ -87,6 +98,7 @@ from src.infrastructure.db.repositories import (
     QdrantRegulatoryRepository,
     QdrantSuggestionRepository,
     SqlCheckpointRepository,
+    SqlOutboxRepository,
     SqlSkippedSuggestionRepository,
     SqlSuggestionRepository,
 )
@@ -104,10 +116,30 @@ from src.infrastructure.services.llm.output_parser import GenerationOutputParser
 from src.infrastructure.services.qdrant import QdrantAdminService
 from src.infrastructure.services.reranker import TEIReranker
 from src.infrastructure.services.summarizers import LLMChunkSummarizer, LLMSummarizer
+from src.infrastructure.services.task_queue import ArqTaskQueueService
 from src.infrastructure.services.text_processing.shekar_text_normalizer import (
     ShekarTextNormalizer,
 )
 from src.infrastructure.services.tokenizers.qwen_tokenizer import QwenTokenizer
+
+
+async def init_arq_redis_pool(
+    settings: RedisSettings,
+) -> AsyncGenerator[ArqRedis, None]:
+    """Initializes the ArqRedis connection pool and guarantees clean closure on teardown."""
+    from arq import create_pool
+    from arq.connections import RedisSettings as ArqRedisSettings
+
+    pool = await create_pool(
+        ArqRedisSettings(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            password=settings.REDIS_PASSWORD or None,
+            database=settings.REDIS_DB,
+        )
+    )
+    yield pool
+    await pool.close()
 
 
 async def init_client_registry(
@@ -328,6 +360,7 @@ class Container(containers.DeclarativeContainer):
         suggestion_repo_factory=providers.Object(SqlSuggestionRepository),
         checkpoint_repo_factory=providers.Object(SqlCheckpointRepository),
         skipped_repo_factory=providers.Object(SqlSkippedSuggestionRepository),
+        outbox_repo_factory=providers.Object(SqlOutboxRepository),
     )
 
     # 10. Suggestion Chunker Strategy
@@ -335,19 +368,29 @@ class Container(containers.DeclarativeContainer):
         FieldAwareSuggestionChunker
     )
 
-    # 11. Suggestion Ingestion Use Case
+    # 11. Asynchronous Task Queue Infrastructure & Port
+    arq_redis_pool = providers.Resource(
+        init_arq_redis_pool,
+        settings=redis_settings,
+    )
+
+    task_queue_service: providers.Provider[ITaskQueueService] = providers.Singleton(
+        ArqTaskQueueService,
+        pool=arq_redis_pool,
+    )
+
+    # 12. Suggestion Ingestion Use Case
     ingest_suggestion_use_case: providers.Provider[IngestSuggestionUseCase] = (
         providers.Factory(
             IngestSuggestionUseCase,
             uow=unit_of_work,
             normalizer=text_normalizer,
             chunker=suggestion_chunker,
-            embedding_service=hybrid_embedding_service,
-            vector_repo=suggestion_vector_repository,
+            task_queue=task_queue_service,
         )
     )
 
-    # 12. Historical Suggestion Extractor
+    # 13. Historical Suggestion Extractor
     historical_extractor: providers.Provider[IHistoricalSuggestionExtractor] = (
         providers.Singleton(
             MssqlSuggestionExtractor,
@@ -355,7 +398,7 @@ class Container(containers.DeclarativeContainer):
         )
     )
 
-    # 13. Historical Suggestion Ingestion Use Case
+    # 14. Historical Suggestion Ingestion Use Case
     extract_and_ingest_historical_suggestions_use_case: providers.Provider[
         ExtractAndIngestHistoricalSuggestionsUseCase
     ] = providers.Factory(
@@ -369,24 +412,23 @@ class Container(containers.DeclarativeContainer):
         job_name=historical_ingestion_settings.CHECKPOINT_JOB_NAME,
     )
 
-    # 14. Suggestion Update Use Case
+    # 15. Suggestion Update Use Case
     update_suggestion_use_case: providers.Provider[UpdateSuggestionUseCase] = (
         providers.Factory(
             UpdateSuggestionUseCase,
             uow=unit_of_work,
             normalizer=text_normalizer,
             chunker=suggestion_chunker,
-            embedding_service=hybrid_embedding_service,
-            vector_repo=suggestion_vector_repository,
+            task_queue=task_queue_service,
         )
     )
 
-    # 15. Suggestion Delete Use Case
+    # 16. Suggestion Delete Use Case
     delete_suggestion_use_case: providers.Provider[DeleteSuggestionUseCase] = (
         providers.Factory(
             DeleteSuggestionUseCase,
             uow=unit_of_work,
-            vector_repo=suggestion_vector_repository,
+            task_queue=task_queue_service,
         )
     )
 
@@ -396,6 +438,53 @@ class Container(containers.DeclarativeContainer):
     ] = providers.Factory(
         BulkDeleteSuggestionsUseCase,
         delete_use_case=delete_suggestion_use_case,
+    )
+
+    # 17. Outbox Handlers and Orchestrator
+    ingest_outbox_handler: providers.Provider[IngestSuggestionVectorsHandler] = (
+        providers.Singleton(
+            IngestSuggestionVectorsHandler,
+            chunker=suggestion_chunker,
+            embedding_service=hybrid_embedding_service,
+            vector_repo=suggestion_vector_repository,
+            normalizer=text_normalizer,
+        )
+    )
+    update_outbox_handler: providers.Provider[UpdateSuggestionVectorsHandler] = (
+        providers.Singleton(
+            UpdateSuggestionVectorsHandler,
+            chunker=suggestion_chunker,
+            embedding_service=hybrid_embedding_service,
+            vector_repo=suggestion_vector_repository,
+            normalizer=text_normalizer,
+        )
+    )
+    purge_outbox_handler: providers.Provider[PurgeSuggestionVectorsHandler] = (
+        providers.Singleton(
+            PurgeSuggestionVectorsHandler,
+            vector_repo=suggestion_vector_repository,
+        )
+    )
+
+    outbox_handler_registry: providers.Provider[OutboxHandlerRegistry] = (
+        providers.Singleton(
+            OutboxHandlerRegistry,
+            handlers=providers.Dict(
+                {
+                    "SUGGESTION_INGESTED": ingest_outbox_handler,
+                    "SUGGESTION_UPDATED": update_outbox_handler,
+                    "SUGGESTION_DELETED": purge_outbox_handler,
+                }
+            ),
+        )
+    )
+
+    process_outbox_event_use_case: providers.Provider[ProcessOutboxEventUseCase] = (
+        providers.Factory(
+            ProcessOutboxEventUseCase,
+            uow=unit_of_work,
+            registry=outbox_handler_registry,
+        )
     )
 
     # 9. Generation Context Allocation Engine

@@ -90,6 +90,7 @@ def pool_and_partition_candidates(
             winning_score=winning_score,
             winning_content=winning_result.chunk.content,
             all_matched_chunk_types=tuple(matched_types),
+            version=getattr(winning_result.chunk, "version", 1),
         )
         partitions[status].append(candidate)
 

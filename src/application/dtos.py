@@ -159,6 +159,7 @@ class PooledSuggestionCandidate:
     winning_score: float
     winning_content: str
     all_matched_chunk_types: tuple[SuggestionChunkType, ...]
+    version: int = 1
 
 
 @dataclass(frozen=True)

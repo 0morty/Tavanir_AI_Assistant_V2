@@ -16,6 +16,7 @@ from src.application.interfaces.i_hybrid_embedding_service import (
 )
 from src.application.interfaces.i_llm_client import ILLMClient
 from src.application.interfaces.i_llm_request_builder import ILLMRequestBuilder
+from src.application.interfaces.i_outbox_event_handler import IOutboxEventHandler
 from src.application.interfaces.i_overflow_strategy_dispatcher import (
     IOverflowStrategyDispatcher,
 )
@@ -33,6 +34,7 @@ from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
 from src.application.interfaces.i_suggestion_prompt_preparer import (
     ISuggestionPromptPreparer,
 )
+from src.application.interfaces.i_task_queue_service import ITaskQueueService
 from src.application.interfaces.i_template_validator import ITemplateValidator
 from src.application.interfaces.i_text_normalizer import ITextNormalizer
 from src.application.interfaces.i_text_summarizer import ITextSummarizer
@@ -53,6 +55,7 @@ __all__ = [
     "IReferenceGenerator",
     "ISparseEmbedder",
     "ISuggestionPromptPreparer",
+    "ITaskQueueService",
     "ITemplateValidator",
     "ITextNormalizer",
     "ITextSummarizer",
@@ -65,4 +68,5 @@ __all__ = [
     "IChunkEmbeddingService",
     "IUnitOfWork",
     "IReranker",
+    "IOutboxEventHandler",
 ]

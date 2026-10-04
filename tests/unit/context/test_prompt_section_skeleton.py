@@ -5,12 +5,13 @@ from src.application.context.sections.history_section import HistorySection
 from src.application.context.sections.referenced_collection_section import (
     ReferencedCollectionSection,
 )
-from src.application.interfaces import IPromptSection
 from src.domain.context.tokenizer import Tokenizer
-from src.domain.entities import GenerationChunk, HistoryMessage
-from src.domain.enums import HistoryRole, OverflowStrategy
 from src.domain.overflow_strategy_stack import OverflowStrategyStack
 from src.infrastructure.services.summarizers import FakeSummarizer
+
+from src.application.interfaces import IPromptSection
+from src.domain.entities import GenerationChunk, HistoryMessage
+from src.domain.enums import HistoryRole, OverflowStrategy
 
 
 class FakeTokenizer(Tokenizer):
@@ -39,6 +40,9 @@ class PlainTextSection(PromptSection):
 
 
 class TaggedSection(ReferencedCollectionSection):
+    def __init__(self, *args, cite_items: bool = False, **kwargs) -> None:
+        super().__init__(*args, cite_items=cite_items, **kwargs)
+
     @property
     def section_type(self) -> str:
         return "TAGGED"
@@ -58,7 +62,10 @@ def test_skeleton_implements_compressible_plain_text_defaults():
     section = PlainTextSection("abcdefghij", summarizer=FakeSummarizer())
     assert isinstance(section, (PromptSection, IPromptSection, CompressibleSection))
     prepared = section.prepare()
-    assert section.truncate(prepared, 100, tokenizer=FakeTokenizer()).content == "abcdefghij"
+    assert (
+        section.truncate(prepared, 100, tokenizer=FakeTokenizer()).content
+        == "abcdefghij"
+    )
     assert section.truncate(prepared, 3, tokenizer=FakeTokenizer()).content == "abc"
     assert section.summarize(prepared, 3).content == "[fake-summarizer-output]"
     assert section.ignore(prepared, 3, tokenizer=FakeTokenizer()) is None
@@ -70,20 +77,31 @@ def test_dispatch_honours_configured_strategy_priority():
     section = PlainTextSection("abcdefghij", overflow_strategies=stack)
     prepared = section.prepare()
     dispatcher = OverflowStrategyDispatcher()
-    assert dispatcher.apply(
-        section, OverflowStrategy.IGNORE, prepared, 3, tokenizer=FakeTokenizer()
-    ) is None
-    assert dispatcher.apply(
-        section, OverflowStrategy.TRUNCATE, prepared, 3, tokenizer=FakeTokenizer()
-    ).content == "abc"
+    assert (
+        dispatcher.apply(
+            section, OverflowStrategy.IGNORE, prepared, 3, tokenizer=FakeTokenizer()
+        )
+        is None
+    )
+    assert (
+        dispatcher.apply(
+            section, OverflowStrategy.TRUNCATE, prepared, 3, tokenizer=FakeTokenizer()
+        ).content
+        == "abc"
+    )
 
 
 def test_referenced_section_inherits_single_text_defaults():
-    from src.application.context.sections.output_format_section import OutputFormatSection
+    from src.application.context.sections.output_format_section import (
+        OutputFormatSection,
+    )
 
     section = OutputFormatSection("abcdefghij")
     assert isinstance(section, CompressibleSection)
-    assert section.truncate(section.prepare(), 3, tokenizer=FakeTokenizer()).content == "abc"
+    assert (
+        section.truncate(section.prepare(), 3, tokenizer=FakeTokenizer()).content
+        == "abc"
+    )
 
 
 def test_render_still_frames_running_through_base_compose():

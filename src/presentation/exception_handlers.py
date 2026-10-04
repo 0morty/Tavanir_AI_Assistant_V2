@@ -20,6 +20,7 @@ from src.application.exceptions import (
     ApplicationAPIError,
     ApplicationError,
     ChunkSummarizationError,
+    CommandNotRegisteredError,
     DuplicateEvidenceIdError,
     EmbedderAPIError,
     EmbedderAuthenticationError,
@@ -46,6 +47,7 @@ from src.application.exceptions import (
     RerankerProtocolError,
     RerankerValidationError,
     SparseEmbedderError,
+    TaskQueueError,
     TextNormalizationError,
     TokenizerError,
 )
@@ -291,6 +293,16 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
     TokenizerError: ErrorSpec(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         code="TOKENIZATION_FAILED",
+        default_pointer=None,
+    ),
+    TaskQueueError: ErrorSpec(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        code="TASK_QUEUE_ERROR",
+        default_pointer=None,
+    ),
+    CommandNotRegisteredError: ErrorSpec(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="COMMAND_NOT_REGISTERED",
         default_pointer=None,
     ),
     # --- Reranker Exceptions ---

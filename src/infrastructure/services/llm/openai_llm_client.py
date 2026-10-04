@@ -1,7 +1,7 @@
 import asyncio
 import threading
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from openai import AsyncOpenAI, NotFoundError
 
@@ -159,7 +159,7 @@ class OpenAILLMClient(BaseOpenAIService, ILLMClient):
             try:
                 data = await self._client.post(
                     _BATCH_PATH,
-                    cast_to=dict,
+                    cast_to=dict[str, Any],
                     body={
                         "model": self._model,
                         "messages": [

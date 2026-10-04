@@ -1,53 +1,35 @@
+from __future__ import annotations
+
+from uuid import uuid4
+
 import structlog
 
 from src.application.dtos import CreateSuggestionDTO, IngestSuggestionResponseDTO
-from src.application.interfaces import IUnitOfWork
-from src.application.interfaces.i_hybrid_embedding_service import (
-    IHybridEmbeddingService,
-)
-from src.application.interfaces.i_text_normalizer import ITextNormalizer
+from src.application.interfaces import ITaskQueueService, ITextNormalizer, IUnitOfWork
 from src.application.services.suggestion_normalizer import normalize_suggestion
 from src.domain.entities import (
     CommitteeEvaluation,
+    OutboxEvent,
     SecretariatEvaluation,
     ShamsiDate,
     Suggestion,
     SuggestionContent,
 )
-from src.domain.enums import ChunkStatus
+from src.domain.enums import OutboxEventType, OutboxResourceType
 from src.domain.exceptions import (
     SuggestionAlreadyExistsError,
     SuggestionChunkingError,
 )
-from src.domain.interfaces import (
-    ISuggestionChunker,
-    ISuggestionVectorRepository,
-)
+from src.domain.interfaces import ISuggestionChunker
 
 logger = structlog.get_logger(__name__)
 
 
 class IngestSuggestionUseCase:
     """
-    Orchestrates the synchronous ingestion pipeline for employee suggestions (ADR-001, ADR-002).
-
-    Pipeline Flow:
-    1. Pre-check idempotency/conflict via short-lived UoW (raises SuggestionAlreadyExistsError).
-       Acts as strict gatekeeper to guarantee no healthy data is ever purged from Qdrant.
-    2. Construct domain entity & validate domain invariants (raises InvalidSuggestionContentError).
-    3. Normalize Persian text across all fields.
-    4. Decompose suggestion into field-isolated child chunks (TITLE, PROBLEM, SOLUTION, EVALUATION)
-       and tag them with ChunkStatus.STAGING.
-    5. Compute dense and sparse embeddings concurrently via IHybridEmbeddingService.
-    6. Pattern A Persistence with Staging Lifecycle:
-       a. Fast PostgreSQL persistence via short-lived UoW.
-       b. Guarded Qdrant execution:
-          - Pre-emptive purge of residual chunks from previous crashed attempts.
-          - Batch upsert of chunks in STAGING status.
-          - Atomic promotion from STAGING to ACTIVE.
-       c. If Qdrant fails at any point:
-          - Best-effort compensating deletion in Qdrant.
-          - Guarded compensating SQL deletion to maintain dual-write consistency.
+    Orchestrates ingestion of employee suggestions via Transactional Outbox (ADR-001, ADR-002).
+    Saves suggestion entity and appends SUGGESTION_INGESTED outbox event in a single
+    atomic PostgreSQL transaction, eliminating dual-write compensation failures (F-08 & F-09).
     """
 
     def __init__(
@@ -55,17 +37,15 @@ class IngestSuggestionUseCase:
         uow: IUnitOfWork,
         normalizer: ITextNormalizer,
         chunker: ISuggestionChunker,
-        embedding_service: IHybridEmbeddingService,
-        vector_repo: ISuggestionVectorRepository,
+        task_queue: ITaskQueueService,
     ) -> None:
         self._uow = uow
         self._normalizer = normalizer
         self._chunker = chunker
-        self._embedding_service = embedding_service
-        self._vector_repo = vector_repo
+        self._task_queue = task_queue
 
     async def execute(self, dto: CreateSuggestionDTO) -> IngestSuggestionResponseDTO:
-        # Step 1: Pre-check duplicate existence (Gatekeeper: protects healthy suggestions and soft-deleted records)
+        # Step 1: Pre-check duplicate existence within transaction (Gatekeeper)
         async with self._uow as uow:
             existing = await uow.suggestions.get_by_id(
                 dto.suggestion_id, include_deleted=True
@@ -109,88 +89,64 @@ class IngestSuggestionUseCase:
             date=date,
             context_title=dto.context_title,
             secretariat_evaluation=secretariat_evaluation,
+            is_deleted=False,
+            version=1,
         )
 
         # Step 3: Normalize Persian text
         normalized_suggestion = normalize_suggestion(raw_suggestion, self._normalizer)
 
-        # Step 4: Decompose into field-isolated chunks and tag with STAGING status
+        # Step 4: Validate chunking decomposes cleanly in-memory
         chunks = await self._chunker.chunk(normalized_suggestion)
         if not chunks:
             raise SuggestionChunkingError(
                 f"Chunking produced 0 chunks for suggestion '{dto.suggestion_id}'."
             )
-        for chunk in chunks:
-            chunk.chunk_status = ChunkStatus.STAGING
+        chunks_count = len(chunks)
 
-        # Step 5: Generate dense and sparse embeddings concurrently
-        await self._embedding_service.embed_chunks(chunks)
+        # Step 5: Single Atomic PostgreSQL Transaction (Entity + Outbox)
+        event_id = uuid4()
+        event = OutboxEvent(
+            id=event_id,
+            resource_type=OutboxResourceType.SUGGESTION,
+            resource_id=dto.suggestion_id,
+            event_type=OutboxEventType.SUGGESTION_INGESTED,
+            version=normalized_suggestion.version,
+            payload={
+                "suggestion_id": dto.suggestion_id,
+                "version": normalized_suggestion.version,
+            },
+        )
 
-        # Step 6: Pattern A Persistence with Staging Lifecycle
-        # 6a. Persist to PostgreSQL via short-lived UoW
         async with self._uow as uow:
             await uow.suggestions.save(normalized_suggestion)
+            await uow.outbox.append(event)
             await uow.commit()
 
-        # 6b. Guarded Qdrant Operations (Purge residual -> Upsert STAGING -> Promote ACTIVE)
+        # Step 6: Asynchronous Dispatch via ARQ (fire-and-forget buffer)
         try:
-            # Pre-emptive cleanup: only safe because Step 1 confirmed this ID does not exist in SQL.
-            # Guarantees no lingering chunks from a prior crashed ingestion remain.
-            await self._vector_repo.delete_chunks_by_parent_id(dto.suggestion_id)
-            await self._vector_repo.upsert_chunks_batch(chunks)
-            await self._vector_repo.activate_staging_chunks(dto.suggestion_id)
-        except Exception as qdrant_err:
-            await logger.aerror(
-                "Qdrant operation failed during suggestion ingestion; executing compensating cleanups",
-                suggestion_id=dto.suggestion_id,
-                error=str(qdrant_err),
-                exc_info=True,
+            await self._task_queue.enqueue_task(
+                "process_outbox_event_task",
+                event_id=str(event_id),
+                deduplication_id=str(event_id),
+            )
+        except Exception as queue_err:
+            await logger.awarning(
+                "Failed to enqueue outbox event to Redis; scheduled sweeper will recover it",
+                event_id=str(event_id),
+                error=str(queue_err),
             )
 
-            # 1. Best-effort Qdrant cleanup (guarded against network drops to ensure SQL rollback runs)
-            try:
-                await self._vector_repo.delete_chunks_by_parent_id(dto.suggestion_id)
-                await logger.ainfo(
-                    "Compensating Qdrant deletion succeeded",
-                    suggestion_id=dto.suggestion_id,
-                )
-            except Exception as qdrant_cleanup_err:
-                await logger.awarning(
-                    "Compensating Qdrant deletion failed; staging chunks remain quarantined",
-                    suggestion_id=dto.suggestion_id,
-                    error=str(qdrant_cleanup_err),
-                    exc_info=True,
-                )
-
-            # 2. Guarded compensating SQL deletion
-            try:
-                async with self._uow as comp_uow:
-                    await comp_uow.suggestions.delete(dto.suggestion_id)
-                    await comp_uow.commit()
-                await logger.ainfo(
-                    "Compensating SQL deletion succeeded",
-                    suggestion_id=dto.suggestion_id,
-                )
-            except Exception as comp_err:
-                await logger.acritical(
-                    "Compensating SQL deletion failed! System in inconsistent state for suggestion",
-                    suggestion_id=dto.suggestion_id,
-                    error=str(comp_err),
-                    exc_info=True,
-                )
-
-            # Re-raise original Qdrant exception so caller gets accurate root cause
-            raise qdrant_err
-
         await logger.ainfo(
-            "Suggestion ingested successfully",
+            "Ingested suggestion with outbox event",
             suggestion_id=dto.suggestion_id,
-            chunks_count=len(chunks),
+            event_id=str(event_id),
+            chunks_count=chunks_count,
         )
 
         return IngestSuggestionResponseDTO(
             suggestion_id=dto.suggestion_id,
-            chunks_count=len(chunks),
+            chunks_count=chunks_count,
             status="CREATED",
         )
 

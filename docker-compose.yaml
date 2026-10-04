@@ -78,6 +78,42 @@ services:
     depends_on:
       - tavanir_openobserve
 
+  tavanir_redis:
+    image: redis:7.2-alpine
+    container_name: tavanir_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-}"
+    ports:
+      - "${REDIS_PORT:-7379}:6379"
+    volumes:
+      - ${REDIS_STORAGE_PATH:-./data/redis_storage}:/data
+    networks:
+      - tavanir_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tavanir_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tavanir_worker
+    restart: unless-stopped
+    command: python -m arq src.worker.WorkerSettings
+    networks:
+      - tavanir_network
+    depends_on:
+      - tavanir_redis
+      - tavanir_postgres
+      - tavanir_qdrant
+    healthcheck:
+      test: ["CMD-SHELL", "python -m arq src.worker.WorkerSettings --check"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
 networks:
   tavanir_network:
     name: tavanir_network

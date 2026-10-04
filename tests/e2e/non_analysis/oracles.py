@@ -192,6 +192,38 @@ def assert_consistent(
     validate_vectors(points, config)
 
 
+def assert_outbox_consistent(
+    events: list[dict],
+    parent_id: str,
+    *,
+    expected_status: str | None = None,
+    expected_event_type: str | None = None,
+    expected_version: int | None = None,
+    min_retry_count: int | None = None,
+) -> dict:
+    """Assert outbox event lifecycle state for a given parent."""
+    matching = [e for e in events if e.get("resource_id") == parent_id]
+    assert matching, f"No outbox event found for parent {parent_id}"
+    latest = matching[-1]
+    if expected_status is not None:
+        assert latest.get("status") == expected_status, (
+            f"Outbox status {latest.get('status')!r} != {expected_status!r}"
+        )
+    if expected_event_type is not None:
+        assert latest.get("event_type") == expected_event_type, (
+            f"Outbox event_type {latest.get('event_type')!r} != {expected_event_type!r}"
+        )
+    if expected_version is not None:
+        assert latest.get("version") == expected_version, (
+            f"Outbox version {latest.get('version')!r} != {expected_version!r}"
+        )
+    if min_retry_count is not None:
+        assert (latest.get("retry_count") or 0) >= min_retry_count, (
+            f"Outbox retry_count {(latest.get('retry_count') or 0)} < {min_retry_count}"
+        )
+    return latest
+
+
 class FixtureRegistry:
     def __init__(self, config: E2EConfig):
         self.config = config
@@ -420,6 +452,31 @@ class RawStoreOracle:
     def snapshot(self, parent_id: str) -> dict:
         result = asyncio.run(self._snapshot([parent_id]))
         return {"sql": result["sql"].get(parent_id), "points": result["points"]}
+
+    async def _snapshot_outbox(self, parent_id: str) -> list[dict]:
+        engine = create_async_engine(
+            self.config.database.postgres_url, poolclass=NullPool
+        )
+        try:
+            async with engine.connect() as connection:
+                await verify_postgres_connection(connection, self.config.database)
+                statement = text(
+                    "SELECT id, resource_type, resource_id, event_type, version, payload, status, retry_count, last_error, created_at, processed_at "
+                    "FROM public.outbox_events WHERE resource_id = :id ORDER BY created_at ASC"
+                )
+                return [
+                    jsonable(dict(row))
+                    for row in (
+                        await connection.execute(statement, {"id": parent_id})
+                    )
+                    .mappings()
+                    .all()
+                ]
+        finally:
+            await engine.dispose()
+
+    def snapshot_outbox(self, parent_id: str) -> list[dict]:
+        return asyncio.run(self._snapshot_outbox(parent_id))
 
     def all_snapshot(self) -> dict:
         return asyncio.run(self._snapshot())

@@ -46,12 +46,14 @@ METHOD_OPERATIONS = {
     "upsert_chunks_batch": "vector.upsert",
     "activate_staging_chunks": "vector.promote",
     "activate_staging_chunks_batch": "vector.promote_many",
+    "activate_version_chunks": "vector.promote",
     "delete_chunks_by_parent_id": "vector.purge",
     "delete_chunks_by_parent_ids": "vector.purge_many",
     "delete_chunks_by_ids": "vector.delete_ids",
     "delete_staging_chunks": "vector.delete_staging",
     "delete_deprecated_chunks": "vector.delete_deprecated",
     "delete_superseded_chunks": "vector.superseded",
+    "delete_obsolete_version_chunks": "vector.superseded",
 }
 
 
@@ -64,9 +66,11 @@ def _parent(method: str, args: tuple[Any, ...], fallback: str = "") -> str:
             "delete",
             "delete_chunks_by_parent_id",
             "activate_staging_chunks",
+            "activate_version_chunks",
             "delete_staging_chunks",
             "delete_deprecated_chunks",
             "delete_superseded_chunks",
+            "delete_obsolete_version_chunks",
         }:
             return str(value)
         if hasattr(value, "id"):
@@ -103,8 +107,10 @@ def _result_evidence(method: str, result: Any, args: tuple[Any, ...]) -> dict[st
         "commit",
         "upsert_chunks_batch",
         "activate_staging_chunks",
+        "activate_version_chunks",
         "delete_chunks_by_parent_id",
         "delete_superseded_chunks",
+        "delete_obsolete_version_chunks",
         "delete_chunks_by_ids",
     }:
         data["applied"] = True

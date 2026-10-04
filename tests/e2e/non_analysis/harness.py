@@ -759,9 +759,10 @@ class AppProcess:
 
 
 class OutboxWorker:
-    def __init__(self, config: E2EConfig, overrides: dict):
+    def __init__(self, config: E2EConfig, overrides: dict, controller: Any = None):
         self.config = config
         self.overrides = overrides
+        self.controller = controller
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._started = threading.Event()
@@ -789,33 +790,72 @@ class OutboxWorker:
             os.environ[k] = v
         for k, v in self.overrides.items():
             os.environ[k] = v
+        from src.infrastructure.configs.settings import llm_settings, embedding_settings
+        for k, v in self.overrides.items():
+            if hasattr(llm_settings, k):
+                object.__setattr__(llm_settings, k, type(getattr(llm_settings, k))(v))
+            if hasattr(embedding_settings, k):
+                object.__setattr__(embedding_settings, k, type(getattr(embedding_settings, k))(v))
         from src.containers import Container
         self._container = Container()
+        if "QDRANT_PORT" in self.overrides or "QDRANT_HOST" in self.overrides:
+            from src.infrastructure.configs.settings import qdrant_settings
+            q_host = self.overrides.get("QDRANT_HOST", qdrant_settings.QDRANT_HOST)
+            q_port = int(self.overrides.get("QDRANT_PORT", qdrant_settings.QDRANT_PORT))
+            q_prefer_grpc = self.overrides.get("QDRANT_PREFER_GRPC", "false").lower() == "true"
+            self._container.qdrant_client.set_kwargs(
+                **dict(self._container.qdrant_client.kwargs, host=q_host, port=q_port, prefer_grpc=q_prefer_grpc)
+            )
+        if "QDRANT_BATCH_SIZE" in self.overrides:
+            batch_size = int(self.overrides["QDRANT_BATCH_SIZE"])
+            self._container.suggestion_vector_repository.set_kwargs(
+                **dict(self._container.suggestion_vector_repository.kwargs, batch_size=batch_size)
+            )
         await self._container.init_resources()
+        if self.controller is None and self.overrides.get("E2E_FAULT_DIR"):
+            from tests.e2e.non_analysis.proxy import FaultController
+            self.controller = FaultController(Path(self.overrides["E2E_FAULT_DIR"]))
+        if self.controller is not None:
+            from tests.e2e.non_analysis.bootstrap import install_instrumentation
+            install_instrumentation(self._container, self.controller)
         ctx = {"di_container": self._container, "job_try": 1}
 
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text
         from sqlalchemy.pool import NullPool
         from src.infrastructure.tasks.outbox_tasks import process_outbox_event_task
+        from tests.e2e.non_analysis.proxy import REQUEST_CONTEXT
 
         self._engine = create_async_engine(self.config.database.postgres_url, poolclass=NullPool)
         self._started.set()
+        deferred: dict[str, float] = {}
         try:
             while not self._stop_event.is_set():
                 had_work = False
+                now = time.monotonic()
                 try:
                     async with self._engine.connect() as conn:
-                        res = await conn.execute(text("SELECT id FROM outbox_events WHERE status = 'PENDING' ORDER BY retry_count ASC, created_at ASC LIMIT 1"))
+                        res = await conn.execute(text("SELECT id, resource_id, event_type, version, retry_count FROM outbox_events WHERE status = 'PENDING' ORDER BY retry_count ASC, created_at ASC LIMIT 1"))
                         row = res.mappings().first()
                     if row:
-                        had_work = True
-                        try:
-                            await process_outbox_event_task(ctx, str(row["id"]))
-                        except Exception as e:
-                            import traceback
-                            traceback.print_exc()
-                except Exception as e:
+                        event_id = str(row["id"])
+                        if event_id in deferred and now < deferred[event_id]:
+                            had_work = False
+                        else:
+                            had_work = True
+                            parent_id = str(row["resource_id"])
+                            token = REQUEST_CONTEXT.set({"request_id": event_id, "parent_id": parent_id})
+                            try:
+                                ctx["job_try"] = (row.get("retry_count") or 0) + 1
+                                await process_outbox_event_task(ctx, event_id)
+                                deferred.pop(event_id, None)
+                            except (Exception, asyncio.CancelledError) as e:
+                                attempt = (row.get("retry_count") or 0) + 1
+                                delay = min(0.05 * (2 ** (attempt - 1)), 1.0)
+                                deferred[event_id] = time.monotonic() + delay
+                            finally:
+                                REQUEST_CONTEXT.reset(token)
+                except (Exception, asyncio.CancelledError) as e:
                     import traceback
                     traceback.print_exc()
                 if not had_work:
@@ -935,7 +975,7 @@ class LiveHarness:
 
     def start_worker(self):
         if self._outbox_worker is None:
-            self._outbox_worker = OutboxWorker(self.config, self.process.overrides)
+            self._outbox_worker = OutboxWorker(self.config, self.process.overrides, controller=self.fault_controller)
             self._outbox_worker.start()
 
     def stop_worker(self):
@@ -946,6 +986,9 @@ class LiveHarness:
     def drain_outbox(self, timeout: float = 10.0):
         if self._outbox_worker is not None:
             self._outbox_worker.wait_settled(timeout=timeout)
+
+    def snapshot_outbox(self, parent_id: str) -> list[dict]:
+        return self.oracle.snapshot_outbox(parent_id)
 
     def snapshot(self, parent_id):
         self.drain_outbox()

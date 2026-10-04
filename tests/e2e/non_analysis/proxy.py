@@ -238,6 +238,9 @@ class FaultController:
         if rule["error"] == "normalizer":
             from src.application.exceptions import TextNormalizationError
             raise TextNormalizationError(message)
+        if rule["error"] == "domain":
+            from src.domain.exceptions import DomainError
+            raise DomainError(message)
         raise RuntimeError(message)
 
 
@@ -316,7 +319,10 @@ def classify_request(path: str, body: Any, provider: str) -> tuple[str, str, str
     operation = "http.qdrant.other"
     if "/points/delete" in path:
         operation = "http.qdrant.delete"
-        if qfilter.get("must_not"):
+        if qfilter.get("must_not") or any(
+            isinstance(c, dict) and c.get("key") == "version"
+            for c in qfilter.get("must", [])
+        ):
             operation = "http.qdrant.superseded"
         elif isinstance(points, list) and points:
             operation = "http.qdrant.delete_ids"

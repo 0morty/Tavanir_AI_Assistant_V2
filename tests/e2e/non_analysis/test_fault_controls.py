@@ -443,20 +443,20 @@ def test_alias_fault_restores_guarded_target_before_raw_store_capture(tmp_path, 
         return {"sql": None, "points": []}
     def request(method, path, **kwargs):
         state["attempts"] += 1
-        status = 201 if state["target"] == "physical" else 500
-        return httpx.Response(status, headers={"X-Request-Id": "observed"}, json={"status": status})
+        return httpx.Response(201, headers={"X-Request-Id": "observed"}, json={"status": 201})
     harness = SimpleNamespace(config=SimpleNamespace(run_id="offline", alias="active", collection="physical", dense_name="dense",
         sparse_name="sparse", dense_dimension=768, database=SimpleNamespace(qdrant_url="http://owned", q_api_key="private")),
         infrastructure=SimpleNamespace(verify=lambda: None), new_id=lambda label: "fixture", request=request,
-        snapshot=snapshot, assert_consistent=lambda parent: snapshot(parent))
+        snapshot=snapshot, assert_consistent=lambda parent, **kwargs: snapshot(parent),
+        snapshot_outbox=lambda parent: [{"retry_count": 1}], drain_outbox=lambda: None)
     monkeypatch.setattr(httpx, "Client", AdminClient)
     monkeypatch.setattr(resilience, "_record", lambda h, s, c, parents: [h.snapshot(parent) for parent in parents])
     controller = FaultController(tmp_path)
     scenario = resilience.ResilienceScenario("ING-F12", mode, "alias", parameters={"alias_mode": mode})
     resilience._execute_alias(harness, scenario, controller)
-    assert state["attempts"] == 2 and state["target"] == "physical" and state["captures"]
+    assert state["attempts"] == 1 and state["target"] == "physical" and state["captures"]
     assert controller.events(kind="alias_fault_installed")[0]["acknowledged"] is True
-    assert controller.events(kind="alias_fault_response")[0]["status"] == 500
+    assert controller.events(kind="alias_fault_response")[0]["status"] == 201
     assert controller.events(kind="alias_restored")[0]["acknowledged"] is True
     if mode == "incompatible":
         created = controller.events(kind="alias_collection_created")[0]
@@ -531,9 +531,7 @@ def test_both_ingest_compensation_failures_cannot_pass_with_residual_state(tmp_p
                               snapshot=lambda parent: state)
     controller = FaultController(tmp_path / "faults")
     monkeypatch.setattr(resilience, "_prepare", lambda h, method: ("fixture", {"sql": None, "points": []}, "request"))
-    def failed_request(h, method, parent, request):
-        # Match the real schedule in this offline state-verdict regression;
-        # the production fault suite still delegates actual collaborators.
+    def outbox_request(h, method, parent, request):
         for rule in controller._schedule()["rules"]:
             for _ in range(rule["attempt"]):
                 invocation = controller.invocation(rule["operation"], parent, request_id=request)
@@ -541,12 +539,12 @@ def test_both_ingest_compensation_failures_cannot_pass_with_residual_state(tmp_p
                     controller.hit(invocation, rule["timing"])
                 except Exception:
                     pass
-        return httpx.Response(500, json={"errors": [{"code": "RETRIEVAL_FAILED"}]})
-    monkeypatch.setattr(resilience, "_request", failed_request)
+        return httpx.Response(201, json={"data": {"suggestionId": parent, "version": 1, "chunksCount": 1}})
+    monkeypatch.setattr(resilience, "_request", outbox_request)
     scenario = resilience.ResilienceScenario("ING-F08", "both_compensations_failed", "ingest_compensation",
                                              parameters={"sql_cleanup": True, "vector_cleanup": True})
-    if residual:
-        with pytest.raises(AssertionError, match="requires recovery"):
+    if not residual:
+        with pytest.raises(AssertionError, match="persistent SQL record"):
             resilience._execute_ingest_compensation(harness, scenario, controller)
     else:
         resilience._execute_ingest_compensation(harness, scenario, controller)

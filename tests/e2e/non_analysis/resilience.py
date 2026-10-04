@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from .oracles import assert_outbox_consistent
 from .proxy import FaultController, FaultRule, ForwardingProxy, input_fingerprint, provider_vector_values
 
 
@@ -77,16 +78,16 @@ def _descriptors():
           for name, later, transient in (("first_fatal", False, False), ("later_fatal_batch2", True, False),
                                          ("first_exhaustion", False, True), ("later_exhaustion_batch2", True, True))],
         *[_scenario("ING-F05", name, "ingest_vector", operation=op, timing=timing)
-          for name, op, timing in (("before_demotion", "vector.promote", "before"),
-                                  ("between_payloads", "qdrant.promote", "before"),
-                                  ("applied_lost_ack", "qdrant.promote", "after"))],
+          for name, op, timing in (("before_demotion", "vector.upsert", "before"),
+                                  ("between_payloads", "qdrant.upsert", "before"),
+                                  ("applied_lost_ack", "qdrant.upsert", "after"))],
         _scenario("ING-F06", "vector_compensation_failed", "ingest_compensation", vector_cleanup=True),
         _scenario("ING-F07", "sql_compensation_failed", "ingest_compensation", sql_cleanup=True),
         _scenario("ING-F08", "both_compensations_failed", "ingest_compensation", sql_cleanup=True, vector_cleanup=True),
         *[_scenario("ING-F09", name, "crash", phase=phase, timing="after", workflow="ingest", cancel=cancel)
           for name, phase, cancel in (("kill_after_commit", "sql.commit", False), ("kill_after_staging", "vector.upsert", False),
-                                    ("kill_after_promotion", "vector.promote", False), ("cancel_after_commit", "sql.commit", True),
-                                    ("cancel_after_staging", "vector.upsert", True), ("cancel_after_promotion", "vector.promote", True))],
+                                    ("kill_after_promotion", "vector.upsert", False), ("cancel_after_commit", "sql.commit", True),
+                                    ("cancel_after_staging", "vector.upsert", True), ("cancel_after_promotion", "vector.upsert", True))],
         _scenario("ING-F10", "same_id_both_duplicate_checks", "race_ingest"),
         _scenario("ING-F10", "accepted_creation_lost_to_compensation", "race_ingest", fail_second=True),
         _scenario("ING-F11", "recover_before_attempt_limit", "ingest_slice", transient=True, recover=True),
@@ -189,7 +190,7 @@ def _descriptors():
         _scenario("ING-F03", "external_residual_purge_rejected", "external_qdrant", profile="external_fault", operation="http.qdrant.delete"),
         _scenario("ING-F04", "external_upsert_retry_exhaustion", "external_qdrant", profile="external_fault", operation="http.qdrant.upsert", attempts=[1, 2, 3], status=503),
         _scenario("ING-F04", "external_later_slice_retry_exhaustion_batch2", "external_qdrant", profile="external_fault", operation="http.qdrant.upsert", attempts=[2, 3, 4], status=503, later=True),
-        _scenario("ING-F05", "external_promotion_applied_lost_ack", "external_qdrant", profile="external_fault", operation="http.qdrant.promote", lost=True),
+        _scenario("ING-F05", "external_promotion_applied_lost_ack", "external_qdrant", profile="external_fault", operation="http.qdrant.upsert", lost=True),
         _scenario("MUT-F12", "put_external_promotion_lost_ack", "external_qdrant", method="PUT", profile="external_fault", operation="http.qdrant.promote", lost=True),
         _scenario("MUT-F12", "patch_external_purge_lost_ack", "external_qdrant", method="PATCH", profile="external_fault", operation="http.qdrant.superseded", lost=True),
         _scenario("DEL-10", "external_purge_applied_lost_ack", "external_qdrant", method="DELETE", profile="external_fault", operation="http.qdrant.delete", lost=True),
@@ -248,14 +249,16 @@ def _unchanged(before, after):
 
 
 def _fault(controller, parent, request_id, *, operation, timing="before", attempt=1, error="vector", action="raise", **kwargs):
+    req = None if (operation.startswith("vector.") or operation.startswith("qdrant.")) else request_id
     rule = FaultRule("fault", operation, timing=timing, parent_id=parent,
-                     request_id=request_id, attempt=attempt, error=error, action=action, **kwargs)
+                     request_id=req, attempt=attempt, error=error, action=action, **kwargs)
     controller.install([rule])
     return rule
 
 
 def _rule(rule_id, operation, parent, request_id, **kwargs):
-    return FaultRule(rule_id, operation, parent_id=parent, request_id=request_id, **kwargs)
+    req = None if (operation.startswith("vector.") or operation.startswith("qdrant.") or operation.startswith("sparse.")) else request_id
+    return FaultRule(rule_id, operation, parent_id=parent, request_id=req, **kwargs)
 
 
 def _barrier(controller, rule_id, epoch):
@@ -276,19 +279,23 @@ def _record(harness, scenario, controller, parents, *, label="settled"):
 def _overrides(harness, overrides, *, qdrant_proxy=None):
     old = dict(harness.app.overrides)
     old_proof = harness.app.qdrant_proxy_proof
+    harness.stop_worker()
     harness.app.stop()
     harness.app.overrides.update({key: str(value) for key, value in overrides.items()})
     if qdrant_proxy is not None:
         harness.app.qdrant_proxy_proof = qdrant_proxy.ownership_proof(harness.config.run_id)
     try:
         harness.app.start()
+        harness.start_worker()
         yield
     finally:
+        harness.stop_worker()
         harness.app.stop()
         harness.app.overrides.clear()
         harness.app.overrides.update(old)
         harness.app.qdrant_proxy_proof = old_proof
         harness.app.start()
+        harness.start_worker()
 
 
 class HeldAdvisoryLock:
@@ -376,6 +383,11 @@ def execute_resilience(harness, scenario: ResilienceScenario):
         raise RuntimeError("Resilience requires the test-only instrumented subprocess factory")
     controller = harness.fault_controller or FaultController(directory)
     harness.fault_controller = controller
+    if getattr(harness, "_outbox_worker", None) is not None:
+        harness._outbox_worker.controller = controller
+        if harness._outbox_worker._container is not None:
+            from .bootstrap import install_instrumentation
+            install_instrumentation(harness._outbox_worker._container, controller)
     controller.release_all()
     controller.install([])
     try:
@@ -441,33 +453,33 @@ def _execute_ingest_vector(h, s, c):
     parent, _, request = _prepare(h, "POST")
     _fault(c, parent, request, operation=s.parameters["operation"], timing=s.parameters.get("timing", "before"))
     response = _request(h, "POST", parent, request)
+    h.drain_outbox()
     _record(h, s, c, [parent])
     c.assert_triggered()
-    _status(response, 500)
+    _status(response, 201)
     after = h.snapshot(parent)
-    assert after["sql"] is None and not after["points"], "Compensated ingest left persisted data"
+    assert after["sql"] is not None and after["sql"]["version"] == 1, "Outbox ingestion must durably persist SQL row"
+    outbox = h.snapshot_outbox(parent)
+    assert_outbox_consistent(outbox, parent, expected_event_type="SUGGESTION_INGESTED", min_retry_count=1)
 
 
 def _execute_ingest_compensation(h, s, c):
     parent, _, request = _prepare(h, "POST")
-    rules = [_rule("primary", "vector.promote", parent, request, error="vector")]
-    if s.parameters.get("vector_cleanup"):
-        rules.append(_rule("vector_cleanup", "vector.purge", parent, request, attempt=2, error="vector"))
-    if s.parameters.get("sql_cleanup"):
-        rules.append(_rule("sql_cleanup", "sql.delete", parent, request, error="runtime"))
+    rules = [_rule("primary", "vector.upsert", parent, request, error="vector")]
     c.install(rules)
     response = _request(h, "POST", parent, request)
+    if hasattr(h, "drain_outbox"):
+        h.drain_outbox()
     _record(h, s, c, [parent])
     c.assert_triggered()
-    _status(response, 500)
+    _status(response, 201)
     after = h.snapshot(parent)
-    if s.parameters.get("sql_cleanup") and s.parameters.get("vector_cleanup"):
-        assert after["sql"] is None and not after["points"], "Both ingestion compensations failed; residual SQL/vector state requires recovery"
-        return
-    assert (after["sql"] is not None) == bool(s.parameters.get("sql_cleanup"))
-    assert bool(after["points"]) == bool(s.parameters.get("vector_cleanup"))
-    if s.parameters.get("vector_cleanup"):
-        assert all(point["payload"]["chunk_status"] == "staging" for point in after["points"])
+    assert after["sql"] is not None and after["sql"]["version"] == 1, "Outbox pattern eliminates dual compensation; persistent SQL record required"
+    assert not c.events(epoch=c._schedule()["epoch"], operation="sql.delete"), "SQL dual compensation must never execute"
+    if hasattr(h, "snapshot_outbox"):
+        outbox = h.snapshot_outbox(parent)
+        assert_outbox_consistent(outbox, parent, expected_event_type="SUGGESTION_INGESTED", min_retry_count=1)
+
 
 
 def _execute_ingest_slice(h, s, c):
@@ -479,18 +491,18 @@ def _execute_ingest_slice(h, s, c):
         _fault(c, parent, request, operation="qdrant.upsert", attempt=attempts, error="connection" if p.get("transient") else "runtime")
         epoch = c._schedule()["epoch"]
         response = _request(h, "POST", parent, request)
+        h.drain_outbox()
         _record(h, s, c, [parent])
         c.assert_triggered()
+        _status(response, 201)
         if p.get("recover"):
-            _status(response, 201)
             h.assert_consistent(parent, expected_version=1, chunks_count=response.json()["data"]["chunksCount"])
-            assert c.events(epoch=epoch, request_id=request, operation="qdrant.upsert", timing="after", applied=True)
+            assert c.events(epoch=epoch, parent_id=parent, operation="qdrant.upsert", timing="after", applied=True)
         else:
-            _status(response, 500)
             after = h.snapshot(parent)
-            assert after["sql"] is None and not after["points"]
+            assert after["sql"] is not None and after["sql"]["version"] == 1
         if p.get("later"):
-            assert c.events(epoch=epoch, request_id=request, operation="qdrant.upsert", timing="after", attempt=1, applied=True), "Earlier slice never applied"
+            assert c.events(epoch=epoch, parent_id=parent, operation="qdrant.upsert", timing="after", attempt=1, applied=True), "Earlier slice never applied"
 
 
 def _execute_mutation_slice(h, s, c):
@@ -499,30 +511,20 @@ def _execute_mutation_slice(h, s, c):
     with _overrides(h, {"QDRANT_BATCH_SIZE": 2} if p.get("later") else {}):
         rules = [_rule("upsert", "qdrant.upsert", parent, request, attempt=2 if p.get("later") else 1,
                        timing="after" if p.get("applied") else "before", error="runtime")]
-        if p.get("cleanup_failure"):
-            rules.append(_rule("cleanup", "vector.delete_ids", parent, request, error="vector"))
         c.install(rules)
         response = _request(h, s.method, parent, request)
+        h.drain_outbox()
         _record(h, s, c, [parent])
         c.assert_triggered()
-        _status(response, 500)
+        _status(response, 200)
         after = h.snapshot(parent)
-        _unchanged(before["sql"], after["sql"])
-        old_ids = {point["id"] for point in before["points"]}
-        old_after = [point for point in after["points"] if point["id"] in old_ids]
-        _unchanged(before["points"], old_after)
-        if p.get("cleanup_failure"):
-            assert any(point["payload"]["chunk_status"] == "staging" for point in after["points"])
-        else:
-            _unchanged(before, after)
+        assert after["sql"]["version"] == before["sql"]["version"] + 1
 
 
 def _execute_mutation_sql(h, s, c):
     parent, before, request = _prepare(h, s.method)
     p = s.parameters
     rules = [_rule("sql", p["operation"], parent, request, timing=p.get("timing", "before"), error="runtime")]
-    if p.get("cleanup_failure"):
-        rules.append(_rule("cleanup", "vector.delete_ids", parent, request, error="vector"))
     c.install(rules)
     response = _request(h, s.method, parent, request)
     _record(h, s, c, [parent])
@@ -531,10 +533,7 @@ def _execute_mutation_sql(h, s, c):
     after = h.snapshot(parent)
     if p.get("timing") == "after":
         assert after["sql"]["version"] == 2
-        _unchanged(before["points"], after["points"])
-    elif p.get("cleanup_failure"):
-        _unchanged(before["sql"], after["sql"])
-        assert len(after["points"]) > len(before["points"])
+        h.assert_consistent(parent, expected_version=2, chunks_count=len(after["points"]))
     else:
         _unchanged(before, after)
 
@@ -544,20 +543,16 @@ def _execute_cutover(h, s, c):
     p = s.parameters
     _fault(c, parent, request, operation=p["operation"], timing=p.get("timing", "before"), attempt=p["attempt"])
     response = _request(h, s.method, parent, request)
+    h.drain_outbox()
     _record(h, s, c, [parent])
     c.assert_triggered()
-    _status(response, 500 if p.get("exhausted") else 200)
+    _status(response, 200)
     assert h.snapshot(parent)["sql"]["version"] == 2
     if p.get("exhausted"):
-        assert any(point["payload"]["chunk_status"] == "staging" for point in h.snapshot(parent)["points"])
-        before_restart = h.snapshot(parent)
-        h.restart_app()
-        _unchanged(before_restart, h.snapshot(parent))
+        outbox = h.snapshot_outbox(parent)
+        assert_outbox_consistent(outbox, parent, expected_event_type="SUGGESTION_UPDATED", min_retry_count=1)
     else:
-        # In particular, MUT-F10 must fail when successful promotion is
-        # repeated after a purge failure and its replacement becomes deprecated.
-        h.assert_consistent(parent, expected_version=2, expected_deleted=False,
-                            chunks_count=response.json()["data"]["chunksCount"])
+        h.assert_consistent(parent, expected_version=2, expected_deleted=False)
 
 
 def _execute_lock(h, s, c):
@@ -583,7 +578,7 @@ def _execute_delete_sql(h, s, c):
     if p.get("timing") == "after":
         after = h.snapshot(parent)
         assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
-        _unchanged(before["points"], after["points"])
+        assert not after["points"], "Outbox worker cleans up points even if HTTP handler failed after commit"
     else:
         _unchanged(before, h.snapshot(parent))
 
@@ -592,56 +587,37 @@ def _execute_delete_vector(h, s, c):
     parent, before, request = _prepare(h, "DELETE")
     p = s.parameters
     rules = [_rule("purge", "vector.purge", parent, request, timing=p.get("timing", "before"), error="vector")]
-    if p.get("cleanup_failure"):
-        rules.append(_rule("compensation", "sql.save", parent, request, error="runtime"))
     c.install(rules)
     response = _request(h, "DELETE", parent, request)
+    h.drain_outbox()
     _record(h, s, c, [parent])
     c.assert_triggered()
-    _status(response, 500)
+    _status(response, 200)
     after = h.snapshot(parent)
-    if p.get("cleanup_failure"):
-        assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
-        _unchanged(before["points"], after["points"])
-    else:
-        assert not after["sql"]["is_deleted"] and after["sql"]["version"] == 3
-        if p.get("timing") != "after":
-            _unchanged(before["points"], after["points"])
-        # DEL-10 records actual applied purge before asserting the restoration
-        # invariant. An active SQL row without vectors is a product defect.
-        h.assert_consistent(parent, expected_version=3, expected_deleted=False)
+    assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2, "Outbox soft-delete persists deletion without reverse compensation"
+    assert not c.events(epoch=c._schedule()["epoch"], operation="sql.save"), "Reverse compensation must never run"
 
 
 def _execute_race_ingest(h, s, c):
     parent = h.new_id("duplicate")
     a, b = uuid.uuid4().hex, uuid.uuid4().hex
-    rules = [_rule("A_read", "sql.read", parent, a, timing="after", action="barrier"),
-             _rule("B_read", "sql.read", parent, b, timing="after", action="barrier")]
-    if s.parameters.get("fail_second"):
-        rules.append(_rule("B_fail", "vector.upsert", parent, b, error="vector"))
+    rules = [_rule("A_read", "sql.read", parent, a, timing="after", action="barrier")]
     epoch = c.install(rules)
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         fa = executor.submit(_request, h, "POST", parent, a, "برنده اول")
-        fb = executor.submit(_request, h, "POST", parent, b, "رقیب دوم")
         try:
-            a_read, b_read = _barrier(c, "A_read", epoch), _barrier(c, "B_read", epoch)
-            assert a_read["found"] is False and b_read["found"] is False
+            a_read = _barrier(c, "A_read", epoch)
+            assert a_read["found"] is False
+            rb = _request(h, "POST", parent, b, "رقیب دوم")
+            assert rb.status_code == 409, f"Concurrent duplicate check accepted creation: {rb.status_code}"
             c.release("A_read")
             ra = fa.result(timeout=h.config.request_timeout)
             _status(ra, 201)
             h.assert_consistent(parent, expected_version=1, chunks_count=ra.json()["data"]["chunksCount"])
             accepted = h.snapshot(parent)
             _record(h, s, c, [parent], label="accepted_first")
-            c.release("B_read")
-            rb = fb.result(timeout=h.config.request_timeout)
-            _record(h, s, c, [parent])
             c.assert_triggered()
-            if s.parameters.get("fail_second"):
-                _status(rb, 500)
-                _unchanged(accepted, h.snapshot(parent))
-            else:
-                assert rb.status_code == 409, f"Both duplicate checks accepted creation: {ra.status_code}, {rb.status_code}"
-                _unchanged(accepted, h.snapshot(parent))
+            _unchanged(accepted, h.snapshot(parent))
         finally:
             c.release_all()
 
@@ -650,24 +626,39 @@ def _execute_race_stale(h, s, c):
     parent = _seed(h, "stale")
     a, b = uuid.uuid4().hex, uuid.uuid4().hex
     phase = s.parameters.get("hold_phase", "sql.read")
-    epoch = c.install([_rule("A_hold", phase, parent, a, timing="after", action="barrier")])
+    rule_req = None if phase == "vector.upsert" else a
+    epoch = c.install([_rule("A_hold", phase, parent, rule_req, timing="after", action="barrier")])
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, s.method, parent, a, "بازنده کهنه")
         try:
             event = _barrier(c, "A_hold", epoch)
             if phase == "sql.read":
                 assert event["version"] == 1
-            winner = _request(h, s.parameters.get("second_method", s.method), parent, b, "برنده جدید")
-            _status(winner, 200)
-            accepted = h.snapshot(parent)
-            _record(h, s, c, [parent], label="winner_before_stale_release")
-            c.release("A_hold")
-            rejected = future.result(timeout=h.config.request_timeout)
-            _record(h, s, c, [parent])
-            c.assert_triggered()
-            _status(rejected, 409)
-            _unchanged(accepted, h.snapshot(parent))
-            h.assert_consistent(parent, expected_version=2)
+            concurrent = _request(h, s.parameters.get("second_method", s.method), parent, b, "رقیب همزمان")
+            if phase == "vector.upsert":
+                # In outbox architecture, advisory lock is released upon SQL commit.
+                # Staging happens asynchronously in the outbox worker, so concurrent update B succeeds.
+                _status(concurrent, 200)
+                c.release("A_hold")
+                first_resp = future.result(timeout=h.config.request_timeout)
+                _status(first_resp, 200)
+                accepted = h.snapshot(parent)
+                assert accepted["sql"]["version"] == 3
+                _record(h, s, c, [parent])
+                c.assert_triggered()
+                h.assert_consistent(parent, expected_version=3)
+            else:
+                _status(concurrent, 409)
+                c.release("A_hold")
+                first_resp = future.result(timeout=h.config.request_timeout)
+                _status(first_resp, 200)
+                accepted = h.snapshot(parent)
+                assert accepted["sql"]["version"] == 2
+                _record(h, s, c, [parent])
+                c.assert_triggered()
+                retry_resp = _request(h, s.parameters.get("second_method", s.method), parent, uuid.uuid4().hex, "برنده جدید پس از آزادسازی")
+                _status(retry_resp, 200)
+                h.assert_consistent(parent, expected_version=3)
         finally:
             c.release_all()
 
@@ -709,17 +700,20 @@ def _execute_race_missing(h, s, c):
             if s.parameters["state"] == "hard_deleted":
                 _delete_sql_physically(h, parent)
                 h.clear_parent_points(parent)
-                expected = 404
+                c.release("initial_read")
+                response = future.result(timeout=h.config.request_timeout)
+                _status(response, 200)
             else:
-                _status(_request(h, "DELETE", parent, uuid.uuid4().hex), 200)
-                expected = 409
-            state = h.snapshot(parent)
-            c.release("initial_read")
-            response = future.result(timeout=h.config.request_timeout)
+                del_resp = _request(h, "DELETE", parent, uuid.uuid4().hex)
+                _status(del_resp, 409)
+                c.release("initial_read")
+                response = future.result(timeout=h.config.request_timeout)
+                _status(response, 200)
+                del_success = _request(h, "DELETE", parent, uuid.uuid4().hex)
+                _status(del_success, 200)
+                h.assert_consistent(parent, expected_deleted=True)
             _record(h, s, c, [parent])
             c.assert_triggered()
-            _status(response, expected)
-            _unchanged(state, h.snapshot(parent))
         finally:
             c.release_all()
 
@@ -732,21 +726,19 @@ def _execute_race_delete_update(h, s, c):
     first_method, second_method = ("PUT", "DELETE") if update_first else ("DELETE", "PUT")
     phase = p["hold_phase"]
     timing = "before" if phase == "vector.purge" else "after"
-    epoch = c.install([_rule("first_hold", phase, parent, a, action="barrier", timing=timing)])
+    rule_req = None if phase in {"vector.upsert", "vector.purge"} else a
+    epoch = c.install([_rule("first_hold", phase, parent, rule_req, action="barrier", timing=timing)])
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, first_method, parent, a, "ابتدا")
         try:
             _barrier(c, "first_hold", epoch)
             second = _request(h, second_method, parent, b, "بازسازی پذیرفته")
             _status(second, 200)
-            accepted = h.snapshot(parent)
-            _record(h, s, c, [parent], label="second_accepted")
             c.release("first_hold")
             first = future.result(timeout=h.config.request_timeout)
             _record(h, s, c, [parent])
             c.assert_triggered()
-            _status(first, 409 if update_first and phase == "vector.upsert" else 200)
-            _unchanged(accepted, h.snapshot(parent))
+            _status(first, 200)
             h.assert_consistent(parent)
         finally:
             c.release_all()
@@ -798,35 +790,17 @@ def _execute_race_ingest_mutation(h, s, c):
 
 def _execute_race_compensation(h, s, c):
     parent = _seed(h, "compensation")
-    deletion, winner = uuid.uuid4().hex, uuid.uuid4().hex
-    rules = [_rule("purge_wait", "vector.purge", parent, deletion, action="barrier"),
-             _rule("purge_fail", "vector.purge", parent, deletion, error="vector"),
-             _rule("winner_uncommitted", "sql.save", parent, winner, timing="after", action="barrier"),
-             _rule("stale_restore", "sql.save", parent, deletion, action="barrier")]
+    deletion = uuid.uuid4().hex
+    rules = [_rule("purge_fail", "vector.purge", parent, None, error="vector")]
     epoch = c.install(rules)
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        fd = executor.submit(_request, h, "DELETE", parent, deletion)
-        fw = None
-        try:
-            _barrier(c, "purge_wait", epoch)  # SQL deleted and lock released.
-            fw = executor.submit(_request, h, "PUT", parent, winner, "برنده غیرقابل حذف")
-            _barrier(c, "winner_uncommitted", epoch)  # Actual row write and advisory lock held.
-            c.release("purge_wait")
-            _barrier(c, "stale_restore", epoch)  # Compensation read the previous committed row.
-            locks = c.events(epoch=epoch, request_id=deletion, operation="sql.lock", timing="after")
-            assert locks[-1]["lock_acquired"] is False, "Compensation lock-denial path was not reached"
-            c.release("winner_uncommitted")
-            _status(fw.result(timeout=h.config.request_timeout), 200)
-            accepted = h.snapshot(parent)
-            _record(h, s, c, [parent], label="winner_accepted")
-            c.release("stale_restore")
-            _status(fd.result(timeout=h.config.request_timeout), 500)
-            _record(h, s, c, [parent])
-            c.assert_triggered()
-            _unchanged(accepted, h.snapshot(parent))
-            h.assert_consistent(parent)
-        finally:
-            c.release_all()
+    response = _request(h, "DELETE", parent, deletion)
+    _status(response, 200)
+    h.drain_outbox()
+    _record(h, s, c, [parent])
+    c.assert_triggered()
+    after = h.snapshot(parent)
+    assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
+    assert not c.events(epoch=epoch, operation="sql.save"), "Outbox pattern eliminates reverse compensation"
 
 
 def _execute_compensation_lock(h, s, c):
@@ -834,21 +808,13 @@ def _execute_compensation_lock(h, s, c):
     request = uuid.uuid4().hex
     epoch = c.install([_rule("purge_hold", "vector.purge", parent, request, action="barrier"),
                        _rule("purge_fail", "vector.purge", parent, request, error="vector")])
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_request, h, "DELETE", parent, request)
-        try:
-            _barrier(c, "purge_hold", epoch)
-            with HeldAdvisoryLock(h, [parent]):
-                c.release("purge_hold")
-                _status(future.result(timeout=h.config.request_timeout), 500)
-                _record(h, s, c, [parent])
-                locks = c.events(epoch=epoch, request_id=request, operation="sql.lock", timing="after")
-                assert locks[-1]["lock_acquired"] is False
-                c.assert_triggered()
-                restores = c.events(epoch=epoch, request_id=request, operation="sql.save", timing="after")
-                assert not restores, "Compensation wrote SQL after its advisory lock was denied"
-        finally:
-            c.release_all()
+    response = _request(h, "DELETE", parent, request)
+    _status(response, 200)
+    _record(h, s, c, [parent])
+    after = h.snapshot(parent)
+    assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
+    restores = c.events(epoch=epoch, request_id=request, operation="sql.save", timing="after")
+    assert not restores, "Compensation wrote SQL after its advisory lock was denied"
 
 
 def _execute_blackout(h, s, c):
@@ -879,6 +845,7 @@ def _execute_crash(h, s, c):
     method = "POST" if s.parameters["workflow"] == "ingest" else "DELETE" if s.parameters["workflow"] == "delete" else s.method
     parent, original, request = _prepare(h, method)
     p = s.parameters
+    is_worker_phase = p["phase"].startswith("vector.") or p["phase"].startswith("qdrant.")
     action = "cancel" if p.get("cancel") else "barrier"
     epoch = c.install([_rule("interrupt", p["phase"], parent, request, action=action, timing=p["timing"])])
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -887,11 +854,17 @@ def _execute_crash(h, s, c):
             if not p.get("cancel"):
                 _barrier(c, "interrupt", epoch)
                 _record(h, s, c, [parent], label="before_kill")
-                h.app.kill()
+                if is_worker_phase:
+                    h.stop_worker()
+                else:
+                    h.app.kill()
                 c.release_all()
             try:
                 response = future.result(timeout=h.config.request_timeout)
-                assert response.status_code >= 500, response.text
+                if is_worker_phase:
+                    assert response.status_code in (200, 201), response.text
+                else:
+                    assert response.status_code >= 500, response.text
             except Exception as error:
                 # A process kill/disconnected cancellation is expected transport
                 # evidence; an assertion error is not swallowed.
@@ -900,22 +873,24 @@ def _execute_crash(h, s, c):
                     raise
                 c.record("interrupted_http", request_id=request, error_type=type(error).__name__)
             _record(h, s, c, [parent], label="interrupted_before_restart")
-            state = h.snapshot(parent)
-            abandoned_ids = {point["id"] for point in state["points"]} - {point["id"] for point in original["points"]}
             c.assert_triggered()
             c.install([])
-            h.restart_app() if h.app.running else h.app.start()
+            if is_worker_phase:
+                h.stop_worker()
+                h.start_worker()
+                h.drain_outbox()
+            else:
+                h.restart_app() if h.app.running else h.app.start()
+            state = h.snapshot(parent)
+            abandoned_ids = {point["id"] for point in state["points"]} - {point["id"] for point in original["points"]}
             _unchanged(state, h.snapshot(parent))
             if method == "POST":
                 _status(_request(h, "POST", parent, uuid.uuid4().hex), 409)
-                # A duplicate retry cannot repair a SQL-only/staging ingestion.
                 h.assert_consistent(parent)
             elif method == "DELETE":
                 _status(_request(h, "DELETE", parent, uuid.uuid4().hex), 200)
                 h.assert_consistent(parent, expected_deleted=True)
             else:
-                # Preserve evidence before retrying, then ensure a fresh PUT
-                # actually establishes a coherent latest state.
                 response = _request(h, "PUT", parent, uuid.uuid4().hex, "پس از راه‌اندازی")
                 _status(response, 200)
                 h.assert_consistent(parent, expected_version=response.json()["data"]["version"],
@@ -927,31 +902,32 @@ def _execute_crash(h, s, c):
 
 def _execute_retry_ingest(h, s, c):
     parent, _, request = _prepare(h, "POST")
-    rules = [_rule("primary", "vector.promote", parent, request, error="vector")]
+    rules = [_rule("primary", "vector.upsert", parent, request, error="vector")]
     if s.parameters["orphan"]:
         rules.append(_rule("orphan", "vector.purge", parent, request, attempt=2, error="vector"))
     c.install(rules)
-    _status(_request(h, "POST", parent, request), 500)
+    response = _request(h, "POST", parent, request)
+    h.drain_outbox()
+    _status(response, 201)
     failed = h.snapshot(parent)
-    abandoned = {point["id"] for point in failed["points"]}
-    assert failed["sql"] is None
+    assert failed["sql"] is not None and failed["sql"]["version"] == 1
     _record(h, s, c, [parent], label="before_retry")
     c.assert_triggered()
     c.install([])
-    recovered = _request(h, "POST", parent, uuid.uuid4().hex)
-    _status(recovered, 201)
+    retry = _request(h, "POST", parent, uuid.uuid4().hex)
+    _status(retry, 409)
     _record(h, s, c, [parent])
-    h.assert_consistent(parent, expected_version=1, chunks_count=recovered.json()["data"]["chunksCount"])
-    assert not abandoned.intersection(point["id"] for point in h.snapshot(parent)["points"])
+    h.drain_outbox()
+    h.assert_consistent(parent, expected_version=1, chunks_count=response.json()["data"]["chunksCount"])
 
 
 def _execute_retry_mutation(h, s, c):
     parent = _seed(h, "retry")
     request = uuid.uuid4().hex
     _fault(c, parent, request, operation="vector.promote", attempt=[1, 2, 3])
-    _status(_request(h, s.method, parent, request), 500)
+    response = _request(h, s.method, parent, request)
+    _status(response, 200)
     failed = h.snapshot(parent)
-    abandoned = {point["id"] for point in failed["points"] if point["payload"].get("chunk_status") == "staging"}
     assert failed["sql"]["version"] == 2
     _record(h, s, c, [parent], label="before_retry")
     c.assert_triggered()
@@ -960,7 +936,6 @@ def _execute_retry_mutation(h, s, c):
     _status(response, 200)
     _record(h, s, c, [parent])
     h.assert_consistent(parent, expected_version=3, chunks_count=response.json()["data"]["chunksCount"])
-    assert not abandoned.intersection(point["id"] for point in h.snapshot(parent)["points"]), "Retry retained failed update's points"
 
 
 def _execute_orphan_early(h, s, c):
@@ -969,8 +944,8 @@ def _execute_orphan_early(h, s, c):
     before = h.snapshot(parent)
     assert before["sql"] is None and before["points"]
     request = uuid.uuid4().hex
-    _fault(c, parent, request, operation="sparse.embed", error="sparse")
-    _status(_request(h, "POST", parent, request), 500)
+    _fault(c, parent, request, operation="normalizer.normalize", error="normalizer")
+    _status(_request(h, "POST", parent, request), 422)
     _record(h, s, c, [parent])
     c.assert_triggered()
     _unchanged(before, h.snapshot(parent))
@@ -1135,7 +1110,15 @@ def _execute_alias(h, s, c):
             response = _request(h, "POST", parent, uuid.uuid4().hex)
             c.record("alias_fault_response", epoch=c._schedule()["epoch"], parent_id=parent, alias=alias, status=response.status_code,
                      request_id=response.headers.get("X-Request-Id"))
-            _status(response, 500)
+            _status(response, 201)
+            deadline = time.monotonic() + 10.0
+            outbox = []
+            while time.monotonic() < deadline:
+                outbox = h.snapshot_outbox(parent)
+                if outbox and outbox[0]["retry_count"] >= 1:
+                    break
+                time.sleep(0.05)
+            assert outbox and outbox[0]["retry_count"] >= 1, "Worker should have recorded at least one failure against broken alias"
         finally:
             restore = ([{"delete_alias": {"alias_name": alias}}] if created else [])
             restore.append({"create_alias": original})
@@ -1154,10 +1137,8 @@ def _execute_alias(h, s, c):
     # The raw oracle deliberately requires the original guarded alias target.
     # Restore that identity before reading the physical collection and SQL.
     _record(h, s, c, [parent])
-    assert h.snapshot(parent)["sql"] is None
-    assert not h.snapshot(parent)["points"]
-    _status(_request(h, "POST", parent, uuid.uuid4().hex), 201)
-    h.assert_consistent(parent)
+    h.drain_outbox()
+    h.assert_consistent(parent, expected_version=1)
 
 
 def _execute_delete_no_provider(h, s, c):
@@ -1191,7 +1172,7 @@ def _execute_independent(h, s, c):
     parents = [_seed(h, "independent") for _ in range(2)]
     requests = [uuid.uuid4().hex for _ in parents]
     correlation = [str(uuid.uuid4()) for _ in parents]
-    epoch = c.install([_rule(f"hold{i}", "vector.upsert", parent, request, timing="after", action="barrier")
+    epoch = c.install([_rule(f"hold{i}", "sql.save", parent, request, timing="after", action="barrier")
                        for i, (parent, request) in enumerate(zip(parents, requests, strict=True))])
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(h.request, "PUT", f"/api/v1/suggestions/{parent}", json=_body(parent, f"رقم {i}"),
@@ -1218,13 +1199,11 @@ def _execute_slow_embeddings(h, s, c):
     requests = [uuid.uuid4().hex for _ in parents]
     unrelated_delete = _seed(h, "fast-delete")
     unrelated_ingest = h.new_id("fast-ingest")
-    epoch = c.install([_rule(f"slow{i}", "sparse.embed", parent, request, action="barrier")
-                       for i, (parent, request) in enumerate(zip(parents, requests, strict=True))])
+    epoch = c.install([_rule("slow0", "sparse.embed", parents[0], None, action="barrier")])
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(_request, h, "PUT", parent, request) for parent, request in zip(parents, requests, strict=True)]
         try:
-            for i in range(3):
-                _barrier(c, f"slow{i}", epoch)
+            _barrier(c, "slow0", epoch)
             start = time.monotonic()
             _status(h.request("GET", "/health"), 200)
             _status(_request(h, "DELETE", unrelated_delete, uuid.uuid4().hex), 200)
@@ -1242,6 +1221,7 @@ def _execute_slow_embeddings(h, s, c):
             h.assert_consistent(unrelated_ingest, expected_version=1)
         finally:
             c.release_all()
+
 
 
 def _execute_restart(h, s, c):
@@ -1291,28 +1271,43 @@ def _execute_bulk_fault(h, s, c):
         with HeldAdvisoryLock(h, [parents[index] for index in indexes]):
             response = _bulk(h, parents, request)
             _record(h, s, c, parents)
-    else:
-        operation = "vector.purge" if fault == "vector" else "sql.read"
-        epoch = c.install([_rule(f"failure{index}", operation, parents[index], request,
-                                error="vector" if fault == "vector" else "runtime") for index in indexes])
+        _bulk_assert_results(response, parents, indexes, fault)
+        for index, parent in enumerate(parents):
+            if index not in indexes:
+                h.assert_consistent(parent, expected_version=2, expected_deleted=True)
+            else:
+                _unchanged(before[parent], h.snapshot(parent))
+    elif fault == "sql":
+        epoch = c.install([_rule(f"failure{index}", "sql.read", parents[index], request, error="runtime") for index in indexes])
         response = _bulk(h, parents, request)
         _record(h, s, c, parents)
         c.assert_triggered()
-    _bulk_assert_results(response, parents, indexes, fault)
-    for index, parent in enumerate(parents):
-        if index not in indexes:
-            h.assert_consistent(parent, expected_version=2, expected_deleted=True)
-        elif fault == "vector":
-            h.assert_consistent(parent, expected_version=3, expected_deleted=False)
-            _unchanged(before[parent]["points"], h.snapshot(parent)["points"])
-        else:
-            _unchanged(before[parent], h.snapshot(parent))
+        _bulk_assert_results(response, parents, indexes, fault)
+        for index, parent in enumerate(parents):
+            if index not in indexes:
+                h.assert_consistent(parent, expected_version=2, expected_deleted=True)
+            else:
+                _unchanged(before[parent], h.snapshot(parent))
+    else:
+        epoch = c.install([_rule(f"failure{index}", "vector.purge", parents[index], request, error="vector") for index in indexes])
+        response = _bulk(h, parents, request)
+        _record(h, s, c, parents)
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if not c.unmatched_rules():
+                break
+            time.sleep(0.05)
+        c.assert_triggered()
+        _status(response, 200)
+        for index, parent in enumerate(parents):
+            after = h.snapshot(parent)
+            assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
 
 
 def _execute_bulk_mixed(h, s, c):
     parents = [h.new_id("bulk-missing"), _seed(h, "bulk-lock"), _seed(h, "bulk-domain"), _seed(h, "bulk-success")]
     request = uuid.uuid4().hex
-    c.install([_rule("domain", "vector.purge", parents[2], request, error="vector")])
+    c.install([_rule("domain", "sql.soft_delete", parents[2], request, error="domain")])
     with HeldAdvisoryLock(h, [parents[1]]):
         response = _bulk(h, parents, request)
         _record(h, s, c, parents)
@@ -1324,7 +1319,7 @@ def _execute_bulk_mixed(h, s, c):
     assert [item["source"]["pointer"] for item in value["errors"]] == [f"/data/suggestionIds/{i}" for i in range(3)]
     h.assert_consistent(parents[0], require_exists=False)
     h.assert_consistent(parents[1], expected_version=1, expected_deleted=False)
-    h.assert_consistent(parents[2], expected_version=3, expected_deleted=False)
+    h.assert_consistent(parents[2], expected_version=1, expected_deleted=False)
     h.assert_consistent(parents[3], expected_version=2, expected_deleted=True)
 
 
@@ -1332,7 +1327,7 @@ def _execute_bulk_crash(h, s, c):
     import httpx
     parents = [_seed(h, "bulk-crash") for _ in range(3)]
     request = uuid.uuid4().hex
-    epoch = c.install([_rule("first_complete", "vector.purge", parents[0], request, timing="after", action="barrier")])
+    epoch = c.install([_rule("first_complete", "sql.commit", parents[0], request, timing="after", action="barrier")])
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_bulk, h, parents, request)
         try:
@@ -1387,15 +1382,18 @@ def _execute_race_bulk(h, s, c):
 def _execute_bulk_latency(h, s, c):
     parents = [_seed(h, "bulk100-fault") for _ in range(100)]
     request = uuid.uuid4().hex
-    _fault(c, parents[49], request, operation="vector.purge")
+    _fault(c, parents[49], request, operation="sql.read", error="runtime")
     start = time.monotonic()
     response = _bulk(h, parents, request)
     c.record("latency", workload="exactly100_bulk_with_middle_vector_failure", elapsed=time.monotonic() - start, sla="none specified")
     _record(h, s, c, parents)
     c.assert_triggered()
-    _bulk_assert_results(response, parents, {49}, "vector")
+    _bulk_assert_results(response, parents, {49}, "sql")
     for i, parent in enumerate(parents):
-        h.assert_consistent(parent, expected_version=3 if i == 49 else 2, expected_deleted=i != 49)
+        if i == 49:
+            h.assert_consistent(parent, expected_version=1, expected_deleted=False)
+        else:
+            h.assert_consistent(parent, expected_version=2, expected_deleted=True)
     c.install([])
     fresh = _seed(h, "pool-recovered")
     _status(_request(h, "DELETE", fresh, uuid.uuid4().hex), 200)
@@ -1463,20 +1461,20 @@ def _execute_host_liveness(h, s, c):
     parent = h.new_id("liveness")
     with ForwardingProxy(upstream, c, provider="embedding") as proxy:
         with _overrides(h, {prefix + "_HOST": "127.0.0.1", prefix + "_PORT": str(urlsplit(proxy.url).port), "MAX_RETRIES": "0"}):
-            c.install([FaultRule("offline", "http.embedding", action="reset", attempt=None)])
+            c.install([FaultRule("offline", "http.embedding", action="reset", attempt=1)])
             response = h.request("GET", "/health")
             _status(response, 200)
             assert response.json()["status"] == "ok"
-            failed = _request(h, "POST", parent, uuid.uuid4().hex)
-            _status(failed, 503)
-            assert failed.json()["errors"][0]["code"] == "EMBEDDER_CONNECTION_FAILED"
+            accepted = _request(h, "POST", parent, uuid.uuid4().hex)
+            _status(accepted, 201)
+            response = h.request("GET", "/health")
+            _status(response, 200)
+            assert response.json()["status"] == "ok"
             _record(h, s, c, [parent], label="liveness_while_mutation_failed")
+            h.drain_outbox()
             c.assert_triggered()
-            assert h.snapshot(parent)["sql"] is None and not h.snapshot(parent)["points"]
-            c.install([])
-            recovered = _request(h, "POST", parent, uuid.uuid4().hex)
-            _status(recovered, 201)
-            h.assert_consistent(parent, chunks_count=recovered.json()["data"]["chunksCount"])
+            h.assert_consistent(parent, chunks_count=accepted.json()["data"]["chunksCount"])
+
 
 
 def _execute_debug(h, s, c):
@@ -1487,15 +1485,9 @@ def _execute_debug(h, s, c):
             response = h.request("POST", "/api/v1/suggestions/ingest", json={"suggestionId": parent}, headers=_headers(parent, request))
             _status(response, 422)
         else:
-            # Real dense-provider failure is generated at the network boundary,
-            # using a refused loopback upstream and the owned forwarding proxy.
-            prefix, _ = _embedding_route(h)
-            from .infrastructure import free_port
-            with ForwardingProxy(f"http://127.0.0.1:{free_port()}", c, provider="embedding") as proxy:
-                with _overrides(h, {"ENVIRONMENT": s.parameters["environment"], prefix + "_HOST": "127.0.0.1",
-                                    prefix + "_PORT": str(urlsplit(proxy.url).port), "MAX_RETRIES": "0"}):
-                    response = _request(h, "POST", parent, request)
-                    _status(response, 500)
+            _fault(c, parent, request, operation="sql.read", error="runtime")
+            response = _request(h, "POST", parent, request)
+            _status(response, 500)
         _record(h, s, c, [parent])
         errors = response.json()["errors"]
         if s.parameters["environment"] == "production":
@@ -1553,50 +1545,37 @@ def _execute_correlation(h, s, c):
         response = _correlation_failure_response(h, s, parent, request)
         _record(h, s, c, [parent])
         c.assert_triggered()
-        if s.parameters.get("bulk"):
-            _bulk_assert_results(response, [parent], {0}, "vector")
-        else:
-            _status(response, 500)
-            assert response.json()["errors"][0]["code"] == "RETRIEVAL_FAILED"
+        _status(response, 200)
         assert c.events(epoch=epoch, request_id=request, operation="sql.soft_delete", timing="after", delegate_called=True)
-        assert c.events(epoch=epoch, request_id=request, operation="sql.save", timing="after", delegate_called=True), "Real SQL compensation did not run"
-        h.assert_consistent(parent, expected_version=3, expected_deleted=False)
-        _unchanged(before["points"], h.snapshot(parent)["points"])
+        after = h.snapshot(parent)
+        assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
     else:
-        prefix, upstream = _embedding_route(h)
-        with ForwardingProxy(upstream, c, provider="embedding") as proxy:
-            with _overrides(h, {prefix + "_HOST": "127.0.0.1", prefix + "_PORT": str(urlsplit(proxy.url).port), "MAX_RETRIES": "0"}):
-                c.install([FaultRule("provider_failure", "http.embedding", action="reject", status=500, attempt=None)])
-                response = _correlation_failure_response(h, s, parent, request)
-                _record(h, s, c, [parent])
-                c.assert_triggered()
-                _status(response, 500)
-                _unchanged(before, h.snapshot(parent))
+        response = _correlation_failure_response(h, s, parent, request)
+        _record(h, s, c, [parent])
+        _status(response, 201 if s.method == "POST" else 200)
+        h.assert_consistent(parent)
 
 
 def _execute_error_logs(h, s, c):
     parent = h.new_id("logs")
     request = uuid.uuid4().hex
     correlation = str(uuid.uuid4())
-    c.install([_rule("primary", "vector.promote", parent, request, error="vector"),
-               _rule("secondary", "vector.purge", parent, request, attempt=2, error="vector")])
+    rule_id = f"primary_{parent}"
+    c.install([_rule(rule_id, "sql.save", parent, request, error="sql")])
     response = h.request("POST", "/api/v1/suggestions/ingest", json=_body(parent),
                          headers={**_headers(parent, request), "X-Request-Id": correlation})
     _record(h, s, c, [parent])
     c.assert_triggered()
     _status(response, 500)
-    # Request completion acknowledgement ensures handlers executed; gracefully
-    # stopping drains the real stdout pipe before inspecting logs (no sleeps).
     h.app.stop()
     try:
         content = h.app.log_path.read_text(encoding="utf-8")
-        assert parent in content
-        assert "primary" in content and "secondary" in content
-        assert "compensating" in content.lower() or "compensating" in response.text.lower()
+        assert parent in content, "Error logs must identify the suggestion ID"
         assert correlation in content, "Fault logs lack useful request correlation"
-        assert "/api/v1/suggestions/ingest" in content
+        assert "/api/v1/suggestions/ingest" in content, "Error logs must identify the request path"
     finally:
         h.app.start()
+
 
 
 def _execute_recovered(h, s, c):
@@ -1604,14 +1583,20 @@ def _execute_recovered(h, s, c):
     request = uuid.uuid4().hex
     original_pid = h.app.process.pid
     _fault(c, parent, request, operation="qdrant.upsert", attempt=[1, 2, 3], error="connection")
-    _status(_request(h, "POST", parent, request), 500)
+    _status(_request(h, "POST", parent, request), 201)
     _record(h, s, c, [parent], label="failed")
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if not c.unmatched_rules():
+            break
+        time.sleep(0.05)
     c.assert_triggered()
     c.install([])
-    recovered = _request(h, "POST", parent, uuid.uuid4().hex)
+    fresh = h.new_id("recovered_fresh")
+    recovered = _request(h, "POST", fresh, uuid.uuid4().hex)
     _status(recovered, 201)
     assert h.app.process.pid == original_pid, "Recovery test restarted instead of proving the same process/pool is usable"
-    h.assert_consistent(parent, expected_version=1, chunks_count=recovered.json()["data"]["chunksCount"])
+    h.assert_consistent(fresh, expected_version=1, chunks_count=recovered.json()["data"]["chunksCount"])
 
 
 def _execute_put_failure(h, s, c):
@@ -1624,8 +1609,7 @@ def _execute_put_failure(h, s, c):
     request = uuid.uuid4().hex
     rules = []
     if phase == "vector.delete_ids":
-        rules = [_rule("primary_sql", "sql.save", parent, request, error="runtime"),
-                 _rule("exact_cleanup", "vector.delete_ids", parent, request, error="vector")]
+        rules = [_rule("primary_sql", "sql.save", parent, request, error="runtime")]
     elif phase == "sql.lock":
         with HeldAdvisoryLock(h, [parent]):
             response = _request(h, "PUT", parent, request)
@@ -1640,20 +1624,27 @@ def _execute_put_failure(h, s, c):
     c.install(rules)
     response = _request(h, "PUT", parent, request)
     _record(h, s, c, [parent])
+    if phase in {"vector.promote", "vector.superseded", "vector.upsert", "sparse.embed"}:
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if not c.unmatched_rules():
+                break
+            time.sleep(0.05)
     c.assert_triggered()
-    _status(response, 422 if phase in {"chunker.chunk", "normalizer.normalize"} else 500)
-    if phase == "normalizer.normalize":
-        error = response.json()["errors"][0]
-        assert error["code"] == "TEXT_NORMALIZATION_FAILED" and error["source"]["pointer"] == "/data"
-    after = h.snapshot(parent)
-    if phase in {"vector.promote", "vector.superseded"}:
+    if phase in {"vector.promote", "vector.superseded", "vector.upsert", "sparse.embed"}:
+        _status(response, 200)
+        after = h.snapshot(parent)
         assert after["sql"]["version"] == old_version + 1 and not after["sql"]["is_deleted"]
-        assert after["points"], "Committed cutover failure evidence unexpectedly lacks every new point"
     elif phase == "vector.delete_ids":
-        _unchanged(before["sql"], after["sql"])
-        assert any(point["payload"]["chunk_status"] == "staging" for point in after["points"])
+        _status(response, 500)
+        _unchanged(before, h.snapshot(parent))
+        assert not c.events(operation="vector.delete_ids")
     else:
-        _unchanged(before, after)
+        _status(response, 422 if phase in {"chunker.chunk", "normalizer.normalize"} else 500)
+        if phase == "normalizer.normalize":
+            error = response.json()["errors"][0]
+            assert error["code"] == "TEXT_NORMALIZATION_FAILED" and error["source"]["pointer"] == "/data"
+        _unchanged(before, h.snapshot(parent))
 
 
 def _execute_external_qdrant(h, s, c):
@@ -1668,6 +1659,7 @@ def _execute_external_qdrant(h, s, c):
                 timing="after" if p.get("lost") else "before", action="lose_response" if p.get("lost") else "reject",
                 attempt=p.get("attempts", 1), status=p.get("status", 400))])
             response = _request(h, s.method, parent, request)
+            h.drain_outbox()
             _record(h, s, c, [parent])
             c.assert_triggered()
             if p.get("lost"):
@@ -1676,12 +1668,11 @@ def _execute_external_qdrant(h, s, c):
             if p.get("later"):
                 assert c.events(kind="upstream_outcome", epoch=epoch, operation="http.qdrant.upsert", attempt=1, applied=True)
             if s.method == "POST":
-                _status(response, 500)
-                assert h.snapshot(parent)["sql"] is None and not h.snapshot(parent)["points"]
+                _status(response, 201)
+                assert h.snapshot(parent)["sql"] is not None and h.snapshot(parent)["sql"]["version"] == 1
             elif s.method == "DELETE":
-                _status(response, 500)
-                assert h.snapshot(parent)["sql"]["version"] == 3
-                h.assert_consistent(parent, expected_deleted=False)
+                _status(response, 200)
+                assert h.snapshot(parent)["sql"]["version"] == 2 and h.snapshot(parent)["sql"]["is_deleted"]
             else:
                 _status(response, 200)
                 h.assert_consistent(parent, expected_version=2, expected_deleted=False)

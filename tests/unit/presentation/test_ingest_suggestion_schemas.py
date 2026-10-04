@@ -268,3 +268,31 @@ def test_ingest_suggestion_data_response_serialization():
         "chunksCount": 4,
         "status": "CREATED",
     }
+
+
+def test_ingest_suggestion_length_bounds():
+    base_payload = {
+        "title": "عنوان پیشنهاد معتبر",
+        "problem": "شرح مشکل معتبر سازمانی",
+        "solution": "راهکار اجرایی معتبر سازمانی",
+        "status": "APPROVED",
+    }
+
+    # suggestionId 128 valid, 129 invalid
+    valid_id = "s" * 128
+    req = IngestSuggestionRequest.model_validate({**base_payload, "suggestionId": valid_id})
+    assert req.suggestion_id == valid_id
+
+    invalid_id = "s" * 129
+    with pytest.raises(ValidationError):
+        IngestSuggestionRequest.model_validate({**base_payload, "suggestionId": invalid_id})
+
+    # contextTitle 512 valid, 513 invalid
+    valid_ctx = "c" * 512
+    req2 = IngestSuggestionRequest.model_validate({**base_payload, "suggestionId": "s1", "contextTitle": valid_ctx})
+    assert req2.context_title == valid_ctx
+
+    invalid_ctx = "c" * 513
+    with pytest.raises(ValidationError):
+        IngestSuggestionRequest.model_validate({**base_payload, "suggestionId": "s1", "contextTitle": invalid_ctx})
+

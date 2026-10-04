@@ -106,6 +106,7 @@ async def update_suggestion(
         Path(
             alias="suggestionId",
             min_length=1,
+            max_length=128,
             description="Unique suggestion identifier",
         ),
     ],
@@ -139,6 +140,7 @@ async def patch_suggestion(
         Path(
             alias="suggestionId",
             min_length=1,
+            max_length=128,
             description="Unique suggestion identifier",
         ),
     ],
@@ -172,6 +174,7 @@ async def delete_suggestion(
         Path(
             alias="suggestionId",
             min_length=1,
+            max_length=128,
             description="Unique suggestion identifier",
         ),
     ],

@@ -1,7 +1,7 @@
 import secrets
 
 import structlog
-from fastapi import Security, status
+from fastapi import Request, Security, status
 from fastapi.security import APIKeyHeader
 from src.infrastructure.configs.settings import security_settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -27,13 +27,24 @@ class AuthenticationError(StarletteHTTPException):
 
 
 async def get_api_key(
+    request: Request,
     api_key_header: str | None = Security(api_key_header_scheme),
 ) -> str:
     """
     Validates the incoming API Key against configured security settings.
     Differentiates between missing key and invalid key according to Contract 06.
+    Ensures duplicate headers with contradictory credentials are authenticated strictly.
     """
-    if api_key_header is None:
+    if request is not None and hasattr(request, "headers"):
+        header_values = request.headers.getlist(security_settings.API_KEY_NAME)
+    elif isinstance(request, str):
+        header_values = [request]
+    elif isinstance(api_key_header, str):
+        header_values = [api_key_header]
+    else:
+        header_values = []
+
+    if not header_values:
         await logger.awarning(
             "API Key authentication failed: missing header",
             header_name=security_settings.API_KEY_NAME,
@@ -43,14 +54,20 @@ async def get_api_key(
             message=f"Missing mandatory authentication header '{security_settings.API_KEY_NAME}'",
         )
 
-    if not secrets.compare_digest(api_key_header, security_settings.API_KEY):
-        await logger.awarning(
-            "API Key authentication failed: invalid key value",
-            header_name=security_settings.API_KEY_NAME,
-        )
-        raise AuthenticationError(
-            code="API_KEY_INVALID",
-            message="The provided API Key is invalid",
-        )
+    for val in header_values:
+        try:
+            is_valid = secrets.compare_digest(val, security_settings.API_KEY)
+        except TypeError:
+            is_valid = False
 
-    return api_key_header
+        if not is_valid:
+            await logger.awarning(
+                "API Key authentication failed: invalid key value",
+                header_name=security_settings.API_KEY_NAME,
+            )
+            raise AuthenticationError(
+                code="API_KEY_INVALID",
+                message="The provided API Key is invalid",
+            )
+
+    return header_values[0]

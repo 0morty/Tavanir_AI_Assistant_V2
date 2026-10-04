@@ -35,7 +35,7 @@ class SuggestionModel(Base, TimestampMixin):
         ),
     )
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     problem: Mapped[str] = mapped_column(Text, nullable=False)
     solution: Mapped[str] = mapped_column(Text, nullable=False)
@@ -54,7 +54,7 @@ class SuggestionModel(Base, TimestampMixin):
         String(10), nullable=True, index=True
     )
     context_title: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, index=True
+        String(512), nullable=True, index=True
     )
     is_deleted: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default="false"

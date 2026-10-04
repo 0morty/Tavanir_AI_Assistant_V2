@@ -1,5 +1,6 @@
 from enum import Enum
 
+import httpx
 from openai import AsyncOpenAI
 
 from src.application.exceptions import LLMConfigurationError
@@ -73,4 +74,5 @@ class AsyncOpenAIClientFactory:
             base_url=base_url,
             timeout=timeout,
             max_retries=llm_settings.MAX_RETRIES,
+            http_client=httpx.AsyncClient(trust_env=False),
         )

@@ -33,6 +33,7 @@ from src.domain.enums import (
     SuggestionStatus,
 )
 from src.domain.exceptions import (
+    SuggestionAlreadyExistsError,
     SuggestionNotFoundError,
     SuggestionProcessingConflictError,
 )
@@ -70,6 +71,15 @@ class FakeSuggestionRepo(ISuggestionRepository):
             if s and (include_deleted or not s.is_deleted):
                 results.append(s)
         return results
+
+    async def insert(self, suggestion: Suggestion) -> None:
+        if suggestion.id in self.suggestions:
+            raise SuggestionAlreadyExistsError(
+                f"Suggestion with ID '{suggestion.id}' already exists.",
+                pointer="/data/suggestionId",
+            )
+        self.suggestions[suggestion.id] = suggestion
+        self.saved_entities.append(suggestion)
 
     async def save(self, suggestion: Suggestion) -> None:
         self.suggestions[suggestion.id] = suggestion

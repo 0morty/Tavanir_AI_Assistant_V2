@@ -211,9 +211,9 @@ def _variants() -> tuple[Scenario, ...]:
                 continue
             add("VAL-11", f"{endpoint}-{label}", "validation", endpoint=endpoint, field="status", value=value, code="INVALID_SUGGESTION_STATUS")
         for value in (True, False):
-            add("VAL-12", f"{endpoint}-status-{str(value).lower()}", "validation", endpoint=endpoint, field="status", value=value, status=(201 if endpoint == "ingest" else 200) if value else 422, code=None if value else "INVALID_SUGGESTION_STATUS", expected={"status_id": 1} if value else {}, characterization=True)
+            add("VAL-12", f"{endpoint}-status-{str(value).lower()}", "validation", endpoint=endpoint, field="status", value=value, status=422, code="INVALID_SUGGESTION_STATUS")
             for name in ("committeeScrutiny", "secretariatScrutiny"):
-                add("VAL-12", f"{endpoint}-{name}-{str(value).lower()}", "validation", endpoint=endpoint, field=name, value=value, status=201 if endpoint == "ingest" else 200, expected={SQL_FIELDS[name] + "_id": int(value)}, characterization=True)
+                add("VAL-12", f"{endpoint}-{name}-{str(value).lower()}", "validation", endpoint=endpoint, field=name, value=value, status=422, code="INVALID_COMMITTEE_SCRUTINY" if name == "committeeScrutiny" else "INVALID_SECRETARIAT_SCRUTINY")
         for field_name, table in (("committeeScrutiny", COMMITTEE), ("secretariatScrutiny", SECRETARIAT)):
             for number, (name, title) in table.items():
                 reps = {"integer": number, "ascii": str(number), "persian-digits": _script_digits(str(number), "persian"), "arabic-digits": _script_digits(str(number), "arabic"), "enum": name, "title": title, "arabic-letters": title.replace("ی", "ي").replace("ک", "ك"), "half-spaces": title.replace(" ", "\u200c")}
@@ -233,7 +233,7 @@ def _variants() -> tuple[Scenario, ...]:
         for label, value in (("separator", "1403-02-18"), ("unpadded-month", "1403/2/18"), ("unpadded-day", "1403/02/8"), ("digits", "140/02/18"), ("year-low", "0999/01/01"), ("year-high", "5000/01/01"), ("month-zero", "1403/00/01"), ("month-high", "1403/13/01"), ("day-zero", "1403/01/00"), ("day-high", "1403/01/32"), ("suffix", "1403/01/01text")):
             add("VAL-18", f"{endpoint}-{label}", "validation", endpoint=endpoint, field="shamsiDate", value=value, code="INVALID_SHAMSI_DATE", pointer="/data/date")
         for value in ("1402/07/31", "1402/12/30"):
-            add("VAL-19", f"{endpoint}-{value.replace('/', '-')}", "validation", endpoint=endpoint, field="shamsiDate", value=value, status=201 if endpoint == "ingest" else 200, expected={"shamsi_date": value}, characterization=True)
+            add("VAL-19", f"{endpoint}-{value.replace('/', '-')}", "validation", endpoint=endpoint, field="shamsiDate", value=value, status=422, code="INVALID_SHAMSI_DATE", pointer="/data/date")
         for label, value in (("number", 14030218), ("boolean", True), ("array", []), ("object", {})):
             add("VAL-20", f"{endpoint}-{label}", "validation", endpoint=endpoint, field="shamsiDate", value=value, code="INVALID_SHAMSI_DATE")
         for field_name, value in (("tributaryScrutiny", -2), ("tributaryComment", "abcdefghijklmnop")):
@@ -249,13 +249,13 @@ def _variants() -> tuple[Scenario, ...]:
                 add("VAL-24", f"{endpoint}-{name}-{label}", "validation", endpoint=endpoint, field=name, value=value, code="VALIDATION_ERROR")
             add("VAL-24", f"{endpoint}-{name}-trimmed", "validation", endpoint=endpoint, field=name, value="  abcdefghijklmnop  ", status=201 if endpoint == "ingest" else 200, expected={SQL_FIELDS[name]: "abcdefghijklmnop"})
         for length in (255, 256):
-            add("VAL-25", f"{endpoint}-context-{length}", "validation", endpoint=endpoint, field="contextTitle", value=(string.ascii_lowercase * 10)[:length], status=(201 if endpoint == "ingest" else 200) if length == 255 else 500, code=None if length == 255 else "INTERNAL_ERROR", expected={"context_title": (string.ascii_lowercase * 10)[:length]} if length == 255 else {}, characterization=length == 256)
+            add("VAL-25", f"{endpoint}-context-{length}", "validation", endpoint=endpoint, field="contextTitle", value=(string.ascii_lowercase * 10)[:length], status=201 if endpoint == "ingest" else 200, expected={"context_title": (string.ascii_lowercase * 10)[:length]})
         for label, media in (("charset", "application/json; charset=utf-8"), ("plus-json", "application/vnd.api+json"), ("absent", None), ("text", "text/plain"), ("form", "application/x-www-form-urlencoded"), ("multipart", "multipart/form-data; boundary=e2e")):
             add("VAL-30", f"{endpoint}-{label}", "media", endpoint=endpoint, media=media, accepted=label in ("charset", "plus-json", "absent"), characterization=True)
         for variant in ("duplicate-property", "escaped-unicode", "literal-unicode", "large-valid", "large-invalid"):
             add("VAL-31", f"{endpoint}-{variant}", "json_characterization", endpoint=endpoint, variant=variant, characterization=True)
     for length in (1, 64, 65):
-        add("VAL-25", f"ingest-id-{length}", "identity", length=length, characterization=length == 65)
+        add("VAL-25", f"ingest-id-{length}", "identity", length=length)
     for variant in ("persian", "case-distinct", "trimmed", "leading-zero", "digit-script"):
         add("VAL-26" if variant in ("persian", "case-distinct", "trimmed") else "VAL-29", variant, "identity", variant=variant)
     for label, value in (("empty", ""), ("whitespace", " "), ("null", None), ("number", 2), ("boolean", True), ("array", []), ("object", {})):
@@ -448,7 +448,7 @@ def assert_consistent(harness: Any, suggestion_id: str, response: Any, *, previo
         uuid.UUID(payload["chunk_id"])
         assert payload["chunk_status"] == "active", f"non-active final point: {payload}"
         assert payload["status"] == STATUS[row["status_id"]][1]
-        assert "version" not in payload and "parent_content" not in payload
+        assert "parent_content" not in payload and payload.get("version") == row["version"]
         for sql_name, payload_name in (("context_title", "context_title"), ("shamsi_date", "date"), ("committee_scrutiny", "committee_scrutiny"), ("committee_scrutiny_id", "committee_scrutiny_id"), ("secretariat_scrutiny", "secretariat_scrutiny"), ("secretariat_scrutiny_id", "secretariat_scrutiny_id")):
             if row[sql_name] is None:
                 assert payload_name not in payload, f"null metadata not omitted: {payload_name}"
@@ -845,11 +845,7 @@ def _run_identity(harness: Any, length: int | None = None, variant: str | None =
         before = harness.snapshot(suggestion_id)
         assert before["sql"] is None and not before["points"], "exact boundary ID is not fresh"
         response = _request(harness, "ingest", suggestion_id, _body("ingest", suggestion_id))
-        if length == 65:
-            assert_error(response, 500, "INTERNAL_ERROR")
-            _assert_unchanged(harness, suggestion_id, before)
-        else:
-            assert_consistent(harness, suggestion_id, response)
+        assert_consistent(harness, suggestion_id, response)
         return
     if variant == "persian":
         suggestion_id = harness.new_id("شناسه-يک")
@@ -1238,9 +1234,9 @@ def _run_patch(harness: Any, variant: str, **params: Any) -> None:
         body = {name: params["value"]}
         if variant == "blank-overlay":
             body["title"] = "valid new title"
-        expected[SQL_FIELDS[name]] = before["sql"][SQL_FIELDS[name]]
-        if variant == "blank-noop":
-            expected.update({key: value for key, value in before["sql"].items() if key not in ("updated_at", "version")})
+            expected[SQL_FIELDS[name]] = before["sql"][SQL_FIELDS[name]]
+        else:
+            code = "VALIDATION_ERROR"
     elif variant in ("comment-only", "scrutiny-only", "preserve-independent"):
         body = {"secretariatComment": "new secretariat commentary"} if variant != "scrutiny-only" else {"secretariatScrutiny": -2}
         expected = {"secretariat_comment": "new secretariat commentary"} if variant != "scrutiny-only" else {"secretariat_scrutiny_id": -2, "secretariat_comment": None}

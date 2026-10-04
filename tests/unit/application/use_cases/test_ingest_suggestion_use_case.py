@@ -30,6 +30,7 @@ from src.domain.exceptions import (
     InvalidSuggestionContentError,
     SuggestionAlreadyExistsError,
     SuggestionChunkingError,
+    SuggestionProcessingConflictError,
 )
 from src.domain.interfaces import (
     IChunkingStrategy,
@@ -52,6 +53,14 @@ class FakeSuggestionRepository(ISuggestionRepository):
         self, ids: Sequence[str], include_deleted: bool = False
     ) -> Sequence[Suggestion]:
         return []
+
+    async def insert(self, entity: Suggestion) -> None:
+        if self._existing and self._existing.id == entity.id:
+            raise SuggestionAlreadyExistsError(
+                f"Suggestion with ID '{entity.id}' already exists.",
+                pointer="/data/suggestionId",
+            )
+        self.saved_entities.append(entity)
 
     async def save(self, entity: Suggestion) -> None:
         self.saved_entities.append(entity)
@@ -397,3 +406,49 @@ async def test_enqueue_failure_does_not_fail_http_response(valid_dto):
     assert uow.suggestions.saved_entities[0].version == 1
     assert len(uow.outbox.saved_events) == 1
     assert uow.committed is True
+
+
+@pytest.mark.asyncio
+async def test_ingest_suggestion_advisory_lock_contention(valid_dto):
+    uow = FakeUoW()
+    uow.try_acquire_advisory_lock = AsyncMock(return_value=False)  # type: ignore
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+
+    use_case = IngestSuggestionUseCase(
+        uow=uow,
+        normalizer=FakeNormalizer(),
+        chunker=FakeChunker(),
+        task_queue=mock_task_queue,
+    )
+
+    with pytest.raises(SuggestionProcessingConflictError) as exc_info:
+        await use_case.execute(valid_dto)
+
+    assert "currently being processed" in str(exc_info.value)
+    assert exc_info.value.pointer == "/data/suggestionId"
+
+
+@pytest.mark.asyncio
+async def test_ingest_suggestion_concurrent_insert_duplicate(valid_dto):
+    uow = FakeUoW()
+    # Simulate race condition where get_by_id passed, but insert encounters duplicate key
+    uow.suggestions.insert = AsyncMock(  # type: ignore
+        side_effect=SuggestionAlreadyExistsError(
+            f"Suggestion with ID '{valid_dto.suggestion_id}' already exists.",
+            pointer="/data/suggestionId",
+        )
+    )
+    mock_task_queue = AsyncMock(spec=ITaskQueueService)
+
+    use_case = IngestSuggestionUseCase(
+        uow=uow,
+        normalizer=FakeNormalizer(),
+        chunker=FakeChunker(),
+        task_queue=mock_task_queue,
+    )
+
+    with pytest.raises(SuggestionAlreadyExistsError) as exc_info:
+        await use_case.execute(valid_dto)
+
+    assert f"Suggestion with ID '{valid_dto.suggestion_id}' already exists." in str(exc_info.value)
+

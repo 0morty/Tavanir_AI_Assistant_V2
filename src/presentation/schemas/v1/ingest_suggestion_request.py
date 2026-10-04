@@ -28,6 +28,7 @@ class IngestSuggestionRequest(BaseRequestModel):
     suggestion_id: str = Field(
         ...,
         min_length=1,
+        max_length=128,
         description="Unique business identifier of the suggestion",
     )
     title: str = Field(
@@ -63,6 +64,7 @@ class IngestSuggestionRequest(BaseRequestModel):
     )
     context_title: str | None = Field(
         default=None,
+        max_length=512,
         description="Organizational department or domain context",
     )
     secretariat_scrutiny: Any = Field(

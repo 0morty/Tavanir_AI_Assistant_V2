@@ -78,6 +78,9 @@ class FakeSuggestionRepo(ISuggestionRepository):
                 results.append(s)
         return results
 
+    async def insert(self, suggestion: Suggestion) -> None:
+        self.saved_suggestions.append(suggestion)
+
     async def save(self, suggestion: Suggestion) -> None:
         self.saved_suggestions.append(suggestion)
 

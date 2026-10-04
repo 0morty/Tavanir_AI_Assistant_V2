@@ -59,6 +59,7 @@ class PatchSuggestionRequest(BaseRequestModel):
     )
     context_title: str | None = Field(
         default=None,
+        max_length=512,
         description="Organizational department or domain context",
     )
     secretariat_scrutiny: Any = Field(
@@ -123,11 +124,15 @@ class PatchSuggestionRequest(BaseRequestModel):
         if trib_comment is not None and sec_comment is None:
             data["secretariat_comment"] = trib_comment
 
-        # Rule 2: Ensure at least one field is provided and non-null
-        valid_values = [v for k, v in data.items() if v is not None]
-        if not valid_values:
+        # Rule 2: Ensure at least one substantive, non-blank field is provided
+        substantive_values = [
+            v
+            for k, v in data.items()
+            if v is not None and (not isinstance(v, str) or v.strip())
+        ]
+        if not substantive_values:
             raise ValueError(
-                "At least one non-null field must be provided in PATCH request."
+                "At least one non-null field must be provided in PATCH request with substantive content."
             )
 
         return data
@@ -201,9 +206,13 @@ class PatchSuggestionRequest(BaseRequestModel):
             solution=self.solution.strip() if self.solution is not None else None,
             status=self.status,
             committee_scrutiny=self.committee_scrutiny,
-            description=self.description.strip() if self.description is not None else None,
+            description=self.description.strip()
+            if self.description is not None
+            else None,
             shamsi_date=self.shamsi_date,
-            context_title=self.context_title.strip() if self.context_title is not None else None,
+            context_title=self.context_title.strip()
+            if self.context_title is not None
+            else None,
             committee_scrutiny_id=committee_id,
             secretariat_scrutiny=self.secretariat_scrutiny,
             secretariat_comment=self.secretariat_comment.strip()

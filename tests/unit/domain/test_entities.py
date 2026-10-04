@@ -66,6 +66,20 @@ def test_shamsi_date():
     valid = ShamsiDate("1402/05/20")
     assert str(valid) == "1402/05/20"
 
+    # Month 1-6 allows up to 31 days
+    assert str(ShamsiDate("1402/06/31")) == "1402/06/31"
+
+    # Month 7-11 has maximum 30 days; day 31 must raise
+    with pytest.raises(InvalidShamsiDateFormatError):
+        ShamsiDate("1402/07/31")
+
+    # Month 12 in common year (1402) has 29 days; day 30 must raise
+    with pytest.raises(InvalidShamsiDateFormatError):
+        ShamsiDate("1402/12/30")
+
+    # Month 12 in leap year (1403) has 30 days; day 30 is valid
+    assert str(ShamsiDate("1403/12/30")) == "1403/12/30"
+
     with pytest.raises(InvalidShamsiDateFormatError):
         ShamsiDate("2024-05-20")
 

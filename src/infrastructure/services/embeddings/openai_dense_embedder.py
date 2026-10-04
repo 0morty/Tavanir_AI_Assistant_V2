@@ -5,7 +5,9 @@ from openai import AsyncOpenAI
 
 from src.application.exceptions import (
     EmbedderAPIError,
+    EmbedderAuthenticationError,
     EmbedderConnectionError,
+    EmbedderContextLengthError,
 )
 from src.application.interfaces.i_dense_embedder import IDenseEmbedder
 from src.infrastructure.services.base_openai_service import BaseOpenAIService
@@ -47,6 +49,14 @@ class OpenAIDenseEmbedder(IDenseEmbedder, BaseOpenAIService):
     @property
     def _api_error_cls(self) -> type[EmbedderAPIError]:
         return EmbedderAPIError
+
+    @property
+    def _auth_error_cls(self) -> type[EmbedderAuthenticationError]:
+        return EmbedderAuthenticationError
+
+    @property
+    def _context_length_error_cls(self) -> type[EmbedderContextLengthError]:
+        return EmbedderContextLengthError
 
     @property
     def embedding_dimension(self) -> int:

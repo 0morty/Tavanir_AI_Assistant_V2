@@ -28,6 +28,15 @@ class ISuggestionRepository(ABC):
         pass
 
     @abstractmethod
+    async def insert(self, suggestion: Suggestion) -> None:
+        """
+        Strictly insert a new suggestion record in SQL.
+        Unlike save(), this does not perform an upsert.
+        Raises SuggestionAlreadyExistsError if a record with the same ID already exists.
+        """
+        pass
+
+    @abstractmethod
     async def save(self, suggestion: Suggestion) -> None:
         """Persist or update a single suggestion record in SQL."""
         pass

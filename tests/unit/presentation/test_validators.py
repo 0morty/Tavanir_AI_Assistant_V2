@@ -113,3 +113,28 @@ def test_parse_secretariat_scrutiny():
 
     with pytest.raises(InvalidSecretariatScrutinyError):
         parse_secretariat_scrutiny("عنوان ناموجود دبیرخانه")
+
+
+def test_boolean_rejection_in_parsers():
+    # Booleans must not coerce to integers (True != 1, False != 0)
+    with pytest.raises(InvalidSuggestionStatusError) as exc_info:
+        parse_suggestion_status(True)
+    assert exc_info.value.pointer == "/data/status"
+
+    with pytest.raises(InvalidSuggestionStatusError):
+        parse_suggestion_status(False)
+
+    with pytest.raises(InvalidCommitteeScrutinyError) as exc_info:
+        parse_committee_scrutiny(True)
+    assert exc_info.value.pointer == "/data/committeeScrutiny"
+
+    with pytest.raises(InvalidCommitteeScrutinyError):
+        parse_committee_scrutiny(False)
+
+    with pytest.raises(InvalidSecretariatScrutinyError) as exc_info:
+        parse_secretariat_scrutiny(True)
+    assert exc_info.value.pointer == "/data/secretariatScrutiny"
+
+    with pytest.raises(InvalidSecretariatScrutinyError):
+        parse_secretariat_scrutiny(False)
+

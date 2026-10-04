@@ -41,6 +41,11 @@ class BaseOpenAIService(ABC):
         """Returns the specific application AuthError class. Defaults to _api_error_cls."""
         return self._api_error_cls
 
+    @property
+    def _context_length_error_cls(self) -> type[Exception] | None:
+        """Returns the specific application ContextLengthError class. Defaults to None."""
+        return None
+
     @staticmethod
     def _extract_retry_after(err: APIError) -> float | None:
         """Attempts to parse the Retry-After header from the API response."""
@@ -90,6 +95,17 @@ class BaseOpenAIService(ABC):
 
         except APIStatusError as err:
             msg = getattr(err, "message", None) or str(err)
+            error_code = getattr(err, "code", None)
+            if self._context_length_error_cls is not None:
+                is_context_limit = (
+                    error_code == "context_length_exceeded"
+                    or "context length" in str(msg).lower()
+                    or "context_length" in str(msg).lower()
+                )
+                if is_context_limit:
+                    error_msg = f"Context length exceeded during {operation_name}: {msg}"
+                    raise self._context_length_error_cls(error_msg) from err
+
             error_msg = f"API error during {operation_name}: {msg}"
             status_code = getattr(err, "status_code", None)
             raise self._create_api_error(error_msg, status_code=status_code) from err

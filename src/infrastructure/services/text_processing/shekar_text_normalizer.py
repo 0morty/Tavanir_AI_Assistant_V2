@@ -2,6 +2,7 @@ import asyncio
 import re
 from collections.abc import Sequence
 from typing import cast
+from uuid import uuid4
 
 import structlog
 from shekar.preprocessing import (
@@ -103,26 +104,45 @@ _PREFIX_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 
+import secrets
+import string
+
+
+def _generate_nonce(length: int = 16) -> str:
+    chars = string.ascii_uppercase + string.digits
+    nonce: list[str] = []
+    last: str | None = None
+    for _ in range(length):
+        c = secrets.choice(chars)
+        while c == last:
+            c = secrets.choice(chars)
+        nonce.append(c)
+        last = c
+    return "".join(nonce)
+
+
 class TokenStore:
     """
     Encapsulates thread-safe, call-local token masking and restoration
     for preserving Markdown architecture during Persian text normalization.
+    Uses dynamic per-instance nonces to prevent collision with literal text.
     """
 
-    __slots__ = ("_tokens",)
+    __slots__ = ("_tokens", "_nonce")
 
     def __init__(self) -> None:
         self._tokens: list[str] = []
+        self._nonce: str = _generate_nonce()
 
     def mask(self, val: str) -> str:
         """Stores a raw string slice and returns a collision-safe placeholder."""
         self._tokens.append(val)
-        return f"_TAVANIR_TOKEN_{len(self._tokens) - 1}_"
+        return f"__TAV_{self._nonce}_{len(self._tokens) - 1}__"
 
     def restore(self, text: str) -> str:
         """Restores all protected tokens in reverse order of discovery."""
         for i in range(len(self._tokens) - 1, -1, -1):
-            text = text.replace(f"_TAVANIR_TOKEN_{i}_", self._tokens[i])
+            text = text.replace(f"__TAV_{self._nonce}_{i}__", self._tokens[i])
         return text
 
 

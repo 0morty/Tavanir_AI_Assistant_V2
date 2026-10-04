@@ -65,10 +65,28 @@ class ShamsiDate:
     value: str
 
     def __post_init__(self):
-        pattern = r"^[1-4]\d{3}/(0[1-9]|1[0-2])/(0[1-9]|[12]\d|3[01])$"
-        if not re.match(pattern, self.value):
+        pattern = r"^([1-4]\d{3})/(0[1-9]|1[0-2])/(0[1-9]|[12]\d|3[01])$"
+        match = re.match(pattern, self.value)
+        if not match:
             raise InvalidShamsiDateFormatError(
                 f"Invalid Shamsi date format: '{self.value}'. Expected 'YYYY/MM/DD'."
+            )
+        year = int(match.group(1))
+        month = int(match.group(2))
+        day = int(match.group(3))
+
+        if 1 <= month <= 6:
+            max_days = 31
+        elif 7 <= month <= 11:
+            max_days = 30
+        else:  # Month 12 (Esfand)
+            # Birashk 33-year cycle leap year calculation for Solar Hijri calendar
+            is_leap = (year % 33) in (1, 5, 9, 13, 17, 22, 26, 30)
+            max_days = 30 if is_leap else 29
+
+        if day > max_days:
+            raise InvalidShamsiDateFormatError(
+                f"Invalid Shamsi date: '{self.value}'. Month {month:02d} has maximum {max_days} days."
             )
 
     def __str__(self) -> str:

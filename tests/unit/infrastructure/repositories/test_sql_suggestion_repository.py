@@ -22,6 +22,7 @@ from src.domain.enums import (
     SecretariatScrutiny,
     SuggestionStatus,
 )
+from src.domain.exceptions import SuggestionAlreadyExistsError
 
 
 def _create_sample_suggestion(
@@ -431,3 +432,32 @@ async def test_upsert_updates_scrutiny_columns(
             retrieved.secretariat_evaluation.comment
             == "موضوع در حیطه اختیارات شرکت نیست."
         )
+
+
+@pytest.mark.asyncio
+async def test_insert_suggestion_success(session_factory: async_sessionmaker[AsyncSession]):
+    async with clean_db_session(session_factory) as db_session:
+        repo = SqlSuggestionRepository(session=db_session)
+        sugg = _create_sample_suggestion(suggestion_id="SUG-DB-INSERT-01")
+        await repo.insert(sugg)
+        await db_session.commit()
+
+        retrieved = await repo.get_by_id("SUG-DB-INSERT-01")
+        assert retrieved is not None
+        assert retrieved.id == "SUG-DB-INSERT-01"
+
+
+@pytest.mark.asyncio
+async def test_insert_suggestion_duplicate_raises_already_exists(session_factory: async_sessionmaker[AsyncSession]):
+    async with clean_db_session(session_factory) as db_session:
+        repo = SqlSuggestionRepository(session=db_session)
+        sugg = _create_sample_suggestion(suggestion_id="SUG-DB-INSERT-DUP")
+        await repo.insert(sugg)
+        await db_session.commit()
+
+        with pytest.raises(SuggestionAlreadyExistsError) as exc_info:
+            await repo.insert(sugg)
+
+        assert "already exists" in str(exc_info.value)
+        assert exc_info.value.pointer == "/data/suggestionId"
+

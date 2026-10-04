@@ -138,7 +138,8 @@ class E2EConfig:
             "QDRANT_DENSE_VECTOR_NAME": self.dense_name, "QDRANT_SPARSE_VECTOR_NAME": self.sparse_name,
             "EMBEDDING_DIMENSION": str(self.dense_dimension), "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1", "TOKENIZERS_PARALLELISM": "false",
-            "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1",
+            "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1", "NO_PROXY": "localhost,127.0.0.1,::1",
+            "no_proxy": "localhost,127.0.0.1,::1",
         }
 
     def secrets(self) -> tuple[str, ...]:

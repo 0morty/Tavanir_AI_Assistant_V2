@@ -124,3 +124,33 @@ def test_bulk_delete_validation_bounds():
     dto = req.to_dto()
     assert isinstance(dto, BulkDeleteSuggestionsDTO)
     assert dto.suggestion_ids == ["sugg-1", "sugg-2", "sugg-3"]
+
+
+def test_patch_rejects_blank_or_whitespace_only_payload():
+    # Blank or whitespace-only optional strings must be rejected as no-ops
+    with pytest.raises(ValidationError) as exc_info:
+        PatchSuggestionRequest.model_validate({"description": "   "})
+    assert "At least one non-null field" in str(exc_info.value)
+
+    with pytest.raises(ValidationError) as exc_info:
+        PatchSuggestionRequest.model_validate({"contextTitle": ""})
+    assert "At least one non-null field" in str(exc_info.value)
+
+    with pytest.raises(ValidationError) as exc_info:
+        PatchSuggestionRequest.model_validate(
+            {"description": "   ", "contextTitle": "", "shamsiDate": " "}
+        )
+    assert "At least one non-null field" in str(exc_info.value)
+
+
+def test_context_title_length_bounds():
+    # 512 is valid
+    valid_title = "a" * 512
+    req = PatchSuggestionRequest.model_validate({"contextTitle": valid_title})
+    assert req.context_title == valid_title
+
+    # 513 is rejected
+    invalid_title = "a" * 513
+    with pytest.raises(ValidationError):
+        PatchSuggestionRequest.model_validate({"contextTitle": invalid_title})
+

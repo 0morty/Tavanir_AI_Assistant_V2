@@ -495,3 +495,21 @@ def check_status(suggestion_id: int) -> dict:
     assert (
         "***تذکر نهایی: هرگونه پرداخت منوط به تایید کمیسیون تخصصی است.***" in normalized
     )
+
+
+def test_literal_placeholder_and_protected_code_collision_prevention(
+    normalizer: ShekarTextNormalizer,
+):
+    """
+    ING-17: Verifies that literal placeholder strings like '_TAVANIR_TOKEN_0_'
+    in the raw text are not corrupted or replaced when neighboring code spans
+    are masked and restored.
+    """
+    raw_text = "مصرف انرژی _TAVANIR_TOKEN_0_ و `x = ۱`"
+    normalized = normalizer.normalize(raw_text)
+
+    # Both literal string and code block must be preserved independently
+    assert "_TAVANIR_TOKEN_0_" in normalized
+    assert "`x = ۱`" in normalized
+    assert normalized == "مصرف انرژی _TAVANIR_TOKEN_0_ و `x = ۱`"
+

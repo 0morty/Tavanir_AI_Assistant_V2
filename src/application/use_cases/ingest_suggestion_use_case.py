@@ -7,6 +7,7 @@ import structlog
 from src.application.dtos import CreateSuggestionDTO, IngestSuggestionResponseDTO
 from src.application.interfaces import ITaskQueueService, ITextNormalizer, IUnitOfWork
 from src.application.services.suggestion_normalizer import normalize_suggestion
+from src.application.utils.advisory_lock import suggestion_id_to_lock_key
 from src.domain.entities import (
     CommitteeEvaluation,
     OutboxEvent,
@@ -19,6 +20,7 @@ from src.domain.enums import OutboxEventType, OutboxResourceType
 from src.domain.exceptions import (
     SuggestionAlreadyExistsError,
     SuggestionChunkingError,
+    SuggestionProcessingConflictError,
 )
 from src.domain.interfaces import ISuggestionChunker
 
@@ -46,7 +48,14 @@ class IngestSuggestionUseCase:
 
     async def execute(self, dto: CreateSuggestionDTO) -> IngestSuggestionResponseDTO:
         # Step 1: Pre-check duplicate existence within transaction (Gatekeeper)
+        lock_key = suggestion_id_to_lock_key(dto.suggestion_id)
         async with self._uow as uow:
+            locked = await uow.try_acquire_advisory_lock(lock_key)
+            if not locked:
+                raise SuggestionProcessingConflictError(
+                    f"Suggestion '{dto.suggestion_id}' is currently being processed by another operation.",
+                    pointer="/data/suggestionId",
+                )
             existing = await uow.suggestions.get_by_id(
                 dto.suggestion_id, include_deleted=True
             )
@@ -119,7 +128,13 @@ class IngestSuggestionUseCase:
         )
 
         async with self._uow as uow:
-            await uow.suggestions.save(normalized_suggestion)
+            locked = await uow.try_acquire_advisory_lock(lock_key)
+            if not locked:
+                raise SuggestionProcessingConflictError(
+                    f"Suggestion '{dto.suggestion_id}' is currently being processed by another operation.",
+                    pointer="/data/suggestionId",
+                )
+            await uow.suggestions.insert(normalized_suggestion)
             await uow.outbox.append(event)
             await uow.commit()
 

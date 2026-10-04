@@ -1068,7 +1068,13 @@ def _execute_provider(h, s, c):
                 if fault in {"unreachable", "reset", "timeout"}:
                     _status(response, 503)
                     assert response.json()["errors"][0]["code"] == "EMBEDDER_CONNECTION_FAILED"
-                elif fault in {"401", "429_retry", "429_plain", "500", "unknown_model", "context_limit", "decoding"}:
+                elif fault == "401":
+                    _status(response, 401)
+                    assert response.json()["errors"][0]["code"] == "EMBEDDER_AUTH_FAILED"
+                elif fault == "context_limit":
+                    _status(response, 422)
+                    assert response.json()["errors"][0]["code"] == "EMBEDDER_CONTEXT_LENGTH"
+                elif fault in {"429_retry", "429_plain", "500", "unknown_model", "decoding"}:
                     _status(response, 500)
                     assert response.json()["errors"][0]["code"] == "EMBEDDING_FAILED"
                 elif fault in {"missing", "extra"}:

@@ -38,7 +38,8 @@ def assert_response(response, status):
     result = response.json()
     if status < 300:
         assert result["status"] == status
-        assert "errors" not in result
+        if status != 207:
+            assert "errors" not in result
     else:
         assert result["errors"]
     return result

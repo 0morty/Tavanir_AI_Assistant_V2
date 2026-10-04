@@ -40,6 +40,13 @@ def parse_suggestion_status(value: Any) -> SuggestionStatus:
     if isinstance(value, SuggestionStatus):
         return value
 
+    if isinstance(value, bool):
+        raise InvalidSuggestionStatusError(
+            f"Cannot parse suggestion status from boolean value: '{value}'",
+            pointer="/data/status",
+            field_name="status",
+        )
+
     try:
         if isinstance(value, int):
             return SuggestionStatus.from_id(value)
@@ -82,6 +89,13 @@ def parse_committee_scrutiny(value: Any) -> CommitteeScrutiny | None:
     if isinstance(value, CommitteeScrutiny):
         return value
 
+    if isinstance(value, bool):
+        raise InvalidCommitteeScrutinyError(
+            f"Cannot parse committee scrutiny from boolean value: '{value}'",
+            pointer="/data/committeeScrutiny",
+            field_name="committee_scrutiny",
+        )
+
     try:
         if isinstance(value, int):
             return CommitteeScrutiny.from_code(value)
@@ -119,6 +133,13 @@ def parse_secretariat_scrutiny(value: Any) -> SecretariatScrutiny | None:
 
     if isinstance(value, SecretariatScrutiny):
         return value
+
+    if isinstance(value, bool):
+        raise InvalidSecretariatScrutinyError(
+            f"Cannot parse secretariat scrutiny from boolean value: '{value}'",
+            pointer="/data/secretariatScrutiny",
+            field_name="secretariat_scrutiny",
+        )
 
     try:
         if isinstance(value, int):

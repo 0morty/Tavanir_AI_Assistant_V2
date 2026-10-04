@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities import (
@@ -20,6 +21,7 @@ from src.domain.enums import (
     SecretariatScrutiny,
     SuggestionStatus,
 )
+from src.domain.exceptions import SuggestionAlreadyExistsError
 from src.domain.interfaces.i_suggestion_repository import ISuggestionRepository
 from src.infrastructure.db.repositories.sql.base_sql_repository import BaseSqlRepository
 from src.infrastructure.db.sql_models.suggestion_model import SuggestionModel
@@ -193,6 +195,27 @@ class SqlSuggestionRepository(
 
         entity_map = {model.id: self._to_entity(model) for model in models}
         return [entity_map[sid] for sid in unique_ids if sid in entity_map]
+
+    async def insert(self, suggestion: Suggestion) -> None:
+        """
+        Insert a new suggestion record into PostgreSQL.
+        Unlike save(), this does not perform an upsert (ON CONFLICT DO UPDATE).
+        Raises SuggestionAlreadyExistsError if a record with the same ID already exists.
+        """
+        values = self._entity_to_dict(suggestion)
+        stmt = pg_insert(SuggestionModel).values(values)
+        try:
+            await self.session.execute(stmt)
+        except IntegrityError as err:
+            orig = getattr(err, "orig", None)
+            pgcode = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+            err_str = str(err).lower()
+            if pgcode == "23505" or "unique constraint" in err_str or "duplicate key" in err_str:
+                raise SuggestionAlreadyExistsError(
+                    f"Suggestion with ID '{suggestion.id}' already exists.",
+                    pointer="/data/suggestionId",
+                ) from err
+            raise
 
     async def save(self, suggestion: Suggestion) -> None:
         """Persist or update a single suggestion record in PostgreSQL via atomic upsert."""

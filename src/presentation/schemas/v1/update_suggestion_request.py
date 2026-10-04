@@ -27,6 +27,7 @@ class UpdateSuggestionRequest(BaseRequestModel):
 
     suggestion_id: str | None = Field(
         default=None,
+        max_length=128,
         description="Optional ID in body. If provided, must match the URL path parameter exactly.",
     )
     title: str = Field(
@@ -62,6 +63,7 @@ class UpdateSuggestionRequest(BaseRequestModel):
     )
     context_title: str | None = Field(
         default=None,
+        max_length=512,
         description="Organizational department or domain context",
     )
     secretariat_scrutiny: Any = Field(

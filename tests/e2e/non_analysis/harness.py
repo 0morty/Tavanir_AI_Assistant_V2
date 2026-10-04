@@ -758,6 +758,99 @@ class AppProcess:
         self.stop()
 
 
+class OutboxWorker:
+    def __init__(self, config: E2EConfig, overrides: dict):
+        self.config = config
+        self.overrides = overrides
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._started = threading.Event()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._container = None
+        self._engine = None
+
+    def start(self):
+        self._stop_event.clear()
+        self._started.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        self._started.wait(timeout=10.0)
+
+    def _run(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._worker_loop())
+        finally:
+            self._loop.close()
+
+    async def _worker_loop(self):
+        for k, v in self.config.application_environment().items():
+            os.environ[k] = v
+        for k, v in self.overrides.items():
+            os.environ[k] = v
+        from src.containers import Container
+        self._container = Container()
+        await self._container.init_resources()
+        ctx = {"di_container": self._container, "job_try": 1}
+
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy import text
+        from sqlalchemy.pool import NullPool
+        from src.infrastructure.tasks.outbox_tasks import process_outbox_event_task
+
+        self._engine = create_async_engine(self.config.database.postgres_url, poolclass=NullPool)
+        self._started.set()
+        try:
+            while not self._stop_event.is_set():
+                had_work = False
+                try:
+                    async with self._engine.connect() as conn:
+                        res = await conn.execute(text("SELECT id FROM outbox_events WHERE status = 'PENDING' ORDER BY retry_count ASC, created_at ASC LIMIT 1"))
+                        row = res.mappings().first()
+                    if row:
+                        had_work = True
+                        try:
+                            await process_outbox_event_task(ctx, str(row["id"]))
+                        except Exception as e:
+                            import traceback
+                            traceback.print_exc()
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                if not had_work:
+                    await asyncio.sleep(0.02)
+        finally:
+            if self._engine:
+                await self._engine.dispose()
+            if self._container:
+                await self._container.shutdown_resources()
+
+    async def _wait_settled_async(self, timeout: float = 10.0):
+        deadline = time.monotonic() + timeout
+        from sqlalchemy import text
+        while time.monotonic() < deadline:
+            try:
+                async with self._engine.connect() as conn:
+                    res = await conn.execute(text("SELECT count(*) FROM outbox_events WHERE status IN ('PENDING', 'PROCESSING')"))
+                    count = res.scalar()
+                if count == 0:
+                    return
+            except Exception:
+                pass
+            await asyncio.sleep(0.02)
+
+    def wait_settled(self, timeout: float = 10.0):
+        if self._loop and self._loop.is_running() and self._engine:
+            future = asyncio.run_coroutine_threadsafe(self._wait_settled_async(timeout), self._loop)
+            future.result(timeout=timeout + 2.0)
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5.0)
+
+
 class LiveHarness:
     def __init__(self, config: E2EConfig, *, app: str = "src.main:app", overrides: dict | None = None, factory: bool = False):
         self.config = config
@@ -770,6 +863,7 @@ class LiveHarness:
         self._baseline: dict | None = None
         self._cleanup_generation = 0
         self._point_templates: dict[str, list] = {}
+        self._outbox_worker: OutboxWorker | None = None
 
     @property
     def registered_ids(self) -> set[str]:
@@ -839,7 +933,22 @@ class LiveHarness:
                 self.snapshot(parent_id)  # Retain a complete pre-delete orphan template.
         return self.process.request(method, path, **kwargs)
 
+    def start_worker(self):
+        if self._outbox_worker is None:
+            self._outbox_worker = OutboxWorker(self.config, self.process.overrides)
+            self._outbox_worker.start()
+
+    def stop_worker(self):
+        if self._outbox_worker is not None:
+            self._outbox_worker.stop()
+            self._outbox_worker = None
+
+    def drain_outbox(self, timeout: float = 10.0):
+        if self._outbox_worker is not None:
+            self._outbox_worker.wait_settled(timeout=timeout)
+
     def snapshot(self, parent_id):
+        self.drain_outbox()
         result = self.oracle.snapshot(parent_id)
         self.observe("raw_parent_snapshot", {"parent_id": parent_id, "snapshot": result})
         if result["points"] and parent_id in self.registry.ids:
@@ -847,6 +956,7 @@ class LiveHarness:
         return result
 
     def all_snapshot(self):
+        self.drain_outbox()
         return self.oracle.all_snapshot()
 
     def assert_consistent(self, parent_id, *, require_exists=True, **expected):
@@ -870,19 +980,26 @@ class LiveHarness:
         return self.oracle.remove_sql_row(parent_id, self.registry)
 
     def restart(self):
-        return self.process.restart()
+        self.stop_worker()
+        res = self.process.restart()
+        self.start_worker()
+        return res
 
     def restart_app(self):
         return self.restart()
 
     def settle_requests(self):
         """A lost TCP response cannot prove the server stopped mutating stores."""
+        self.drain_outbox()
         if self.process.unsettled_request:
+            self.stop_worker()
             self.process.stop()
             self.process.unsettled_request = False
             self.process.start()
+            self.start_worker()
 
     def cleanup(self, *, observed: dict | None = None):
+        self.stop_worker()
         # Administrative cleanup is exact even when ordinary DELETE short-circuits.
         if observed is not None:
             before = {"sql": {key: value for key, value in observed["sql"].items() if key in self.registry.ids}, "points": [point for point in observed["points"] if (point.get("payload") or {}).get("parent_id") in self.registry.ids]}
@@ -898,6 +1015,8 @@ class LiveHarness:
         self.registry.claims.clear()
         self._point_templates.clear()
         self._journal(cleanup_verified=True)
+        if self.process.running:
+            self.start_worker()
         return result
 
     def __enter__(self):
@@ -914,9 +1033,11 @@ class LiveHarness:
             baseline_path.write_text(canonical(current), encoding="utf-8")
         self._journal()
         self.process.start()
+        self.start_worker()
         return self
 
     def __exit__(self, exc_type, exc, traceback):
+        self.stop_worker()
         self.process.stop()
         self.cleanup()
 

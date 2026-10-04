@@ -252,7 +252,7 @@ def test_headerless_json_characterization_requires_consistent_success_or_write_f
         points.append({"id": chunk_id, "payload": {
             "parent_id": "incorrect-parent" if status == 201 and corrupt_store else parent,
             "chunk_id": chunk_id, "chunk_type": field, "sub_index": 0,
-            "chunk_status": "active", "status": "مصوب", "content": row[field],
+            "chunk_status": "active", "status": "مصوب", "content": row[field], "version": row["version"],
         }, "vector": {"dense": [0.1, 0.2], "sparse": {"indices": [], "values": []}}})
     persisted = {"sql": row, "points": points}
     response_body = {"status": 201, "data": {"suggestionId": parent, "status": "CREATED", "chunksCount": 3}} if status == 201 else {"errors": [{"status": status, "code": "VALIDATION_ERROR" if status == 422 else "INTERNAL_ERROR"}]}

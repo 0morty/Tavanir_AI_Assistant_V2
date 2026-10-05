@@ -25,7 +25,7 @@ Early-stage FastAPI project (Tavanir AI Assistant V2) on a Clean Architecture sc
 - Clean Architecture dependency rule: `src/domain/` must stay pure stdlib (no FastAPI, SQLAlchemy, Pydantic); outer layers depend inward through ports under `src/domain/interfaces/` and `src/application/interfaces/`.
 - The project must use Dependency Injection (DI) as a core architectural principle. **Follow the Dependency Injection policy below for every component you add or touch.**
 - Domain uses Persian suggestion statuses: `SuggestionStatus` in `src/domain/enums.py` converts legacy `status_id` ints and Persian titles via `from_id()`/`from_string()`.
-- **Commit messages: always generate short and meaningful commits** (Conventional Commits, per `docs/contracts/02_Git_Commit_Convention.md`); add a body only when extra description is genuinely needed.
+- **Git commits**: Never create git commits automatically. Only commit when explicitly instructed by the user. When asked to commit, generate short and meaningful commit messages (Conventional Commits, per `docs/contracts/02_Git_Commit_Convention.md`).
 
 ### Dependency Injection policy
 

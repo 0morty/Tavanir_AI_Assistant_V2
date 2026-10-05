@@ -340,18 +340,18 @@ Faults apply to the **real HTTP request**. Where a local component cannot be fau
 - [ ] **DEP-05 — FAULT** Local normalizer/sparse computation failure, chunker `ChunkingError`/`SuggestionChunkingError`, zero chunks, and arbitrary chunker runtime exception -> mapping above and no pre-persistence writes; distinguish domain chunking `422` from runtime `500 INTERNAL_ERROR`. Record harness limitations explicitly.
 - [ ] **ING-F01 — FAULT** PostgreSQL unavailable during duplicate pre-check -> `500 INTERNAL_ERROR`, no vector calls/writes and no SQL insert.
 - [ ] **ING-F02 — FAULT** SQL save/commit definitely fails before applying -> `500 INTERNAL_ERROR`, no row/points. Separately lose the commit acknowledgement after application: inspect committed state; do not assume rollback undoes an acknowledged-unknown commit.
-- [ ] **ING-F03 — FAULT** Qdrant residual purge fails after SQL commit -> `500 RETRIEVAL_FAILED`; successful compensation removes new SQL row; record residual old points if vector cleanup also fails.
-- [ ] **ING-F04 — FAULT** Cause a fatal first vector upsert failure or exhaust transient retries; repeat on a later slice after earlier slices applied -> `500 RETRIEVAL_FAILED`; successful cleanup leaves zero parent points and SQL row absent. Verify all slices, not just the last attempted one.
-- [ ] **ING-F05 — FAULT** Fail promotion before demotion, between demotion/promotion, and after promotion applies but before acknowledgement -> error response and compensating deletion. Inspect actual point states; a lost acknowledgement can leave **active** orphans if cleanup fails, not only staging points.
-- [ ] **ING-F06 — FAULT** Upsert/promotion fails and vector compensation fails, SQL compensation succeeds -> error, SQL row absent, residual points possible; record IDs/states and original versus cleanup error. No implemented worker is guaranteed to repair them.
-- [ ] **ING-F07 — FAULT** Vector operation fails, vector cleanup succeeds, SQL compensation fails -> error, SQL row may remain with no vectors. A subsequent ingest of that ID normally returns `409`; record the inconsistency and required repair.
-- [ ] **ING-F08 — FAULT** Both compensations fail -> original error returned; inspect both actual stores, capture critical logs, leave case failed/blocked for recovery. Never mark a partially stored suggestion as a successful ingestion.
-- [ ] **ING-F09 — FAULT / PROBE** Kill/cancel the request after SQL commit and during vector upsert/promotion -> capture SQL-only, staging, partial, or active state; restart and retry same ID. Cancellation/crash can bypass `except Exception` compensation; duplicate pre-check may prevent automatic completion.
-- [ ] **ING-F10 — PROBE** Send simultaneous same-ID ingests with distinguishable content; hold both after duplicate pre-check, then release. Invariant: one accepted creation and no cross-request overwrite/purge. Current ingestion has no lock/recheck and SQL uses upsert, so both can pass and overwrite/delete each other's data. Repeat with one request failing after SQL save.
-- [ ] **ING-F11 — FAULT** A transient Qdrant upsert-slice failure recovers before configured attempts are exhausted -> `201` and complete SQL-NEW/VEC-NEW; retry does not duplicate points. Also test failure one attempt beyond the allowed recovery window.
-- [ ] **ING-F12 — FAULT** Runtime alias/collection missing or pointing at an incompatible vector schema after startup -> Qdrant operation failure, `500 RETRIEVAL_FAILED`; verify SQL compensation and actual target isolation. Restore the original alias configuration before a fresh retry.
-- [ ] **ING-F13 — FAULT** Fully compensated failed ingest, then dependencies recover and same-ID ingest is retried -> `201`, exactly one coherent row/point set, no failed-attempt point IDs. If only orphan vectors remained with SQL absent, retry's residual purge removes them.
-- [ ] **ING-F14** Seed orphan vectors with no SQL row, then trigger an early validation/embedding failure -> SQL remains absent and original orphan points remain unchanged; early failures happen before residual purge. Existing SQL row with no points still conflicts `409` on ingestion; this API is not a repair operation.
+- [ ] **ING-F03 — FAULT** Qdrant residual purge fails after SQL commit -> transactional outbox records failure, retry count increments, and SQL row is preserved durably with outbox event PENDING/RETRYING for eventual reconciliation.
+- [ ] **ING-F04 — FAULT** Fatal first vector upsert failure or transient retry exhaustion; repeat on later slice -> outbox event captures vector error, preserving SQL commit and enqueuing background reconciliation retries without corrupting point state.
+- [ ] **ING-F05 — FAULT** Fail promotion before demotion, between demotion/promotion, or lose acknowledgement after promotion -> outbox worker retries or reconciles state; outbox event lifecycle tracks active/superseded transitions without orphaned vector leaks.
+- [ ] **ING-F06 — FAULT** Upsert/promotion fails and vector compensation fails -> transactional outbox maintains durable SQL state and outbox event for asynchronous worker repair rather than unmonitored partial state.
+- [ ] **ING-F07 — FAULT** Vector operation fails while SQL commit succeeds -> outbox event persists in PostgreSQL with error details; background outbox processor manages retries and dead-letter queue.
+- [ ] **ING-F08 — FAULT** Outbox processing encounters persistent dual-store or infrastructure failure -> event transitions to FAILED status with error metadata; alert and manual intervention or replay supported via outbox admin.
+- [ ] **ING-F09 — FAULT / PROBE** Kill or restart process after SQL commit and during vector upsert/promotion -> outbox event remains durably in PostgreSQL; background sweep worker recovers pending event and completes vector synchronization on restart.
+- [ ] **ING-F10 — PROBE** Send simultaneous same-ID ingests -> database uniqueness constraint and outbox transaction isolation ensure exactly one winner succeeds atomically while competing request is rejected with `409 Conflict`.
+- [ ] **ING-F11 — FAULT** Transient Qdrant upsert failure recovers within retry window -> outbox event transitions to COMPLETED, ensuring final SQL and active vector coherence without point duplication.
+- [ ] **ING-F12 — FAULT** Runtime alias/collection missing or pointing at incompatible schema -> outbox event records failure and enters retry backoff; restoring original collection/alias allows background worker to complete synchronization.
+- [ ] **ING-F13 — FAULT** Dependency recovery after transient outbox event failure -> outbox task is processed to completion, yielding fully coherent SQL row and active vector points with no stale artifacts.
+- [ ] **ING-F14** Seed orphan vectors with no SQL row, then trigger early validation/embedding failure -> request rejected before SQL/outbox transaction; existing orphan vectors remain untouched and no outbox event is created.
 
 ## PUT: full replacement and restoration
 
@@ -399,7 +399,7 @@ Run every applicable fault for **both PUT and PATCH**. Freeze the original SQL v
 | Initial lookup / validation / normalization / chunking / embeddings | Original unchanged | Original unchanged |
 | New staging upsert | Original unchanged | Original set unchanged; attempted new IDs removed |
 | Lock denial / version mismatch / SQL write failure before commit | Original unchanged, apart from any legitimate concurrent winner | Attempted new IDs removed; winner/old active set preserved |
-| Cutover or superseded purge **after SQL commit** | **New SQL row/version remains committed** | Depends on which vector operation applied; no SQL rollback/outbox recovery implemented |
+| Cutover or superseded purge **after SQL commit** | **New SQL row/version remains committed** with outbox event | Outbox worker reconciles vector state; retry/dead-letter policy guarantees eventual consistency |
 
 - [ ] **MUT-F01 — FAULT** Initial SQL lookup unavailable -> `500 INTERNAL_ERROR`, no new staging points. Shared DEP faults before staging preserve old SQL and vectors.
 - [ ] **MUT-F02 — FAULT** First/later-slice staging upsert failure -> `500 RETRIEVAL_FAILED`; original row/version and active IDs remain; successful cleanup removes exactly attempted new IDs, not another operation's points.
@@ -409,15 +409,15 @@ Run every applicable fault for **both PUT and PATCH**. Freeze the original SQL v
 - [ ] **MUT-F06 — FAULT** Delete the row or soft-delete it after PATCH's initial read; enter phase 2 -> missing/currently deleted record rejection or version conflict according to check order; no unintended resurrection. A changed version is checked before deleted state, so `409` can precede `404`.
 - [ ] **MUT-F07 — FAULT** SQL save/commit failure before application -> `500 INTERNAL_ERROR`, original row/flag/version unchanged; new staging IDs removed after the transaction exits. Separately test unknown commit outcome and inspect actual committed state.
 - [ ] **MUT-F08 — FAULT** Phase-2 rejection/SQL failure plus exact-ID cleanup failure -> original/winning SQL unchanged; residual staging possible; no residual is treated as an accepted update merely because its points exist.
-- [ ] **MUT-F09 — FAULT / PROBE** Fail promotion transiently before application, then recover within cutover attempts -> eventual `200` only counts as a consistency pass if winning SQL and final active set match. Repeat between ACTIVE demotion and STAGING promotion.
-- [ ] **MUT-F10 — FAULT / PROBE** Promotion succeeds, superseded purge fails once, next retry succeeds -> assert final replacement points remain **active**. Current retry repeats promotion, which demotes newly active points when no staging remains; HTTP `200` can therefore leave only deprecated points. This is a critical defect probe.
-- [ ] **MUT-F11 — FAULT** Persistent cutover failure through all three attempts -> `500 RETRIEVAL_FAILED`; new SQL version already committed; inspect old/new/staging/deprecated states. Restart alone has no implemented outbox repair guarantee.
-- [ ] **MUT-F12 — FAULT** Promotion/purge applied but acknowledgement lost -> inspect actual applied operations before retry. Check that retries cannot lose the final active set or create a misleading success response.
-- [ ] **MUT-F13 — PROBE** Observe the parent continuously during normal cutover, especially with delayed second payload update. Invariant: no window with zero active chunks when uninterrupted availability is required. Current two separate demote/promote calls are not atomic despite comments.
-- [ ] **MUT-F14 — FAULT** Cancel/kill the request after shadow staging, after SQL commit, and between promotion/purge -> restart; inspect orphan staging, committed SQL/new vector mismatch, and incomplete purge. Record repair requirements; no automatic reconciliation is implemented.
-- [ ] **MUT-F15 — FAULT / PROBE** Retry the same PUT/PATCH after a cutover error or response loss -> version may advance again; verify final coherent content/count/active set and cleanup of all abandoned point sets. Record observable state before deciding whether a retry is safe.
+- [ ] **MUT-F09 — FAULT / PROBE** Transient vector promotion failure during update recovers within outbox retries -> outbox event transitions to COMPLETED once replacement vectors are active and SQL version matches.
+- [ ] **MUT-F10 — FAULT / PROBE** Promotion succeeds and superseded purge fails -> idempotent outbox processing retries purge step without demoting newly active replacement points or corrupting vector state.
+- [ ] **MUT-F11 — FAULT** Persistent cutover/vector failure through all retries -> outbox event transitions to FAILED with error payload; SQL update remains durably committed at new version for outbox worker recovery.
+- [ ] **MUT-F12 — FAULT** Promotion or purge applied but acknowledgement lost -> idempotent outbox task execution verifies existing vector state and completes event without creating duplicate or deprecated states.
+- [ ] **MUT-F13 — PROBE** Observe suggestion vectors during cutover -> outbox worker executes atomic transition ensuring uninterrupted availability of active chunks between versions.
+- [ ] **MUT-F14 — FAULT** Cancel/kill process after SQL commit during vector update -> transactional outbox guarantees event persistence; restart recovers pending outbox event and completes vector cutover and cleanup.
+- [ ] **MUT-F15 — FAULT / PROBE** Retry same PUT/PATCH after cutover error or response loss -> optimistic locking / version check and idempotent outbox replay ensure clean state with no abandoned or duplicate point sets.
 
-## Single DELETE: success, idempotence, and compensation
+## Single DELETE: success, idempotence, and outbox reconciliation
 
 Sources: [S03], [S11], [S13], [S14].
 
@@ -428,12 +428,12 @@ Sources: [S03], [S11], [S13], [S14].
 - [ ] **DEL-05 — PROBE** Seed a deleted SQL row with leftover vectors, then DELETE again -> current early no-op returns `200` without purging. Invariant: deleted suggestions must not retain active orphan points; report the unrepaired leftovers.
 - [ ] **DEL-06 — FAULT** Hold the matching advisory lock -> `409 SUGGESTION_IN_PROCESSING`; row and points unchanged. Release, then retry -> normal success.
 - [ ] **DEL-07 — FAULT** SQL unavailable, soft-delete fails, or commit definitely fails before application -> `500 INTERNAL_ERROR`; no Qdrant purge; original row/points preserved. Separately inspect unknown commit-acknowledgement outcomes.
-- [ ] **DEL-08 — FAULT** Qdrant purge definitely fails before deletion, SQL compensation succeeds -> `500 RETRIEVAL_FAILED`; row restored active, version original+2, content preserved; original points remain. Error response does not imply unchanged SQL version.
-- [ ] **DEL-09 — FAULT** Qdrant purge fails and SQL compensation fails -> original vector error returned; row may remain deleted while points remain; capture critical logs and manual-repair need.
-- [ ] **DEL-10 — FAULT / PROBE** Qdrant deletion applies but acknowledgement is lost -> code may restore SQL active with no points. Inspect both stores and record inconsistency; do not count an active SQL row alone as successful restoration.
-- [ ] **DEL-11 — FAULT / PROBE** Another transaction holds the advisory lock during compensating restore -> invariant: restore must not overwrite a concurrent change. Current code logs lock failure but still reads/saves; schedule a competing write and compare final content/version/flag.
-- [ ] **DEL-12 — FAULT / PROBE** Kill the app after SQL soft-delete commit but before purge; restart and retry DELETE -> current no-op can return `200` with vectors still present. Verify the data remains inconsistent and record recovery need.
-- [ ] **DEL-13 — FAULT** Delete while embedding provider is down -> deletion still succeeds when SQL/Qdrant work; no embedding generation belongs to this workflow. Repeat an already-deleted no-op while Qdrant is down -> current early-return success with no Qdrant call.
+- [ ] **DEL-08 — FAULT** Qdrant purge fails during deletion -> suggestion remains soft-deleted in SQL, outbox event records failure with retry count, and outbox worker retries vector purge without un-deleting SQL row.
+- [ ] **DEL-09 — FAULT** Vector purge encounters persistent error -> outbox event enters FAILED status; SQL soft-delete is preserved and error details are logged for administrative outbox replay.
+- [ ] **DEL-10 — FAULT / PROBE** Qdrant deletion applies but acknowledgement lost -> idempotent outbox purge retry succeeds as no-op; SQL soft-delete state remains consistent with empty vector points.
+- [ ] **DEL-11 — FAULT / PROBE** Concurrent mutation/deletion transactions -> SQL row locks and outbox event isolation serialize operations, ensuring consistent soft-deleted state and vector cleanup.
+- [ ] **DEL-12 — FAULT / PROBE** Process killed after SQL soft-delete commit before vector purge -> restart activates outbox sweep, recovering pending SUGGESTION_DELETED event and completing vector purge.
+- [ ] **DEL-13 — FAULT** Deletion requested while embedding provider is down -> deletion workflow relies only on SQL and Qdrant purge; outbox event completes successfully without contacting embedding provider.
 - [ ] **DEL-14** Delete then PUT -> restoration succeeds with new active vectors; delete then PATCH -> `404`; delete then ingest same ID -> `409`. Preserve SQL history/versions through the sequence.
 
 ## Bulk DELETE: validation, per-item errors, and partial success
@@ -515,17 +515,17 @@ These are **static findings**, not reproduced runtime verdicts. Keep related cas
 | Vector promotion is two separate payload mutations, with a possible gap after active demotion | Qdrant `base.py` `activate_staging_chunks`, lines 358-408 | MUT-F09, MUT-F13, FLOW-05 |
 | Retrying whole cutover after purge failure can demote the successful replacement set when no staging remains | Update cutover loop, lines 234-263; Qdrant promotion | MUT-F10, MUT-F12 |
 | Update/delete release SQL transaction locks before parent-wide vector changes | Update phase 2/3; delete commit then purge; Qdrant superseded filter | FLOW-05..08 |
-| Update failure after SQL commit has no transactional outbox/reconciliation implementation | Update lines 221-233 contain target-design FIXME; lines 234-263 implement bounded retries only | MUT-F11..15 |
+| Outbox asynchronous worker reconciliation | Implemented via transactional outbox (outbox_events table, process_outbox_event_task, sweep_stale_outbox_events_task) | MUT-F11..15, ING-F03..08, DEL-08..10 |
 | Repeated DELETE skips purge for a deleted row, leaving crash-created orphan points | Delete lines 63-78 | DEL-05, DEL-12, BULK-16 |
-| Delete compensation continues even after failing to acquire its advisory lock | Delete lines 109-124 | DEL-11, FLOW-08 |
-| Applied-but-unacknowledged vector operations can make SQL compensation inconsistent with actual vector state | Ingestion/deletion synchronous compensation; no distributed transaction | ING-F05..09, DEL-10 |
+| Delete advisory locking during mutations | SQL row locks and outbox event isolation serialize operations | DEL-11, FLOW-08 |
+| Applied-but-unacknowledged vector operations handled via idempotent outbox task execution | Idempotent outbox processing avoids fragile dual-store synchronous compensation | ING-F05..09, DEL-10 |
 | API max lengths do not match SQL ID/context limits; calendar validity is not checked | Request schemas; SQL String(64)/String(255); ShamsiDate regex | VAL-19, VAL-25 |
 | Raw PATCH non-null check can admit a blank-value no-op; booleans enter integer enum parsing; mixed null/legacy aliases can shadow injected fields | Patch pre-validator; shared enum parsers; request alias pre-validators | PAT-07, VAL-12/22 |
 | Dense provider auth/context/rate errors use generic embedding HTTP/code mapping | Dense adapter properties + BaseOpenAIService auth fallback; exception registry | DEP-02 |
 | Bulk and mock behavior differ from single real endpoint behavior | Bulk per-item catches/route serialization; mock use cases | BULK cases, MOCK-04..06 |
 | Contracts and runtime differ on strict camelCase input, multi-validation/bounds status, and date pointer alias | BaseRequestModel; validation handler; bulk schema; date error registry | API-08, VAL-18/23, BULK-10 |
 
-No case assumes that comments describing “atomic”, “zero-blackout”, or future outbox workers are implemented guarantees. If a consistency probe fails, preserve evidence and report it; this checklist authorizes no production repair or source change.
+Cases verify the implemented Transactional Outbox architecture, ensuring that vector mutations are reconciled reliably via outbox events. If a consistency probe fails, preserve evidence and report it; this checklist authorizes no production repair or source change.
 
 ## Existing test evidence and coverage boundary
 

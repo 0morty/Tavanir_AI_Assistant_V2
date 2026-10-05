@@ -466,9 +466,7 @@ class RawStoreOracle:
                 )
                 return [
                     jsonable(dict(row))
-                    for row in (
-                        await connection.execute(statement, {"id": parent_id})
-                    )
+                    for row in (await connection.execute(statement, {"id": parent_id}))
                     .mappings()
                     .all()
                 ]

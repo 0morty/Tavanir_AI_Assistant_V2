@@ -4,11 +4,11 @@ HTTP requests execute the real orchestration against the guarded stores. Every
 race starts its next participant only after a recorded collaborator phase; no
 sleep chooses a winner. Known consistency defects deliberately fail assertions.
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import sys
 import threading
 import time
@@ -16,12 +16,16 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 from .oracles import assert_outbox_consistent
-from .proxy import FaultController, FaultRule, ForwardingProxy, input_fingerprint, provider_vector_values
+from .proxy import (
+    FaultController,
+    FaultRule,
+    ForwardingProxy,
+    provider_vector_values,
+)
 
 
 @dataclass(frozen=True)
@@ -37,7 +41,9 @@ class ResilienceScenario:
     cleanup: str = "Release all gates; restore proxies/app settings; exact registered SQL and vector cleanup"
 
 
-def _scenario(case, variant, action, *, method="POST", profile="instrumented_fault", **parameters):
+def _scenario(
+    case, variant, action, *, method="POST", profile="instrumented_fault", **parameters
+):
     return ResilienceScenario(case, variant, action, method, profile, parameters)
 
 
@@ -45,18 +51,70 @@ def _descriptors():
     result = []
     for method in ("POST", "PUT", "PATCH"):
         for fault in ("unreachable", "reset", "timeout"):
-            result.append(_scenario("DEP-01", f"{method.lower()}_{fault}", "provider", method=method,
-                                    profile="external_fault", fault=fault))
-        for fault in ("401", "429_retry", "429_plain", "500", "unknown_model", "context_limit"):
-            result.append(_scenario("DEP-02", f"{method.lower()}_{fault}", "provider", method=method,
-                                    profile="controlled_provider", fault=fault))
-        for fault in ("missing", "extra", "reordered", "duplicate_indices", "missing_indices"):
-            result.append(_scenario("DEP-03", f"{method.lower()}_{fault}", "provider", method=method,
-                                    profile="controlled_provider", fault=fault))
+            result.append(
+                _scenario(
+                    "DEP-01",
+                    f"{method.lower()}_{fault}",
+                    "provider",
+                    method=method,
+                    profile="external_fault",
+                    fault=fault,
+                )
+            )
+        for fault in (
+            "401",
+            "429_retry",
+            "429_plain",
+            "500",
+            "unknown_model",
+            "context_limit",
+        ):
+            result.append(
+                _scenario(
+                    "DEP-02",
+                    f"{method.lower()}_{fault}",
+                    "provider",
+                    method=method,
+                    profile="controlled_provider",
+                    fault=fault,
+                )
+            )
+        for fault in (
+            "missing",
+            "extra",
+            "reordered",
+            "duplicate_indices",
+            "missing_indices",
+        ):
+            result.append(
+                _scenario(
+                    "DEP-03",
+                    f"{method.lower()}_{fault}",
+                    "provider",
+                    method=method,
+                    profile="controlled_provider",
+                    fault=fault,
+                )
+            )
         for fault in ("wrong_dimension", "nonfinite", "decoding"):
-            result.append(_scenario("DEP-04", f"{method.lower()}_{fault}", "provider", method=method,
-                                    profile="controlled_provider", fault=fault))
-        result.append(_scenario("DEP-04", f"{method.lower()}_malformed_sparse", "malformed_sparse", method=method))
+            result.append(
+                _scenario(
+                    "DEP-04",
+                    f"{method.lower()}_{fault}",
+                    "provider",
+                    method=method,
+                    profile="controlled_provider",
+                    fault=fault,
+                )
+            )
+        result.append(
+            _scenario(
+                "DEP-04",
+                f"{method.lower()}_malformed_sparse",
+                "malformed_sparse",
+                method=method,
+            )
+        )
         for fault, operation, error, status in (
             ("normalizer", "normalizer.normalize", "normalizer", 422),
             ("sparse", "sparse.embed", "sparse", 500),
@@ -65,141 +123,640 @@ def _descriptors():
             ("chunker_runtime", "chunker.chunk", "runtime", 500),
             ("zero_chunks", "chunker.chunk", "runtime", 422),
         ):
-            result.append(_scenario("DEP-05", f"{method.lower()}_{fault}", "early", method=method,
-                                    operation=operation, error=error, status=status, zero=fault == "zero_chunks"))
-    for case, operation, timing in (("ING-F01", "sql.read", "before"),
-                                    ("ING-F02", "sql.save", "before"),
-                                    ("ING-F02", "sql.commit", "before"),
-                                    ("ING-F02", "sql.commit", "after")):
-        result.append(_scenario(case, operation.replace(".", "_") + "_" + timing, "ingest_sql", operation=operation, timing=timing))
-    result.extend([
-        _scenario("ING-F03", "residual_purge", "ingest_vector", operation="vector.purge"),
-        *[_scenario("ING-F04", name, "ingest_slice", later=later, transient=transient)
-          for name, later, transient in (("first_fatal", False, False), ("later_fatal_batch2", True, False),
-                                         ("first_exhaustion", False, True), ("later_exhaustion_batch2", True, True))],
-        *[_scenario("ING-F05", name, "ingest_vector", operation=op, timing=timing)
-          for name, op, timing in (("before_demotion", "vector.upsert", "before"),
-                                  ("between_payloads", "qdrant.upsert", "before"),
-                                  ("applied_lost_ack", "qdrant.upsert", "after"))],
-        _scenario("ING-F06", "vector_compensation_failed", "ingest_compensation", vector_cleanup=True),
-        _scenario("ING-F07", "sql_compensation_failed", "ingest_compensation", sql_cleanup=True),
-        _scenario("ING-F08", "both_compensations_failed", "ingest_compensation", sql_cleanup=True, vector_cleanup=True),
-        *[_scenario("ING-F09", name, "crash", phase=phase, timing="after", workflow="ingest", cancel=cancel)
-          for name, phase, cancel in (("kill_after_commit", "sql.commit", False), ("kill_after_staging", "vector.upsert", False),
-                                    ("kill_after_promotion", "vector.upsert", False), ("cancel_after_commit", "sql.commit", True),
-                                    ("cancel_after_staging", "vector.upsert", True), ("cancel_after_promotion", "vector.upsert", True))],
-        _scenario("ING-F10", "same_id_both_duplicate_checks", "race_ingest"),
-        _scenario("ING-F10", "accepted_creation_lost_to_compensation", "race_ingest", fail_second=True),
-        _scenario("ING-F11", "recover_before_attempt_limit", "ingest_slice", transient=True, recover=True),
-        _scenario("ING-F11", "recovery_one_attempt_too_late", "ingest_slice", transient=True),
-        _scenario("ING-F12", "missing_runtime_alias", "alias", alias_mode="missing"),
-        _scenario("ING-F12", "incompatible_runtime_schema", "alias", alias_mode="incompatible"),
-        _scenario("ING-F13", "retry_fully_compensated", "retry_ingest", orphan=False),
-        _scenario("ING-F13", "retry_clears_orphan_points", "retry_ingest", orphan=True),
-        _scenario("ING-F14", "orphan_before_early_embedding_failure", "orphan_early"),
-        _scenario("ING-F14", "sql_without_points_still_conflicts", "sql_only_conflict"),
-    ])
+            result.append(
+                _scenario(
+                    "DEP-05",
+                    f"{method.lower()}_{fault}",
+                    "early",
+                    method=method,
+                    operation=operation,
+                    error=error,
+                    status=status,
+                    zero=fault == "zero_chunks",
+                )
+            )
+    for case, operation, timing in (
+        ("ING-F01", "sql.read", "before"),
+        ("ING-F02", "sql.save", "before"),
+        ("ING-F02", "sql.commit", "before"),
+        ("ING-F02", "sql.commit", "after"),
+    ):
+        result.append(
+            _scenario(
+                case,
+                operation.replace(".", "_") + "_" + timing,
+                "ingest_sql",
+                operation=operation,
+                timing=timing,
+            )
+        )
+    result.extend(
+        [
+            _scenario(
+                "ING-F03", "residual_purge", "ingest_vector", operation="vector.purge"
+            ),
+            *[
+                _scenario(
+                    "ING-F04", name, "ingest_slice", later=later, transient=transient
+                )
+                for name, later, transient in (
+                    ("first_fatal", False, False),
+                    ("later_fatal_batch2", True, False),
+                    ("first_exhaustion", False, True),
+                    ("later_exhaustion_batch2", True, True),
+                )
+            ],
+            *[
+                _scenario("ING-F05", name, "ingest_vector", operation=op, timing=timing)
+                for name, op, timing in (
+                    ("before_demotion", "vector.upsert", "before"),
+                    ("between_payloads", "qdrant.upsert", "before"),
+                    ("applied_lost_ack", "qdrant.upsert", "after"),
+                )
+            ],
+            _scenario(
+                "ING-F06",
+                "vector_compensation_failed",
+                "ingest_compensation",
+                vector_cleanup=True,
+            ),
+            _scenario(
+                "ING-F07",
+                "sql_compensation_failed",
+                "ingest_compensation",
+                sql_cleanup=True,
+            ),
+            _scenario(
+                "ING-F08",
+                "both_compensations_failed",
+                "ingest_compensation",
+                sql_cleanup=True,
+                vector_cleanup=True,
+            ),
+            *[
+                _scenario(
+                    "ING-F09",
+                    name,
+                    "crash",
+                    phase=phase,
+                    timing="after",
+                    workflow="ingest",
+                    cancel=cancel,
+                )
+                for name, phase, cancel in (
+                    ("kill_after_commit", "sql.commit", False),
+                    ("kill_after_staging", "vector.upsert", False),
+                    ("kill_after_promotion", "vector.upsert", False),
+                    ("cancel_after_commit", "sql.commit", True),
+                    ("cancel_after_staging", "vector.upsert", True),
+                    ("cancel_after_promotion", "vector.upsert", True),
+                )
+            ],
+            _scenario("ING-F10", "same_id_both_duplicate_checks", "race_ingest"),
+            _scenario(
+                "ING-F10",
+                "accepted_creation_lost_to_compensation",
+                "race_ingest",
+                fail_second=True,
+            ),
+            _scenario(
+                "ING-F11",
+                "recover_before_attempt_limit",
+                "ingest_slice",
+                transient=True,
+                recover=True,
+            ),
+            _scenario(
+                "ING-F11",
+                "recovery_one_attempt_too_late",
+                "ingest_slice",
+                transient=True,
+            ),
+            _scenario(
+                "ING-F12", "missing_runtime_alias", "alias", alias_mode="missing"
+            ),
+            _scenario(
+                "ING-F12",
+                "incompatible_runtime_schema",
+                "alias",
+                alias_mode="incompatible",
+            ),
+            _scenario(
+                "ING-F13", "retry_fully_compensated", "retry_ingest", orphan=False
+            ),
+            _scenario(
+                "ING-F13", "retry_clears_orphan_points", "retry_ingest", orphan=True
+            ),
+            _scenario(
+                "ING-F14", "orphan_before_early_embedding_failure", "orphan_early"
+            ),
+            _scenario(
+                "ING-F14", "sql_without_points_still_conflicts", "sql_only_conflict"
+            ),
+        ]
+    )
     for method in ("PUT", "PATCH"):
         prefix = method.lower()
-        result.extend([
-            _scenario("MUT-F01", prefix + "_initial_read", "early", method=method, operation="sql.read", error="runtime", status=500),
-            *[_scenario("MUT-F02", prefix + "_" + name, "mutation_slice", method=method, later=later)
-              for name, later in (("first_slice", False), ("later_slice_batch2", True))],
-            _scenario("MUT-F03", prefix + "_staging_cleanup_failed", "mutation_slice", method=method, cleanup_failure=True, applied=True),
-            _scenario("MUT-F04", prefix + "_separate_transaction_lock", "lock", method=method),
-            _scenario("MUT-F05", prefix + "_stale_version", "race_stale", method=method),
-            *[_scenario("MUT-F06", prefix + "_" + state, "race_missing", method=method, state=state)
-              for state in ("hard_deleted", "soft_deleted")],
-            *[_scenario("MUT-F07", prefix + "_" + op.replace(".", "_") + "_" + timing, "mutation_sql", method=method, operation=op, timing=timing)
-              for op, timing in (("sql.save", "before"), ("sql.commit", "before"), ("sql.commit", "after"))],
-            _scenario("MUT-F08", prefix + "_phase2_cleanup_failed", "mutation_sql", method=method, operation="sql.save", cleanup_failure=True),
-            *[_scenario("MUT-F09", prefix + "_" + name, "cutover", method=method, operation=op, attempt=1)
-              for name, op in (("before_demotion_recovery", "vector.promote"), ("between_payloads_recovery", "qdrant.promote"))],
-            _scenario("MUT-F10", prefix + "_promotion_then_purge_retry", "cutover", method=method, operation="vector.superseded", attempt=1),
-            _scenario("MUT-F11", prefix + "_cutover_exhaustion", "cutover", method=method, operation="vector.promote", attempt=[1, 2, 3], exhausted=True),
-            *[_scenario("MUT-F12", prefix + "_" + name, "cutover", method=method, operation=op, timing="after", attempt=1)
-              for name, op in (("promotion_applied_lost_ack", "vector.promote"), ("purge_applied_lost_ack", "vector.superseded"))],
-            _scenario("MUT-F13", prefix + "_observed_cutover_blackout", "blackout", method=method),
-            *[_scenario("MUT-F14", prefix + "_" + name, "crash", method=method, workflow="mutation", phase=phase, timing="after", cancel=cancel)
-              for name, phase, cancel in (("kill_after_staging", "vector.upsert", False), ("kill_after_commit", "sql.commit", False),
-                                        ("kill_between_promotion_purge", "vector.promote", False), ("cancel_after_staging", "vector.upsert", True),
-                                        ("cancel_after_commit", "sql.commit", True), ("cancel_between_promotion_purge", "vector.promote", True))],
-            _scenario("MUT-F15", prefix + "_retry_after_error", "retry_mutation", method=method),
-        ])
-    result.extend([
-        _scenario("DEL-06", "separate_transaction_lock", "lock", method="DELETE"),
-        *[_scenario("DEL-07", op.replace(".", "_") + "_" + timing, "delete_sql", method="DELETE", operation=op, timing=timing)
-          for op, timing in (("sql.read", "before"), ("sql.soft_delete", "before"), ("sql.commit", "before"), ("sql.commit", "after"))],
-        _scenario("DEL-08", "purge_before_apply_restored", "delete_vector", method="DELETE"),
-        _scenario("DEL-09", "purge_and_compensation_failed", "delete_vector", method="DELETE", cleanup_failure=True),
-        _scenario("DEL-10", "purge_applied_lost_ack", "delete_vector", method="DELETE", timing="after"),
-        _scenario("DEL-11", "compensation_ignores_separate_lock", "compensation_lock", method="DELETE"),
-        _scenario("DEL-12", "kill_after_soft_delete_commit", "crash", method="DELETE", workflow="delete", phase="sql.commit", timing="after"),
-        _scenario("DEL-13", "no_embedding_dependency", "delete_no_provider", method="DELETE"),
-        _scenario("DEL-13", "deleted_noop_without_qdrant", "delete_no_qdrant", method="DELETE"),
-    ])
+        result.extend(
+            [
+                _scenario(
+                    "MUT-F01",
+                    prefix + "_initial_read",
+                    "early",
+                    method=method,
+                    operation="sql.read",
+                    error="runtime",
+                    status=500,
+                ),
+                *[
+                    _scenario(
+                        "MUT-F02",
+                        prefix + "_" + name,
+                        "mutation_slice",
+                        method=method,
+                        later=later,
+                    )
+                    for name, later in (
+                        ("first_slice", False),
+                        ("later_slice_batch2", True),
+                    )
+                ],
+                _scenario(
+                    "MUT-F03",
+                    prefix + "_staging_cleanup_failed",
+                    "mutation_slice",
+                    method=method,
+                    cleanup_failure=True,
+                    applied=True,
+                ),
+                _scenario(
+                    "MUT-F04",
+                    prefix + "_separate_transaction_lock",
+                    "lock",
+                    method=method,
+                ),
+                _scenario(
+                    "MUT-F05", prefix + "_stale_version", "race_stale", method=method
+                ),
+                *[
+                    _scenario(
+                        "MUT-F06",
+                        prefix + "_" + state,
+                        "race_missing",
+                        method=method,
+                        state=state,
+                    )
+                    for state in ("hard_deleted", "soft_deleted")
+                ],
+                *[
+                    _scenario(
+                        "MUT-F07",
+                        prefix + "_" + op.replace(".", "_") + "_" + timing,
+                        "mutation_sql",
+                        method=method,
+                        operation=op,
+                        timing=timing,
+                    )
+                    for op, timing in (
+                        ("sql.save", "before"),
+                        ("sql.commit", "before"),
+                        ("sql.commit", "after"),
+                    )
+                ],
+                _scenario(
+                    "MUT-F08",
+                    prefix + "_phase2_cleanup_failed",
+                    "mutation_sql",
+                    method=method,
+                    operation="sql.save",
+                    cleanup_failure=True,
+                ),
+                *[
+                    _scenario(
+                        "MUT-F09",
+                        prefix + "_" + name,
+                        "cutover",
+                        method=method,
+                        operation=op,
+                        attempt=1,
+                    )
+                    for name, op in (
+                        ("before_demotion_recovery", "vector.promote"),
+                        ("between_payloads_recovery", "qdrant.promote"),
+                    )
+                ],
+                _scenario(
+                    "MUT-F10",
+                    prefix + "_promotion_then_purge_retry",
+                    "cutover",
+                    method=method,
+                    operation="vector.superseded",
+                    attempt=1,
+                ),
+                _scenario(
+                    "MUT-F11",
+                    prefix + "_cutover_exhaustion",
+                    "cutover",
+                    method=method,
+                    operation="vector.promote",
+                    attempt=[1, 2, 3],
+                    exhausted=True,
+                ),
+                *[
+                    _scenario(
+                        "MUT-F12",
+                        prefix + "_" + name,
+                        "cutover",
+                        method=method,
+                        operation=op,
+                        timing="after",
+                        attempt=1,
+                    )
+                    for name, op in (
+                        ("promotion_applied_lost_ack", "vector.promote"),
+                        ("purge_applied_lost_ack", "vector.superseded"),
+                    )
+                ],
+                _scenario(
+                    "MUT-F13",
+                    prefix + "_observed_cutover_blackout",
+                    "blackout",
+                    method=method,
+                ),
+                *[
+                    _scenario(
+                        "MUT-F14",
+                        prefix + "_" + name,
+                        "crash",
+                        method=method,
+                        workflow="mutation",
+                        phase=phase,
+                        timing="after",
+                        cancel=cancel,
+                    )
+                    for name, phase, cancel in (
+                        ("kill_after_staging", "vector.upsert", False),
+                        ("kill_after_commit", "sql.commit", False),
+                        ("kill_between_promotion_purge", "vector.promote", False),
+                        ("cancel_after_staging", "vector.upsert", True),
+                        ("cancel_after_commit", "sql.commit", True),
+                        ("cancel_between_promotion_purge", "vector.promote", True),
+                    )
+                ],
+                _scenario(
+                    "MUT-F15",
+                    prefix + "_retry_after_error",
+                    "retry_mutation",
+                    method=method,
+                ),
+            ]
+        )
+    result.extend(
+        [
+            _scenario("DEL-06", "separate_transaction_lock", "lock", method="DELETE"),
+            *[
+                _scenario(
+                    "DEL-07",
+                    op.replace(".", "_") + "_" + timing,
+                    "delete_sql",
+                    method="DELETE",
+                    operation=op,
+                    timing=timing,
+                )
+                for op, timing in (
+                    ("sql.read", "before"),
+                    ("sql.soft_delete", "before"),
+                    ("sql.commit", "before"),
+                    ("sql.commit", "after"),
+                )
+            ],
+            _scenario(
+                "DEL-08",
+                "purge_before_apply_restored",
+                "delete_vector",
+                method="DELETE",
+            ),
+            _scenario(
+                "DEL-09",
+                "purge_and_compensation_failed",
+                "delete_vector",
+                method="DELETE",
+                cleanup_failure=True,
+            ),
+            _scenario(
+                "DEL-10",
+                "purge_applied_lost_ack",
+                "delete_vector",
+                method="DELETE",
+                timing="after",
+            ),
+            _scenario(
+                "DEL-11",
+                "compensation_ignores_separate_lock",
+                "compensation_lock",
+                method="DELETE",
+            ),
+            _scenario(
+                "DEL-12",
+                "kill_after_soft_delete_commit",
+                "crash",
+                method="DELETE",
+                workflow="delete",
+                phase="sql.commit",
+                timing="after",
+            ),
+            _scenario(
+                "DEL-13",
+                "no_embedding_dependency",
+                "delete_no_provider",
+                method="DELETE",
+            ),
+            _scenario(
+                "DEL-13",
+                "deleted_noop_without_qdrant",
+                "delete_no_qdrant",
+                method="DELETE",
+            ),
+        ]
+    )
     for position in ("first", "middle", "last"):
-        result.extend([
-            _scenario("BULK-06", position + "_locked", "bulk_fault", fault="lock", position=position),
-            _scenario("BULK-07", position + "_vector_failure", "bulk_fault", fault="vector", position=position),
-            _scenario("BULK-08", position + "_sql_failure", "bulk_fault", fault="sql", position=position),
-        ])
-    result.extend([
-        _scenario("BULK-06", "all_locked", "bulk_fault", fault="lock", all_items=True),
-        _scenario("BULK-08", "all_sql_failed", "bulk_fault", fault="sql", all_items=True),
-        _scenario("BULK-09", "mixed_missing_lock_domain_success", "bulk_mixed"),
-        _scenario("BULK-15", "all_vector_failed_independent_compensation", "bulk_fault", fault="vector", all_items=True),
-        _scenario("BULK-17", "kill_after_first_completed_item", "bulk_crash"),
-        *[_scenario("FLOW-04", variant, "race_stale", method=first, second_method=second)
-          for variant, first, second in (("put_put", "PUT", "PUT"), ("patch_patch", "PATCH", "PATCH"), ("put_patch", "PUT", "PATCH"))],
-        _scenario("FLOW-05", "older_cutover_after_newer_commit", "race_cutover"),
-        _scenario("FLOW-06", "stale_staging_after_winner_cutover", "race_stale", method="PUT", hold_phase="vector.upsert"),
-        *[_scenario("FLOW-07", variant, "race_delete_update", direction=direction, hold_phase=phase)
-          for variant, direction, phase in (("update_staged_then_delete", "update_first", "vector.upsert"),
-                                            ("update_committed_then_delete", "update_first", "sql.commit"),
-                                            ("delete_committed_then_restore", "delete_first", "sql.commit"),
-                                            ("delete_before_purge_then_restore", "delete_first", "vector.purge"))],
-        _scenario("FLOW-08", "stale_compensation_overwrites_accepted_put", "race_compensation"),
-        _scenario("FLOW-09", "same_id_deletes_lock_then_idempotency", "race_delete"),
-        _scenario("FLOW-10", "bulk_and_single_overlap", "race_bulk", single=True),
-        _scenario("FLOW-10", "overlapping_bulk_batches", "race_bulk", single=False),
-        _scenario("FLOW-11", "independent_ids_scheduled_mutations", "independent"),
-        _scenario("FLOW-12", "ingest_commit_then_put", "race_ingest_mutation", second_method="PUT"),
-        _scenario("FLOW-12", "ingest_commit_then_delete", "race_ingest_mutation", second_method="DELETE"),
-        _scenario("FLOW-13", "slow_embeddings_leave_unrelated_work_usable", "slow_embeddings"),
-        *[_scenario("FLOW-14", variant + "_lost_response_retry", "lost_http", method=method, bulk=bulk, profile="external_fault")
-          for variant, method, bulk in (("ingest", "POST", False), ("put", "PUT", False), ("patch", "PATCH", False),
-                                       ("delete", "DELETE", False), ("bulk", "POST", True))],
-        _scenario("FLOW-15", "successful_state_survives_owned_restart", "restart"),
-        _scenario("HOST-03", "embedding_unreachable_liveness", "host_liveness", profile="external_fault"),
-        *[_scenario("API-09", environment + "_" + category, "debug", environment=environment, category=category)
-          for environment in ("production", "development") for category in ("validation", "provider")],
-        _scenario("API-10", "fault_internal_omits_source", "error_source"),
-        _scenario("API-10", "fault_bulk_internal_indexed_source", "bulk_fault", fault="sql", position="middle", check_source=True),
-        _scenario("API-11", "provider_generated_request_id", "correlation", supplied=False),
-        _scenario("API-11", "provider_supplied_request_id", "correlation", supplied=True),
-        *[_scenario("API-11", f"{method.lower()}_provider_{kind}_request_id", "correlation", method=method, supplied=supplied)
-          for method in ("PUT", "PATCH") for kind, supplied in (("generated", False), ("supplied", True))],
-        *[_scenario("API-11", f"{endpoint}_qdrant_{kind}_request_id", "correlation", method="POST" if bulk else "DELETE",
-                    supplied=supplied, dependency="qdrant", bulk=bulk)
-          for endpoint, bulk in (("delete", False), ("bulk", True)) for kind, supplied in (("generated", False), ("supplied", True))],
-        _scenario("API-12", "scheduled_concurrent_distinct_request_ids", "independent", check_correlation=True),
-        _scenario("API-13", "primary_and_compensation_error_logs", "error_logs"),
-        _scenario("API-14", "dependency_recovery_same_process", "recovered"),
-        _scenario("BULK-18", "exact100_partial_failure_latency", "bulk_latency"),
-        _scenario("ING-F03", "external_residual_purge_rejected", "external_qdrant", profile="external_fault", operation="http.qdrant.delete"),
-        _scenario("ING-F04", "external_upsert_retry_exhaustion", "external_qdrant", profile="external_fault", operation="http.qdrant.upsert", attempts=[1, 2, 3], status=503),
-        _scenario("ING-F04", "external_later_slice_retry_exhaustion_batch2", "external_qdrant", profile="external_fault", operation="http.qdrant.upsert", attempts=[2, 3, 4], status=503, later=True),
-        _scenario("ING-F05", "external_promotion_applied_lost_ack", "external_qdrant", profile="external_fault", operation="http.qdrant.upsert", lost=True),
-        _scenario("MUT-F12", "put_external_promotion_lost_ack", "external_qdrant", method="PUT", profile="external_fault", operation="http.qdrant.promote", lost=True),
-        _scenario("MUT-F12", "patch_external_purge_lost_ack", "external_qdrant", method="PATCH", profile="external_fault", operation="http.qdrant.superseded", lost=True),
-        _scenario("DEL-10", "external_purge_applied_lost_ack", "external_qdrant", method="DELETE", profile="external_fault", operation="http.qdrant.delete", lost=True),
-    ])
+        result.extend(
+            [
+                _scenario(
+                    "BULK-06",
+                    position + "_locked",
+                    "bulk_fault",
+                    fault="lock",
+                    position=position,
+                ),
+                _scenario(
+                    "BULK-07",
+                    position + "_vector_failure",
+                    "bulk_fault",
+                    fault="vector",
+                    position=position,
+                ),
+                _scenario(
+                    "BULK-08",
+                    position + "_sql_failure",
+                    "bulk_fault",
+                    fault="sql",
+                    position=position,
+                ),
+            ]
+        )
+    result.extend(
+        [
+            _scenario(
+                "BULK-06", "all_locked", "bulk_fault", fault="lock", all_items=True
+            ),
+            _scenario(
+                "BULK-08", "all_sql_failed", "bulk_fault", fault="sql", all_items=True
+            ),
+            _scenario("BULK-09", "mixed_missing_lock_domain_success", "bulk_mixed"),
+            _scenario(
+                "BULK-15",
+                "all_vector_failed_independent_compensation",
+                "bulk_fault",
+                fault="vector",
+                all_items=True,
+            ),
+            _scenario("BULK-17", "kill_after_first_completed_item", "bulk_crash"),
+            *[
+                _scenario(
+                    "FLOW-04", variant, "race_stale", method=first, second_method=second
+                )
+                for variant, first, second in (
+                    ("put_put", "PUT", "PUT"),
+                    ("patch_patch", "PATCH", "PATCH"),
+                    ("put_patch", "PUT", "PATCH"),
+                )
+            ],
+            _scenario("FLOW-05", "older_cutover_after_newer_commit", "race_cutover"),
+            _scenario(
+                "FLOW-06",
+                "stale_staging_after_winner_cutover",
+                "race_stale",
+                method="PUT",
+                hold_phase="vector.upsert",
+            ),
+            *[
+                _scenario(
+                    "FLOW-07",
+                    variant,
+                    "race_delete_update",
+                    direction=direction,
+                    hold_phase=phase,
+                )
+                for variant, direction, phase in (
+                    ("update_staged_then_delete", "update_first", "vector.upsert"),
+                    ("update_committed_then_delete", "update_first", "sql.commit"),
+                    ("delete_committed_then_restore", "delete_first", "sql.commit"),
+                    (
+                        "delete_before_purge_then_restore",
+                        "delete_first",
+                        "vector.purge",
+                    ),
+                )
+            ],
+            _scenario(
+                "FLOW-08",
+                "stale_compensation_overwrites_accepted_put",
+                "race_compensation",
+            ),
+            _scenario(
+                "FLOW-09", "same_id_deletes_lock_then_idempotency", "race_delete"
+            ),
+            _scenario("FLOW-10", "bulk_and_single_overlap", "race_bulk", single=True),
+            _scenario("FLOW-10", "overlapping_bulk_batches", "race_bulk", single=False),
+            _scenario("FLOW-11", "independent_ids_scheduled_mutations", "independent"),
+            _scenario(
+                "FLOW-12",
+                "ingest_commit_then_put",
+                "race_ingest_mutation",
+                second_method="PUT",
+            ),
+            _scenario(
+                "FLOW-12",
+                "ingest_commit_then_delete",
+                "race_ingest_mutation",
+                second_method="DELETE",
+            ),
+            _scenario(
+                "FLOW-13",
+                "slow_embeddings_leave_unrelated_work_usable",
+                "slow_embeddings",
+            ),
+            *[
+                _scenario(
+                    "FLOW-14",
+                    variant + "_lost_response_retry",
+                    "lost_http",
+                    method=method,
+                    bulk=bulk,
+                    profile="external_fault",
+                )
+                for variant, method, bulk in (
+                    ("ingest", "POST", False),
+                    ("put", "PUT", False),
+                    ("patch", "PATCH", False),
+                    ("delete", "DELETE", False),
+                    ("bulk", "POST", True),
+                )
+            ],
+            _scenario("FLOW-15", "successful_state_survives_owned_restart", "restart"),
+            _scenario(
+                "HOST-03",
+                "embedding_unreachable_liveness",
+                "host_liveness",
+                profile="external_fault",
+            ),
+            *[
+                _scenario(
+                    "API-09",
+                    environment + "_" + category,
+                    "debug",
+                    environment=environment,
+                    category=category,
+                )
+                for environment in ("production", "development")
+                for category in ("validation", "provider")
+            ],
+            _scenario("API-10", "fault_internal_omits_source", "error_source"),
+            _scenario(
+                "API-10",
+                "fault_bulk_internal_indexed_source",
+                "bulk_fault",
+                fault="sql",
+                position="middle",
+                check_source=True,
+            ),
+            _scenario(
+                "API-11", "provider_generated_request_id", "correlation", supplied=False
+            ),
+            _scenario(
+                "API-11", "provider_supplied_request_id", "correlation", supplied=True
+            ),
+            *[
+                _scenario(
+                    "API-11",
+                    f"{method.lower()}_provider_{kind}_request_id",
+                    "correlation",
+                    method=method,
+                    supplied=supplied,
+                )
+                for method in ("PUT", "PATCH")
+                for kind, supplied in (("generated", False), ("supplied", True))
+            ],
+            *[
+                _scenario(
+                    "API-11",
+                    f"{endpoint}_qdrant_{kind}_request_id",
+                    "correlation",
+                    method="POST" if bulk else "DELETE",
+                    supplied=supplied,
+                    dependency="qdrant",
+                    bulk=bulk,
+                )
+                for endpoint, bulk in (("delete", False), ("bulk", True))
+                for kind, supplied in (("generated", False), ("supplied", True))
+            ],
+            _scenario(
+                "API-12",
+                "scheduled_concurrent_distinct_request_ids",
+                "independent",
+                check_correlation=True,
+            ),
+            _scenario("API-13", "primary_and_compensation_error_logs", "error_logs"),
+            _scenario("API-14", "dependency_recovery_same_process", "recovered"),
+            _scenario("BULK-18", "exact100_partial_failure_latency", "bulk_latency"),
+            _scenario(
+                "ING-F03",
+                "external_residual_purge_rejected",
+                "external_qdrant",
+                profile="external_fault",
+                operation="http.qdrant.delete",
+            ),
+            _scenario(
+                "ING-F04",
+                "external_upsert_retry_exhaustion",
+                "external_qdrant",
+                profile="external_fault",
+                operation="http.qdrant.upsert",
+                attempts=[1, 2, 3],
+                status=503,
+            ),
+            _scenario(
+                "ING-F04",
+                "external_later_slice_retry_exhaustion_batch2",
+                "external_qdrant",
+                profile="external_fault",
+                operation="http.qdrant.upsert",
+                attempts=[2, 3, 4],
+                status=503,
+                later=True,
+            ),
+            _scenario(
+                "ING-F05",
+                "external_promotion_applied_lost_ack",
+                "external_qdrant",
+                profile="external_fault",
+                operation="http.qdrant.upsert",
+                lost=True,
+            ),
+            _scenario(
+                "MUT-F12",
+                "put_external_promotion_lost_ack",
+                "external_qdrant",
+                method="PUT",
+                profile="external_fault",
+                operation="http.qdrant.promote",
+                lost=True,
+            ),
+            _scenario(
+                "MUT-F12",
+                "patch_external_purge_lost_ack",
+                "external_qdrant",
+                method="PATCH",
+                profile="external_fault",
+                operation="http.qdrant.superseded",
+                lost=True,
+            ),
+            _scenario(
+                "DEL-10",
+                "external_purge_applied_lost_ack",
+                "external_qdrant",
+                method="DELETE",
+                profile="external_fault",
+                operation="http.qdrant.delete",
+                lost=True,
+            ),
+        ]
+    )
     for deleted in (False, True):
-        for phase in ("sql.read", "normalizer.normalize", "chunker.chunk", "sparse.embed", "vector.upsert",
-                      "sql.lock", "sql.save", "sql.commit", "vector.promote", "vector.superseded", "vector.delete_ids"):
-            result.append(_scenario("PUT-12", ("deleted_" if deleted else "active_") + phase.replace(".", "_"),
-                                    "put_failure", method="PUT", deleted=deleted, phase=phase))
+        for phase in (
+            "sql.read",
+            "normalizer.normalize",
+            "chunker.chunk",
+            "sparse.embed",
+            "vector.upsert",
+            "sql.lock",
+            "sql.save",
+            "sql.commit",
+            "vector.promote",
+            "vector.superseded",
+            "vector.delete_ids",
+        ):
+            result.append(
+                _scenario(
+                    "PUT-12",
+                    ("deleted_" if deleted else "active_") + phase.replace(".", "_"),
+                    "put_failure",
+                    method="PUT",
+                    deleted=deleted,
+                    phase=phase,
+                )
+            )
     return tuple(result)
 
 
@@ -207,23 +764,39 @@ RESILIENCE_SCENARIOS = _descriptors()
 
 
 def _body(parent: str, suffix: str = "الف") -> dict:
-    return {"suggestionId": parent, "title": f"بهبود شبکه توزیع برق {suffix}",
-            "problem": f"پایش تجهیزات شبکه به صورت دستی انجام می‌شود و زمان بیشتری نیاز دارد {suffix}",
-            "solution": f"سامانه پایش برخط برای کاهش تلفات و افزایش کیفیت برق ایجاد شود {suffix}", "status": 3}
+    return {
+        "suggestionId": parent,
+        "title": f"بهبود شبکه توزیع برق {suffix}",
+        "problem": f"پایش تجهیزات شبکه به صورت دستی انجام می‌شود و زمان بیشتری نیاز دارد {suffix}",
+        "solution": f"سامانه پایش برخط برای کاهش تلفات و افزایش کیفیت برق ایجاد شود {suffix}",
+        "status": 3,
+    }
 
 
 def _headers(parent: str, request_id: str) -> dict:
     return {"X-E2E-Operation-Id": request_id, "X-E2E-Parent-Id": parent}
 
 
-def _request(harness, method: str, parent: str, request_id: str, suffix="ب", *, body=None):
+def _request(
+    harness, method: str, parent: str, request_id: str, suffix="ب", *, body=None
+):
     if method == "DELETE":
-        return harness.request(method, f"/api/v1/suggestions/{parent}", headers=_headers(parent, request_id))
+        return harness.request(
+            method,
+            f"/api/v1/suggestions/{parent}",
+            headers=_headers(parent, request_id),
+        )
     data = body or _body(parent, suffix)
     if method == "PATCH":
         data = {"title": data["title"]}
-    return harness.request(method, "/api/v1/suggestions/ingest" if method == "POST" else f"/api/v1/suggestions/{parent}",
-                           json=data, headers=_headers(parent, request_id))
+    return harness.request(
+        method,
+        "/api/v1/suggestions/ingest"
+        if method == "POST"
+        else f"/api/v1/suggestions/{parent}",
+        json=data,
+        headers=_headers(parent, request_id),
+    )
 
 
 def _seed(harness, label="fault") -> str:
@@ -245,19 +818,52 @@ def _status(response, status: int):
 
 def _unchanged(before, after):
     from .oracles import assert_unchanged
+
     assert_unchanged(before, after)
 
 
-def _fault(controller, parent, request_id, *, operation, timing="before", attempt=1, error="vector", action="raise", **kwargs):
-    req = None if (operation.startswith("vector.") or operation.startswith("qdrant.")) else request_id
-    rule = FaultRule("fault", operation, timing=timing, parent_id=parent,
-                     request_id=req, attempt=attempt, error=error, action=action, **kwargs)
+def _fault(
+    controller,
+    parent,
+    request_id,
+    *,
+    operation,
+    timing="before",
+    attempt=1,
+    error="vector",
+    action="raise",
+    **kwargs,
+):
+    req = (
+        None
+        if (operation.startswith("vector.") or operation.startswith("qdrant."))
+        else request_id
+    )
+    rule = FaultRule(
+        "fault",
+        operation,
+        timing=timing,
+        parent_id=parent,
+        request_id=req,
+        attempt=attempt,
+        error=error,
+        action=action,
+        **kwargs,
+    )
     controller.install([rule])
     return rule
 
 
 def _rule(rule_id, operation, parent, request_id, **kwargs):
-    req = None if (operation.startswith("vector.") or operation.startswith("qdrant.") or operation.startswith("sparse.")) else request_id
+    req = (
+        None
+        if (
+            operation.startswith("vector.")
+            or operation.startswith("qdrant.")
+            or operation.startswith("sparse.")
+        )
+        else request_id
+    )
     return FaultRule(rule_id, operation, parent_id=parent, request_id=req, **kwargs)
 
 
@@ -267,12 +873,24 @@ def _barrier(controller, rule_id, epoch):
 
 def _record(harness, scenario, controller, parents, *, label="settled"):
     from .evidence import write_json
-    destination = harness.config.artifacts_dir / "fault_evidence" / f"{scenario.case_id}-{scenario.variant_id}"
+
+    destination = (
+        harness.config.artifacts_dir
+        / "fault_evidence"
+        / f"{scenario.case_id}-{scenario.variant_id}"
+    )
     destination.mkdir(parents=True, exist_ok=True)
-    write_json(destination / f"{label}.json", {"case_id": scenario.case_id, "variant_id": scenario.variant_id,
-                "stores": {parent: harness.snapshot(parent) for parent in parents},
-                "fault_schedule": controller._schedule(),
-                "schedule_events": controller.events(epoch=controller._schedule()["epoch"])}, harness.config.secrets())
+    write_json(
+        destination / f"{label}.json",
+        {
+            "case_id": scenario.case_id,
+            "variant_id": scenario.variant_id,
+            "stores": {parent: harness.snapshot(parent) for parent in parents},
+            "fault_schedule": controller._schedule(),
+            "schedule_events": controller.events(epoch=controller._schedule()["epoch"]),
+        },
+        harness.config.secrets(),
+    )
 
 
 @contextmanager
@@ -283,7 +901,9 @@ def _overrides(harness, overrides, *, qdrant_proxy=None):
     harness.app.stop()
     harness.app.overrides.update({key: str(value) for key, value in overrides.items()})
     if qdrant_proxy is not None:
-        harness.app.qdrant_proxy_proof = qdrant_proxy.ownership_proof(harness.config.run_id)
+        harness.app.qdrant_proxy_proof = qdrant_proxy.ownership_proof(
+            harness.config.run_id
+        )
     try:
         harness.app.start()
         harness.start_worker()
@@ -300,6 +920,7 @@ def _overrides(harness, overrides, *, qdrant_proxy=None):
 
 class HeldAdvisoryLock:
     """Own a real separate SQL transaction; signal acquisition explicitly."""
+
     def __init__(self, harness, parents):
         self.harness = harness
         self.parents = list(parents)
@@ -319,18 +940,30 @@ class HeldAdvisoryLock:
         from sqlalchemy import text
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy.pool import NullPool
+
         from tests.database_safety import verify_postgres_connection
-        engine = create_async_engine(self.harness.config.database.postgres_url, poolclass=NullPool)
+
+        engine = create_async_engine(
+            self.harness.config.database.postgres_url, poolclass=NullPool
+        )
         try:
             async with engine.connect() as connection:
-                await verify_postgres_connection(connection, self.harness.config.database)
+                await verify_postgres_connection(
+                    connection, self.harness.config.database
+                )
                 # Verification opens a transaction; retain it for transaction-scoped locks.
                 for parent in self.parents:
                     self.harness.registry.require(parent)
-                    key = int.from_bytes(hashlib.sha256(parent.encode()).digest()[:8], "big", signed=True)
-                    result = await connection.execute(text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": key})
+                    key = int.from_bytes(
+                        hashlib.sha256(parent.encode()).digest()[:8], "big", signed=True
+                    )
+                    result = await connection.execute(
+                        text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": key}
+                    )
                     if not result.scalar_one():
-                        raise AssertionError("Independent SQL lock could not be acquired")
+                        raise AssertionError(
+                            "Independent SQL lock could not be acquired"
+                        )
                 self.ready.set()
                 released = await asyncio.to_thread(self.release.wait, 40)
                 if not released:
@@ -344,7 +977,9 @@ class HeldAdvisoryLock:
         self.thread.start()
         if not self.ready.wait(10):
             self.release.set()
-            raise TimeoutError("Owned advisory transaction did not acknowledge acquisition")
+            raise TimeoutError(
+                "Owned advisory transaction did not acknowledge acquisition"
+            )
         if self.error:
             raise self.error
         return self
@@ -366,27 +1001,37 @@ def _delete_sql_physically(harness, parent):
         from sqlalchemy import text
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy.pool import NullPool
+
         from tests.database_safety import verify_postgres_connection
-        engine = create_async_engine(harness.config.database.postgres_url, poolclass=NullPool)
+
+        engine = create_async_engine(
+            harness.config.database.postgres_url, poolclass=NullPool
+        )
         try:
             async with engine.begin() as connection:
                 await verify_postgres_connection(connection, harness.config.database)
-                await connection.execute(text("DELETE FROM suggestions WHERE id = :id"), {"id": parent})
+                await connection.execute(
+                    text("DELETE FROM suggestions WHERE id = :id"), {"id": parent}
+                )
         finally:
             await engine.dispose()
+
     asyncio.run(remove())
 
 
 def execute_resilience(harness, scenario: ResilienceScenario):
     directory = harness.app.overrides.get("E2E_FAULT_DIR")
     if not directory or not harness.app.factory:
-        raise RuntimeError("Resilience requires the test-only instrumented subprocess factory")
+        raise RuntimeError(
+            "Resilience requires the test-only instrumented subprocess factory"
+        )
     controller = harness.fault_controller or FaultController(directory)
     harness.fault_controller = controller
     if getattr(harness, "_outbox_worker", None) is not None:
         harness._outbox_worker.controller = controller
         if harness._outbox_worker._container is not None:
             from .bootstrap import install_instrumentation
+
             install_instrumentation(harness._outbox_worker._container, controller)
     controller.release_all()
     controller.install([])
@@ -402,16 +1047,28 @@ def execute_resilience(harness, scenario: ResilienceScenario):
             if not harness.app.running:
                 harness.app.start()
             harness.settle_requests()
-            _record(harness, scenario, controller, sorted(harness.registered_ids), label="final")
+            _record(
+                harness,
+                scenario,
+                controller,
+                sorted(harness.registered_ids),
+                label="final",
+            )
         except Exception as capture_error:
             try:
-                controller.record("final_capture_failed", case_id=scenario.case_id, variant_id=scenario.variant_id,
-                                  error_type=type(capture_error).__name__)
+                controller.record(
+                    "final_capture_failed",
+                    case_id=scenario.case_id,
+                    variant_id=scenario.variant_id,
+                    error_type=type(capture_error).__name__,
+                )
             except Exception:
                 # A failed evidence sink must not replace the product assertion.
                 pass
             if original_error is not None:
-                original_error.add_note(f"Final fault/state capture failed: {type(capture_error).__name__}")
+                original_error.add_note(
+                    f"Final fault/state capture failed: {type(capture_error).__name__}"
+                )
             else:
                 raise
         finally:
@@ -421,21 +1078,38 @@ def execute_resilience(harness, scenario: ResilienceScenario):
 def _execute_early(h, s, c):
     parent, before, request = _prepare(h, s.method)
     p = s.parameters
-    _fault(c, parent, request, operation=p["operation"], error=p["error"], action="zero" if p.get("zero") else "raise")
+    _fault(
+        c,
+        parent,
+        request,
+        operation=p["operation"],
+        error=p["error"],
+        action="zero" if p.get("zero") else "raise",
+    )
     response = _request(h, s.method, parent, request)
     _record(h, s, c, [parent])
     c.assert_triggered()
     _status(response, p["status"])
     if p["error"] == "normalizer":
         error = response.json()["errors"][0]
-        assert error["code"] == "TEXT_NORMALIZATION_FAILED" and error["source"]["pointer"] == "/data"
+        assert (
+            error["code"] == "TEXT_NORMALIZATION_FAILED"
+            and error["source"]["pointer"] == "/data"
+        )
     _unchanged(before, h.snapshot(parent))
 
 
 def _execute_ingest_sql(h, s, c):
     parent, before, request = _prepare(h, "POST")
     p = s.parameters
-    _fault(c, parent, request, operation=p["operation"], timing=p.get("timing", "before"), error="runtime")
+    _fault(
+        c,
+        parent,
+        request,
+        operation=p["operation"],
+        timing=p.get("timing", "before"),
+        error="runtime",
+    )
     response = _request(h, "POST", parent, request)
     _record(h, s, c, [parent])
     c.assert_triggered()
@@ -451,16 +1125,26 @@ def _execute_ingest_sql(h, s, c):
 
 def _execute_ingest_vector(h, s, c):
     parent, _, request = _prepare(h, "POST")
-    _fault(c, parent, request, operation=s.parameters["operation"], timing=s.parameters.get("timing", "before"))
+    _fault(
+        c,
+        parent,
+        request,
+        operation=s.parameters["operation"],
+        timing=s.parameters.get("timing", "before"),
+    )
     response = _request(h, "POST", parent, request)
     h.drain_outbox()
     _record(h, s, c, [parent])
     c.assert_triggered()
     _status(response, 201)
     after = h.snapshot(parent)
-    assert after["sql"] is not None and after["sql"]["version"] == 1, "Outbox ingestion must durably persist SQL row"
+    assert after["sql"] is not None and after["sql"]["version"] == 1, (
+        "Outbox ingestion must durably persist SQL row"
+    )
     outbox = h.snapshot_outbox(parent)
-    assert_outbox_consistent(outbox, parent, expected_event_type="SUGGESTION_INGESTED", min_retry_count=1)
+    assert_outbox_consistent(
+        outbox, parent, expected_event_type="SUGGESTION_INGESTED", min_retry_count=1
+    )
 
 
 def _execute_ingest_compensation(h, s, c):
@@ -474,12 +1158,17 @@ def _execute_ingest_compensation(h, s, c):
     c.assert_triggered()
     _status(response, 201)
     after = h.snapshot(parent)
-    assert after["sql"] is not None and after["sql"]["version"] == 1, "Outbox pattern eliminates dual compensation; persistent SQL record required"
-    assert not c.events(epoch=c._schedule()["epoch"], operation="sql.delete"), "SQL dual compensation must never execute"
+    assert after["sql"] is not None and after["sql"]["version"] == 1, (
+        "Outbox pattern eliminates dual compensation; persistent SQL record required"
+    )
+    assert not c.events(epoch=c._schedule()["epoch"], operation="sql.delete"), (
+        "SQL dual compensation must never execute"
+    )
     if hasattr(h, "snapshot_outbox"):
         outbox = h.snapshot_outbox(parent)
-        assert_outbox_consistent(outbox, parent, expected_event_type="SUGGESTION_INGESTED", min_retry_count=1)
-
+        assert_outbox_consistent(
+            outbox, parent, expected_event_type="SUGGESTION_INGESTED", min_retry_count=1
+        )
 
 
 def _execute_ingest_slice(h, s, c):
@@ -487,8 +1176,21 @@ def _execute_ingest_slice(h, s, c):
     p = s.parameters
     with _overrides(h, {"QDRANT_BATCH_SIZE": 2} if p.get("later") else {}):
         first = 2 if p.get("later") else 1
-        attempts = [first, first + 1] if p.get("recover") else [first, first + 1, first + 2] if p.get("transient") else first
-        _fault(c, parent, request, operation="qdrant.upsert", attempt=attempts, error="connection" if p.get("transient") else "runtime")
+        attempts = (
+            [first, first + 1]
+            if p.get("recover")
+            else [first, first + 1, first + 2]
+            if p.get("transient")
+            else first
+        )
+        _fault(
+            c,
+            parent,
+            request,
+            operation="qdrant.upsert",
+            attempt=attempts,
+            error="connection" if p.get("transient") else "runtime",
+        )
         epoch = c._schedule()["epoch"]
         response = _request(h, "POST", parent, request)
         h.drain_outbox()
@@ -496,21 +1198,47 @@ def _execute_ingest_slice(h, s, c):
         c.assert_triggered()
         _status(response, 201)
         if p.get("recover"):
-            h.assert_consistent(parent, expected_version=1, chunks_count=response.json()["data"]["chunksCount"])
-            assert c.events(epoch=epoch, parent_id=parent, operation="qdrant.upsert", timing="after", applied=True)
+            h.assert_consistent(
+                parent,
+                expected_version=1,
+                chunks_count=response.json()["data"]["chunksCount"],
+            )
+            assert c.events(
+                epoch=epoch,
+                parent_id=parent,
+                operation="qdrant.upsert",
+                timing="after",
+                applied=True,
+            )
         else:
             after = h.snapshot(parent)
             assert after["sql"] is not None and after["sql"]["version"] == 1
         if p.get("later"):
-            assert c.events(epoch=epoch, parent_id=parent, operation="qdrant.upsert", timing="after", attempt=1, applied=True), "Earlier slice never applied"
+            assert c.events(
+                epoch=epoch,
+                parent_id=parent,
+                operation="qdrant.upsert",
+                timing="after",
+                attempt=1,
+                applied=True,
+            ), "Earlier slice never applied"
 
 
 def _execute_mutation_slice(h, s, c):
     parent, before, request = _prepare(h, s.method)
     p = s.parameters
     with _overrides(h, {"QDRANT_BATCH_SIZE": 2} if p.get("later") else {}):
-        rules = [_rule("upsert", "qdrant.upsert", parent, request, attempt=2 if p.get("later") else 1,
-                       timing="after" if p.get("applied") else "before", error="runtime")]
+        rules = [
+            _rule(
+                "upsert",
+                "qdrant.upsert",
+                parent,
+                request,
+                attempt=2 if p.get("later") else 1,
+                timing="after" if p.get("applied") else "before",
+                error="runtime",
+            )
+        ]
         c.install(rules)
         response = _request(h, s.method, parent, request)
         h.drain_outbox()
@@ -524,7 +1252,16 @@ def _execute_mutation_slice(h, s, c):
 def _execute_mutation_sql(h, s, c):
     parent, before, request = _prepare(h, s.method)
     p = s.parameters
-    rules = [_rule("sql", p["operation"], parent, request, timing=p.get("timing", "before"), error="runtime")]
+    rules = [
+        _rule(
+            "sql",
+            p["operation"],
+            parent,
+            request,
+            timing=p.get("timing", "before"),
+            error="runtime",
+        )
+    ]
     c.install(rules)
     response = _request(h, s.method, parent, request)
     _record(h, s, c, [parent])
@@ -533,7 +1270,9 @@ def _execute_mutation_sql(h, s, c):
     after = h.snapshot(parent)
     if p.get("timing") == "after":
         assert after["sql"]["version"] == 2
-        h.assert_consistent(parent, expected_version=2, chunks_count=len(after["points"]))
+        h.assert_consistent(
+            parent, expected_version=2, chunks_count=len(after["points"])
+        )
     else:
         _unchanged(before, after)
 
@@ -541,7 +1280,14 @@ def _execute_mutation_sql(h, s, c):
 def _execute_cutover(h, s, c):
     parent, _, request = _prepare(h, s.method)
     p = s.parameters
-    _fault(c, parent, request, operation=p["operation"], timing=p.get("timing", "before"), attempt=p["attempt"])
+    _fault(
+        c,
+        parent,
+        request,
+        operation=p["operation"],
+        timing=p.get("timing", "before"),
+        attempt=p["attempt"],
+    )
     response = _request(h, s.method, parent, request)
     h.drain_outbox()
     _record(h, s, c, [parent])
@@ -550,7 +1296,9 @@ def _execute_cutover(h, s, c):
     assert h.snapshot(parent)["sql"]["version"] == 2
     if p.get("exhausted"):
         outbox = h.snapshot_outbox(parent)
-        assert_outbox_consistent(outbox, parent, expected_event_type="SUGGESTION_UPDATED", min_retry_count=1)
+        assert_outbox_consistent(
+            outbox, parent, expected_event_type="SUGGESTION_UPDATED", min_retry_count=1
+        )
     else:
         h.assert_consistent(parent, expected_version=2, expected_deleted=False)
 
@@ -564,13 +1312,22 @@ def _execute_lock(h, s, c):
         _unchanged(before, h.snapshot(parent))
     response = _request(h, s.method, parent, uuid.uuid4().hex)
     _status(response, 200)
-    h.assert_consistent(parent, expected_version=2, expected_deleted=s.method == "DELETE")
+    h.assert_consistent(
+        parent, expected_version=2, expected_deleted=s.method == "DELETE"
+    )
 
 
 def _execute_delete_sql(h, s, c):
     parent, before, request = _prepare(h, "DELETE")
     p = s.parameters
-    _fault(c, parent, request, operation=p["operation"], timing=p.get("timing", "before"), error="runtime")
+    _fault(
+        c,
+        parent,
+        request,
+        operation=p["operation"],
+        timing=p.get("timing", "before"),
+        error="runtime",
+    )
     response = _request(h, "DELETE", parent, request)
     _record(h, s, c, [parent])
     c.assert_triggered()
@@ -578,7 +1335,9 @@ def _execute_delete_sql(h, s, c):
     if p.get("timing") == "after":
         after = h.snapshot(parent)
         assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
-        assert not after["points"], "Outbox worker cleans up points even if HTTP handler failed after commit"
+        assert not after["points"], (
+            "Outbox worker cleans up points even if HTTP handler failed after commit"
+        )
     else:
         _unchanged(before, h.snapshot(parent))
 
@@ -586,7 +1345,16 @@ def _execute_delete_sql(h, s, c):
 def _execute_delete_vector(h, s, c):
     parent, before, request = _prepare(h, "DELETE")
     p = s.parameters
-    rules = [_rule("purge", "vector.purge", parent, request, timing=p.get("timing", "before"), error="vector")]
+    rules = [
+        _rule(
+            "purge",
+            "vector.purge",
+            parent,
+            request,
+            timing=p.get("timing", "before"),
+            error="vector",
+        )
+    ]
     c.install(rules)
     response = _request(h, "DELETE", parent, request)
     h.drain_outbox()
@@ -594,8 +1362,12 @@ def _execute_delete_vector(h, s, c):
     c.assert_triggered()
     _status(response, 200)
     after = h.snapshot(parent)
-    assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2, "Outbox soft-delete persists deletion without reverse compensation"
-    assert not c.events(epoch=c._schedule()["epoch"], operation="sql.save"), "Reverse compensation must never run"
+    assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2, (
+        "Outbox soft-delete persists deletion without reverse compensation"
+    )
+    assert not c.events(epoch=c._schedule()["epoch"], operation="sql.save"), (
+        "Reverse compensation must never run"
+    )
 
 
 def _execute_race_ingest(h, s, c):
@@ -609,11 +1381,17 @@ def _execute_race_ingest(h, s, c):
             a_read = _barrier(c, "A_read", epoch)
             assert a_read["found"] is False
             rb = _request(h, "POST", parent, b, "رقیب دوم")
-            assert rb.status_code == 409, f"Concurrent duplicate check accepted creation: {rb.status_code}"
+            assert rb.status_code == 409, (
+                f"Concurrent duplicate check accepted creation: {rb.status_code}"
+            )
             c.release("A_read")
             ra = fa.result(timeout=h.config.request_timeout)
             _status(ra, 201)
-            h.assert_consistent(parent, expected_version=1, chunks_count=ra.json()["data"]["chunksCount"])
+            h.assert_consistent(
+                parent,
+                expected_version=1,
+                chunks_count=ra.json()["data"]["chunksCount"],
+            )
             accepted = h.snapshot(parent)
             _record(h, s, c, [parent], label="accepted_first")
             c.assert_triggered()
@@ -627,14 +1405,18 @@ def _execute_race_stale(h, s, c):
     a, b = uuid.uuid4().hex, uuid.uuid4().hex
     phase = s.parameters.get("hold_phase", "sql.read")
     rule_req = None if phase == "vector.upsert" else a
-    epoch = c.install([_rule("A_hold", phase, parent, rule_req, timing="after", action="barrier")])
+    epoch = c.install(
+        [_rule("A_hold", phase, parent, rule_req, timing="after", action="barrier")]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, s.method, parent, a, "بازنده کهنه")
         try:
             event = _barrier(c, "A_hold", epoch)
             if phase == "sql.read":
                 assert event["version"] == 1
-            concurrent = _request(h, s.parameters.get("second_method", s.method), parent, b, "رقیب همزمان")
+            concurrent = _request(
+                h, s.parameters.get("second_method", s.method), parent, b, "رقیب همزمان"
+            )
             if phase == "vector.upsert":
                 # In outbox architecture, advisory lock is released upon SQL commit.
                 # Staging happens asynchronously in the outbox worker, so concurrent update B succeeds.
@@ -656,7 +1438,13 @@ def _execute_race_stale(h, s, c):
                 assert accepted["sql"]["version"] == 2
                 _record(h, s, c, [parent])
                 c.assert_triggered()
-                retry_resp = _request(h, s.parameters.get("second_method", s.method), parent, uuid.uuid4().hex, "برنده جدید پس از آزادسازی")
+                retry_resp = _request(
+                    h,
+                    s.parameters.get("second_method", s.method),
+                    parent,
+                    uuid.uuid4().hex,
+                    "برنده جدید پس از آزادسازی",
+                )
                 _status(retry_resp, 200)
                 h.assert_consistent(parent, expected_version=3)
         finally:
@@ -666,7 +1454,13 @@ def _execute_race_stale(h, s, c):
 def _execute_race_cutover(h, s, c):
     parent = _seed(h, "cutover")
     a, b = uuid.uuid4().hex, uuid.uuid4().hex
-    epoch = c.install([_rule("A_committed", "sql.commit", parent, a, timing="after", action="barrier")])
+    epoch = c.install(
+        [
+            _rule(
+                "A_committed", "sql.commit", parent, a, timing="after", action="barrier"
+            )
+        ]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, "PUT", parent, a, "نسخه قدیمی")
         try:
@@ -692,7 +1486,18 @@ def _execute_race_cutover(h, s, c):
 def _execute_race_missing(h, s, c):
     parent = _seed(h, "removed")
     request = uuid.uuid4().hex
-    epoch = c.install([_rule("initial_read", "sql.read", parent, request, timing="after", action="barrier")])
+    epoch = c.install(
+        [
+            _rule(
+                "initial_read",
+                "sql.read",
+                parent,
+                request,
+                timing="after",
+                action="barrier",
+            )
+        ]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, s.method, parent, request)
         try:
@@ -723,11 +1528,15 @@ def _execute_race_delete_update(h, s, c):
     a, b = uuid.uuid4().hex, uuid.uuid4().hex
     p = s.parameters
     update_first = p["direction"] == "update_first"
-    first_method, second_method = ("PUT", "DELETE") if update_first else ("DELETE", "PUT")
+    first_method, second_method = (
+        ("PUT", "DELETE") if update_first else ("DELETE", "PUT")
+    )
     phase = p["hold_phase"]
     timing = "before" if phase == "vector.purge" else "after"
     rule_req = None if phase in {"vector.upsert", "vector.purge"} else a
-    epoch = c.install([_rule("first_hold", phase, parent, rule_req, action="barrier", timing=timing)])
+    epoch = c.install(
+        [_rule("first_hold", phase, parent, rule_req, action="barrier", timing=timing)]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, first_method, parent, a, "ابتدا")
         try:
@@ -747,7 +1556,18 @@ def _execute_race_delete_update(h, s, c):
 def _execute_race_delete(h, s, c):
     parent = _seed(h, "two-deletes")
     a, b = uuid.uuid4().hex, uuid.uuid4().hex
-    epoch = c.install([_rule("hold_lock", "sql.soft_delete", parent, a, action="barrier", timing="after")])
+    epoch = c.install(
+        [
+            _rule(
+                "hold_lock",
+                "sql.soft_delete",
+                parent,
+                a,
+                action="barrier",
+                timing="after",
+            )
+        ]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, "DELETE", parent, a)
         try:
@@ -769,12 +1589,25 @@ def _execute_race_delete(h, s, c):
 def _execute_race_ingest_mutation(h, s, c):
     parent = h.new_id("ingest-race")
     a, b = uuid.uuid4().hex, uuid.uuid4().hex
-    epoch = c.install([_rule("ingest_committed", "sql.commit", parent, a, timing="after", action="barrier")])
+    epoch = c.install(
+        [
+            _rule(
+                "ingest_committed",
+                "sql.commit",
+                parent,
+                a,
+                timing="after",
+                action="barrier",
+            )
+        ]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, "POST", parent, a, "ایجاد قدیمی")
         try:
             _barrier(c, "ingest_committed", epoch)
-            second = _request(h, s.parameters["second_method"], parent, b, "تغییر پذیرفته جدید")
+            second = _request(
+                h, s.parameters["second_method"], parent, b, "تغییر پذیرفته جدید"
+            )
             _status(second, 200)
             accepted = h.snapshot(parent)
             _record(h, s, c, [parent], label="competing_mutation_accepted")
@@ -800,27 +1633,37 @@ def _execute_race_compensation(h, s, c):
     c.assert_triggered()
     after = h.snapshot(parent)
     assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
-    assert not c.events(epoch=epoch, operation="sql.save"), "Outbox pattern eliminates reverse compensation"
+    assert not c.events(epoch=epoch, operation="sql.save"), (
+        "Outbox pattern eliminates reverse compensation"
+    )
 
 
 def _execute_compensation_lock(h, s, c):
     parent = _seed(h, "restore-lock")
     request = uuid.uuid4().hex
-    epoch = c.install([_rule("purge_hold", "vector.purge", parent, request, action="barrier"),
-                       _rule("purge_fail", "vector.purge", parent, request, error="vector")])
+    epoch = c.install(
+        [
+            _rule("purge_hold", "vector.purge", parent, request, action="barrier"),
+            _rule("purge_fail", "vector.purge", parent, request, error="vector"),
+        ]
+    )
     response = _request(h, "DELETE", parent, request)
     _status(response, 200)
     _record(h, s, c, [parent])
     after = h.snapshot(parent)
     assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
-    restores = c.events(epoch=epoch, request_id=request, operation="sql.save", timing="after")
+    restores = c.events(
+        epoch=epoch, request_id=request, operation="sql.save", timing="after"
+    )
     assert not restores, "Compensation wrote SQL after its advisory lock was denied"
 
 
 def _execute_blackout(h, s, c):
     parent = _seed(h, "blackout")
     request = uuid.uuid4().hex
-    epoch = c.install([_rule("between_payloads", "qdrant.promote", parent, request, action="barrier")])
+    epoch = c.install(
+        [_rule("between_payloads", "qdrant.promote", parent, request, action="barrier")]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, s.method, parent, request)
         try:
@@ -834,20 +1677,45 @@ def _execute_blackout(h, s, c):
             h.assert_consistent(parent, expected_version=2)
             # Availability is characterized separately; the checklist explicitly
             # leaves a contractual availability guarantee undecided.
-            c.record("availability_characterization", parent_id=parent,
-                     active_count=sum(point["payload"].get("chunk_status") == "active" for point in intermediate["points"]),
-                     contract_gap="two payload operations permit a temporary blackout; no SLA specified")
+            c.record(
+                "availability_characterization",
+                parent_id=parent,
+                active_count=sum(
+                    point["payload"].get("chunk_status") == "active"
+                    for point in intermediate["points"]
+                ),
+                contract_gap="two payload operations permit a temporary blackout; no SLA specified",
+            )
         finally:
             c.release_all()
 
 
 def _execute_crash(h, s, c):
-    method = "POST" if s.parameters["workflow"] == "ingest" else "DELETE" if s.parameters["workflow"] == "delete" else s.method
+    method = (
+        "POST"
+        if s.parameters["workflow"] == "ingest"
+        else "DELETE"
+        if s.parameters["workflow"] == "delete"
+        else s.method
+    )
     parent, original, request = _prepare(h, method)
     p = s.parameters
-    is_worker_phase = p["phase"].startswith("vector.") or p["phase"].startswith("qdrant.")
+    is_worker_phase = p["phase"].startswith("vector.") or p["phase"].startswith(
+        "qdrant."
+    )
     action = "cancel" if p.get("cancel") else "barrier"
-    epoch = c.install([_rule("interrupt", p["phase"], parent, request, action=action, timing=p["timing"])])
+    epoch = c.install(
+        [
+            _rule(
+                "interrupt",
+                p["phase"],
+                parent,
+                request,
+                action=action,
+                timing=p["timing"],
+            )
+        ]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_request, h, method, parent, request)
         try:
@@ -869,9 +1737,14 @@ def _execute_crash(h, s, c):
                 # A process kill/disconnected cancellation is expected transport
                 # evidence; an assertion error is not swallowed.
                 import httpx
+
                 if not isinstance(error, (httpx.TransportError, RuntimeError)):
                     raise
-                c.record("interrupted_http", request_id=request, error_type=type(error).__name__)
+                c.record(
+                    "interrupted_http",
+                    request_id=request,
+                    error_type=type(error).__name__,
+                )
             _record(h, s, c, [parent], label="interrupted_before_restart")
             c.assert_triggered()
             c.install([])
@@ -882,7 +1755,9 @@ def _execute_crash(h, s, c):
             else:
                 h.restart_app() if h.app.running else h.app.start()
             state = h.snapshot(parent)
-            abandoned_ids = {point["id"] for point in state["points"]} - {point["id"] for point in original["points"]}
+            abandoned_ids = {point["id"] for point in state["points"]} - {
+                point["id"] for point in original["points"]
+            }
             _unchanged(state, h.snapshot(parent))
             if method == "POST":
                 _status(_request(h, "POST", parent, uuid.uuid4().hex), 409)
@@ -891,11 +1766,18 @@ def _execute_crash(h, s, c):
                 _status(_request(h, "DELETE", parent, uuid.uuid4().hex), 200)
                 h.assert_consistent(parent, expected_deleted=True)
             else:
-                response = _request(h, "PUT", parent, uuid.uuid4().hex, "پس از راه‌اندازی")
+                response = _request(
+                    h, "PUT", parent, uuid.uuid4().hex, "پس از راه‌اندازی"
+                )
                 _status(response, 200)
-                h.assert_consistent(parent, expected_version=response.json()["data"]["version"],
-                                    chunks_count=response.json()["data"]["chunksCount"])
-                assert not abandoned_ids.intersection(point["id"] for point in h.snapshot(parent)["points"]), "Retry retained interrupted operation points"
+                h.assert_consistent(
+                    parent,
+                    expected_version=response.json()["data"]["version"],
+                    chunks_count=response.json()["data"]["chunksCount"],
+                )
+                assert not abandoned_ids.intersection(
+                    point["id"] for point in h.snapshot(parent)["points"]
+                ), "Retry retained interrupted operation points"
         finally:
             c.release_all()
 
@@ -904,7 +1786,9 @@ def _execute_retry_ingest(h, s, c):
     parent, _, request = _prepare(h, "POST")
     rules = [_rule("primary", "vector.upsert", parent, request, error="vector")]
     if s.parameters["orphan"]:
-        rules.append(_rule("orphan", "vector.purge", parent, request, attempt=2, error="vector"))
+        rules.append(
+            _rule("orphan", "vector.purge", parent, request, attempt=2, error="vector")
+        )
     c.install(rules)
     response = _request(h, "POST", parent, request)
     h.drain_outbox()
@@ -918,7 +1802,9 @@ def _execute_retry_ingest(h, s, c):
     _status(retry, 409)
     _record(h, s, c, [parent])
     h.drain_outbox()
-    h.assert_consistent(parent, expected_version=1, chunks_count=response.json()["data"]["chunksCount"])
+    h.assert_consistent(
+        parent, expected_version=1, chunks_count=response.json()["data"]["chunksCount"]
+    )
 
 
 def _execute_retry_mutation(h, s, c):
@@ -935,7 +1821,9 @@ def _execute_retry_mutation(h, s, c):
     response = _request(h, s.method, parent, uuid.uuid4().hex)
     _status(response, 200)
     _record(h, s, c, [parent])
-    h.assert_consistent(parent, expected_version=3, chunks_count=response.json()["data"]["chunksCount"])
+    h.assert_consistent(
+        parent, expected_version=3, chunks_count=response.json()["data"]["chunksCount"]
+    )
 
 
 def _execute_orphan_early(h, s, c):
@@ -971,38 +1859,104 @@ def _embedding_route(h):
 
 def _provider_rules(fault):
     if fault == "reset":
-        return [FaultRule("provider_reset", "http.embedding", action="reset", attempt=None)]
+        return [
+            FaultRule("provider_reset", "http.embedding", action="reset", attempt=None)
+        ]
     if fault == "timeout":
-        return [FaultRule("provider_timeout", "http.embedding", action="barrier", barrier_timeout=10, attempt=1)]
-    if fault in {"missing", "extra", "reordered", "duplicate_indices", "missing_indices", "wrong_dimension", "nonfinite", "decoding"}:
-        return [FaultRule("provider_shape", "http.embedding", action="response", timing="after", attempt=None,
-                          status=200, response={"__transform__": fault})]
+        return [
+            FaultRule(
+                "provider_timeout",
+                "http.embedding",
+                action="barrier",
+                barrier_timeout=10,
+                attempt=1,
+            )
+        ]
+    if fault in {
+        "missing",
+        "extra",
+        "reordered",
+        "duplicate_indices",
+        "missing_indices",
+        "wrong_dimension",
+        "nonfinite",
+        "decoding",
+    }:
+        return [
+            FaultRule(
+                "provider_shape",
+                "http.embedding",
+                action="response",
+                timing="after",
+                attempt=None,
+                status=200,
+                response={"__transform__": fault},
+            )
+        ]
     if fault == "unreachable":
         return []
-    status = 429 if fault.startswith("429") else 400 if fault in {"unknown_model", "context_limit"} else int(fault)
-    message = "Unknown model" if fault == "unknown_model" else "Context length exceeded" if fault == "context_limit" else "Controlled provider rejection"
-    return [FaultRule("provider_rejection", "http.embedding", action="reject", attempt=None,
-                      status=status, response={"error": {"message": message, "type": "invalid_request_error" if status == 400 else "api_error",
-                                                          "code": "model_not_found" if fault == "unknown_model" else "context_length_exceeded" if fault == "context_limit" else "controlled_error"}},
-                      response_headers={"Retry-After": "0.05"} if fault == "429_retry" else None)]
+    status = (
+        429
+        if fault.startswith("429")
+        else 400
+        if fault in {"unknown_model", "context_limit"}
+        else int(fault)
+    )
+    message = (
+        "Unknown model"
+        if fault == "unknown_model"
+        else "Context length exceeded"
+        if fault == "context_limit"
+        else "Controlled provider rejection"
+    )
+    return [
+        FaultRule(
+            "provider_rejection",
+            "http.embedding",
+            action="reject",
+            attempt=None,
+            status=status,
+            response={
+                "error": {
+                    "message": message,
+                    "type": "invalid_request_error" if status == 400 else "api_error",
+                    "code": "model_not_found"
+                    if fault == "unknown_model"
+                    else "context_length_exceeded"
+                    if fault == "context_limit"
+                    else "controlled_error",
+                }
+            },
+            response_headers={"Retry-After": "0.05"} if fault == "429_retry" else None,
+        )
+    ]
 
 
 def _execute_provider(h, s, c):
     import math
+
     parent, before, request = _prepare(h, s.method)
     fault = s.parameters["fault"]
     prefix, upstream = _embedding_route(h)
     if fault == "unreachable":
         from .infrastructure import free_port
+
         upstream = f"http://127.0.0.1:{free_port()}"
-    with ForwardingProxy(upstream, c, provider="embedding", upstream_timeout=h.config.request_timeout) as proxy:
-        overrides = {prefix + "_HOST": "127.0.0.1", prefix + "_PORT": str(urlsplit(proxy.url).port)}
+    with ForwardingProxy(
+        upstream, c, provider="embedding", upstream_timeout=h.config.request_timeout
+    ) as proxy:
+        overrides = {
+            prefix + "_HOST": "127.0.0.1",
+            prefix + "_PORT": str(urlsplit(proxy.url).port),
+        }
         if fault == "unreachable":
             # A refused provider connection must reach the SDK as a connection
             # error, rather than an invented 502 gateway HTTP response.
             unavailable_port = free_port()
             overrides[prefix + "_PORT"] = str(unavailable_port)
-            c.record("provider_unreachable_target", host="127.0.0.1", port=unavailable_port)
+            c.record(
+                "provider_unreachable_target", host="127.0.0.1", port=unavailable_port
+            )
         if fault == "timeout":
             overrides.update(MAX_RETRIES="0", EMBEDDING_TIMEOUT="0.2")
         with _overrides(h, overrides):
@@ -1022,14 +1976,18 @@ def _execute_provider(h, s, c):
             after = h.snapshot(parent)
             if fault == "reordered":
                 _status(response, 201 if s.method == "POST" else 200)
-                h.assert_consistent(parent, chunks_count=response.json()["data"]["chunksCount"])
+                h.assert_consistent(
+                    parent, chunks_count=response.json()["data"]["chunksCount"]
+                )
                 associations = c.events(kind="provider_association", epoch=epoch)
                 assert associations, "Provider vector/index evidence was not recorded"
                 input_vectors = {}
                 for event in associations:
                     for item in event["vectors"]:
                         input_vectors[event["inputs"][item["index"]]] = item["vector"]
-                document_prefix = h.config.application_environment().get("EMBEDDING_DOCUMENT_PREFIX", "")
+                document_prefix = h.config.application_environment().get(
+                    "EMBEDDING_DOCUMENT_PREFIX", ""
+                )
                 for point in after["points"]:
                     source = document_prefix + point["payload"]["content"]
                     expected = provider_vector_values(input_vectors[source])
@@ -1037,19 +1995,38 @@ def _execute_provider(h, s, c):
                     normalized = [value / norm for value in expected]
                     actual = point["vector"][h.config.dense_name]
                     assert len(actual) == len(normalized)
-                    assert all(math.isclose(a, b, rel_tol=1e-5, abs_tol=2e-7) for a, b in zip(actual, normalized, strict=True)), "Reordered indices corrupted chunk/vector association"
+                    assert all(
+                        math.isclose(a, b, rel_tol=1e-5, abs_tol=2e-7)
+                        for a, b in zip(actual, normalized, strict=True)
+                    ), "Reordered indices corrupted chunk/vector association"
             else:
-                assert response.status_code >= 400, f"Malformed/unavailable provider falsely accepted: {fault}: {response.text}"
+                assert response.status_code >= 400, (
+                    f"Malformed/unavailable provider falsely accepted: {fault}: {response.text}"
+                )
                 if fault in {"unreachable", "reset", "timeout"}:
                     _status(response, 503)
-                    assert response.json()["errors"][0]["code"] == "EMBEDDER_CONNECTION_FAILED"
+                    assert (
+                        response.json()["errors"][0]["code"]
+                        == "EMBEDDER_CONNECTION_FAILED"
+                    )
                 elif fault == "401":
                     _status(response, 401)
-                    assert response.json()["errors"][0]["code"] == "EMBEDDER_AUTH_FAILED"
+                    assert (
+                        response.json()["errors"][0]["code"] == "EMBEDDER_AUTH_FAILED"
+                    )
                 elif fault == "context_limit":
                     _status(response, 422)
-                    assert response.json()["errors"][0]["code"] == "EMBEDDER_CONTEXT_LENGTH"
-                elif fault in {"429_retry", "429_plain", "500", "unknown_model", "decoding"}:
+                    assert (
+                        response.json()["errors"][0]["code"]
+                        == "EMBEDDER_CONTEXT_LENGTH"
+                    )
+                elif fault in {
+                    "429_retry",
+                    "429_plain",
+                    "500",
+                    "unknown_model",
+                    "decoding",
+                }:
                     _status(response, 500)
                     assert response.json()["errors"][0]["code"] == "EMBEDDING_FAILED"
                 elif fault in {"missing", "extra"}:
@@ -1066,24 +2043,43 @@ def _execute_provider(h, s, c):
 
 def _execute_malformed_sparse(h, s, c):
     parent, before, request = _prepare(h, s.method)
-    c.install([_rule("invalid_sparse", "sparse.embed", parent, request, action="response", timing="after",
-                     response={"__transform__": "malformed_sparse"})])
+    c.install(
+        [
+            _rule(
+                "invalid_sparse",
+                "sparse.embed",
+                parent,
+                request,
+                action="response",
+                timing="after",
+                response={"__transform__": "malformed_sparse"},
+            )
+        ]
+    )
     response = _request(h, s.method, parent, request)
     _record(h, s, c, [parent])
     c.assert_triggered()
-    assert response.status_code >= 400, "Malformed sparse indices/values produced a false success"
+    assert response.status_code >= 400, (
+        "Malformed sparse indices/values produced a false success"
+    )
     _unchanged(before, h.snapshot(parent))
 
 
 def _execute_alias(h, s, c):
     import httpx
+
     h.infrastructure.verify()
     parent = h.new_id("alias")
     database = h.config.database
     alias = h.config.alias
     collection = h.config.collection
     wrong = f"test_e2e_{h.config.run_id}_wrong_schema"
-    with httpx.Client(base_url=database.qdrant_url, headers={"api-key": database.q_api_key}, trust_env=False, timeout=15) as client:
+    with httpx.Client(
+        base_url=database.qdrant_url,
+        headers={"api-key": database.q_api_key},
+        trust_env=False,
+        timeout=15,
+    ) as client:
         response = client.get("/aliases")
         response.raise_for_status()
         aliases = response.json()["result"]["aliases"]
@@ -1094,22 +2090,53 @@ def _execute_alias(h, s, c):
         try:
             actions = [{"delete_alias": {"alias_name": alias}}]
             if s.parameters["alias_mode"] == "incompatible":
-                response = client.put(f"/collections/{wrong}", json={"vectors": {h.config.dense_name: {"size": h.config.dense_dimension + 1, "distance": "Cosine"}},
-                    "sparse_vectors": {h.config.sparse_name: {}}})
+                response = client.put(
+                    f"/collections/{wrong}",
+                    json={
+                        "vectors": {
+                            h.config.dense_name: {
+                                "size": h.config.dense_dimension + 1,
+                                "distance": "Cosine",
+                            }
+                        },
+                        "sparse_vectors": {h.config.sparse_name: {}},
+                    },
+                )
                 response.raise_for_status()
                 created = True
-                c.record("alias_collection_created", epoch=c._schedule()["epoch"], parent_id=parent,
-                         collection=wrong, owner_run_id=h.config.run_id, upstream_status=response.status_code,
-                         acknowledged=response.json().get("result"))
-                actions.append({"create_alias": {"collection_name": wrong, "alias_name": alias}})
+                c.record(
+                    "alias_collection_created",
+                    epoch=c._schedule()["epoch"],
+                    parent_id=parent,
+                    collection=wrong,
+                    owner_run_id=h.config.run_id,
+                    upstream_status=response.status_code,
+                    acknowledged=response.json().get("result"),
+                )
+                actions.append(
+                    {"create_alias": {"collection_name": wrong, "alias_name": alias}}
+                )
             installed = client.post("/collections/aliases", json={"actions": actions})
             installed.raise_for_status()
-            c.record("alias_fault_installed", epoch=c._schedule()["epoch"], parent_id=parent, alias=alias, expected_collection=collection,
-                     actual_collection=wrong if created else None, upstream_status=installed.status_code,
-                     acknowledged=installed.json().get("result"))
+            c.record(
+                "alias_fault_installed",
+                epoch=c._schedule()["epoch"],
+                parent_id=parent,
+                alias=alias,
+                expected_collection=collection,
+                actual_collection=wrong if created else None,
+                upstream_status=installed.status_code,
+                acknowledged=installed.json().get("result"),
+            )
             response = _request(h, "POST", parent, uuid.uuid4().hex)
-            c.record("alias_fault_response", epoch=c._schedule()["epoch"], parent_id=parent, alias=alias, status=response.status_code,
-                     request_id=response.headers.get("X-Request-Id"))
+            c.record(
+                "alias_fault_response",
+                epoch=c._schedule()["epoch"],
+                parent_id=parent,
+                alias=alias,
+                status=response.status_code,
+                request_id=response.headers.get("X-Request-Id"),
+            )
             _status(response, 201)
             deadline = time.monotonic() + 10.0
             outbox = []
@@ -1118,22 +2145,37 @@ def _execute_alias(h, s, c):
                 if outbox and outbox[0]["retry_count"] >= 1:
                     break
                 time.sleep(0.05)
-            assert outbox and outbox[0]["retry_count"] >= 1, "Worker should have recorded at least one failure against broken alias"
+            assert outbox and outbox[0]["retry_count"] >= 1, (
+                "Worker should have recorded at least one failure against broken alias"
+            )
         finally:
-            restore = ([{"delete_alias": {"alias_name": alias}}] if created else [])
+            restore = [{"delete_alias": {"alias_name": alias}}] if created else []
             restore.append({"create_alias": original})
             restored = client.post("/collections/aliases", json={"actions": restore})
             restored.raise_for_status()
-            c.record("alias_restored", epoch=c._schedule()["epoch"], parent_id=parent, alias=alias, collection=collection, upstream_status=restored.status_code,
-                     acknowledged=restored.json().get("result"))
+            c.record(
+                "alias_restored",
+                epoch=c._schedule()["epoch"],
+                parent_id=parent,
+                alias=alias,
+                collection=collection,
+                upstream_status=restored.status_code,
+                acknowledged=restored.json().get("result"),
+            )
             if created:
                 # The unique collection is created by this exact scope after an
                 # identity check; no inherited/source target can be deleted.
                 removed = client.delete(f"/collections/{wrong}")
                 removed.raise_for_status()
-                c.record("alias_collection_deleted", epoch=c._schedule()["epoch"], parent_id=parent,
-                         collection=wrong, owner_run_id=h.config.run_id, upstream_status=removed.status_code,
-                         acknowledged=removed.json().get("result"))
+                c.record(
+                    "alias_collection_deleted",
+                    epoch=c._schedule()["epoch"],
+                    parent_id=parent,
+                    collection=wrong,
+                    owner_run_id=h.config.run_id,
+                    upstream_status=removed.status_code,
+                    acknowledged=removed.json().get("result"),
+                )
     # The raw oracle deliberately requires the original guarded alias target.
     # Restore that identity before reading the physical collection and SQL.
     _record(h, s, c, [parent])
@@ -1144,14 +2186,33 @@ def _execute_alias(h, s, c):
 def _execute_delete_no_provider(h, s, c):
     parent = _seed(h, "no-embedding")
     prefix, upstream = _embedding_route(h)
-    with ForwardingProxy(upstream, c, provider="embedding") as proxy:
-        with _overrides(h, {prefix + "_HOST": "127.0.0.1", prefix + "_PORT": str(urlsplit(proxy.url).port)}):
-            epoch = c.install([FaultRule("embedding_offline", "http.embedding", action="reset", attempt=None)])
-            response = _request(h, "DELETE", parent, uuid.uuid4().hex)
-            _record(h, s, c, [parent])
-            _status(response, 200)
-            assert not c.events(epoch=epoch, operation="http.embedding"), "DELETE invoked embeddings"
-            h.assert_consistent(parent, expected_version=2, expected_deleted=True)
+    with (
+        ForwardingProxy(upstream, c, provider="embedding") as proxy,
+        _overrides(
+            h,
+            {
+                prefix + "_HOST": "127.0.0.1",
+                prefix + "_PORT": str(urlsplit(proxy.url).port),
+            },
+        ),
+    ):
+        epoch = c.install(
+            [
+                FaultRule(
+                    "embedding_offline",
+                    "http.embedding",
+                    action="reset",
+                    attempt=None,
+                )
+            ]
+        )
+        response = _request(h, "DELETE", parent, uuid.uuid4().hex)
+        _record(h, s, c, [parent])
+        _status(response, 200)
+        assert not c.events(epoch=epoch, operation="http.embedding"), (
+            "DELETE invoked embeddings"
+        )
+        h.assert_consistent(parent, expected_version=2, expected_deleted=True)
 
 
 def _execute_delete_no_qdrant(h, s, c):
@@ -1163,7 +2224,9 @@ def _execute_delete_no_qdrant(h, s, c):
     response = _request(h, "DELETE", parent, request)
     _status(response, 200)
     _record(h, s, c, [parent])
-    assert not c.events(kind="fault_matched", epoch=c._schedule()["epoch"]), "Deleted no-op incorrectly contacted Qdrant"
+    assert not c.events(kind="fault_matched", epoch=c._schedule()["epoch"]), (
+        "Deleted no-op incorrectly contacted Qdrant"
+    )
     _unchanged(before, h.snapshot(parent))
     h.assert_consistent(parent, expected_version=2, expected_deleted=True)
 
@@ -1172,24 +2235,48 @@ def _execute_independent(h, s, c):
     parents = [_seed(h, "independent") for _ in range(2)]
     requests = [uuid.uuid4().hex for _ in parents]
     correlation = [str(uuid.uuid4()) for _ in parents]
-    epoch = c.install([_rule(f"hold{i}", "sql.save", parent, request, timing="after", action="barrier")
-                       for i, (parent, request) in enumerate(zip(parents, requests, strict=True))])
+    epoch = c.install(
+        [
+            _rule(
+                f"hold{i}",
+                "sql.save",
+                parent,
+                request,
+                timing="after",
+                action="barrier",
+            )
+            for i, (parent, request) in enumerate(zip(parents, requests, strict=True))
+        ]
+    )
     with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(h.request, "PUT", f"/api/v1/suggestions/{parent}", json=_body(parent, f"رقم {i}"),
-                                   headers={**_headers(parent, request), "X-Request-Id": correlation[i]})
-                   for i, (parent, request) in enumerate(zip(parents, requests, strict=True))]
+        futures = [
+            executor.submit(
+                h.request,
+                "PUT",
+                f"/api/v1/suggestions/{parent}",
+                json=_body(parent, f"رقم {i}"),
+                headers={**_headers(parent, request), "X-Request-Id": correlation[i]},
+            )
+            for i, (parent, request) in enumerate(zip(parents, requests, strict=True))
+        ]
         try:
             for i in range(2):
                 _barrier(c, f"hold{i}", epoch)
             c.release_all()
-            responses = [future.result(timeout=h.config.request_timeout) for future in futures]
+            responses = [
+                future.result(timeout=h.config.request_timeout) for future in futures
+            ]
             _record(h, s, c, parents)
             c.assert_triggered()
             for i, response in enumerate(responses):
                 _status(response, 200)
-                assert response.headers.get("X-Request-Id") == correlation[i], "Concurrent request IDs crossed responses"
+                assert response.headers.get("X-Request-Id") == correlation[i], (
+                    "Concurrent request IDs crossed responses"
+                )
                 h.assert_consistent(parents[i], expected_version=2)
-            assert not {point["id"] for point in h.snapshot(parents[0])["points"]}.intersection(point["id"] for point in h.snapshot(parents[1])["points"])
+            assert not {
+                point["id"] for point in h.snapshot(parents[0])["points"]
+            }.intersection(point["id"] for point in h.snapshot(parents[1])["points"])
         finally:
             c.release_all()
 
@@ -1199,17 +2286,26 @@ def _execute_slow_embeddings(h, s, c):
     requests = [uuid.uuid4().hex for _ in parents]
     unrelated_delete = _seed(h, "fast-delete")
     unrelated_ingest = h.new_id("fast-ingest")
-    epoch = c.install([_rule("slow0", "sparse.embed", parents[0], None, action="barrier")])
+    epoch = c.install(
+        [_rule("slow0", "sparse.embed", parents[0], None, action="barrier")]
+    )
     with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(_request, h, "PUT", parent, request) for parent, request in zip(parents, requests, strict=True)]
+        futures = [
+            executor.submit(_request, h, "PUT", parent, request)
+            for parent, request in zip(parents, requests, strict=True)
+        ]
         try:
             _barrier(c, "slow0", epoch)
             start = time.monotonic()
             _status(h.request("GET", "/health"), 200)
             _status(_request(h, "DELETE", unrelated_delete, uuid.uuid4().hex), 200)
             _status(_request(h, "POST", unrelated_ingest, uuid.uuid4().hex), 201)
-            c.record("latency", workload="unrelated_ingest_delete_during_three_held_embeddings", elapsed=time.monotonic() - start,
-                     sla="none specified")
+            c.record(
+                "latency",
+                workload="unrelated_ingest_delete_during_three_held_embeddings",
+                elapsed=time.monotonic() - start,
+                sla="none specified",
+            )
             c.release_all()
             for future in futures:
                 _status(future.result(timeout=h.config.request_timeout), 200)
@@ -1221,7 +2317,6 @@ def _execute_slow_embeddings(h, s, c):
             h.assert_consistent(unrelated_ingest, expected_version=1)
         finally:
             c.release_all()
-
 
 
 def _execute_restart(h, s, c):
@@ -1240,8 +2335,12 @@ def _execute_restart(h, s, c):
 
 
 def _bulk(h, parents, request):
-    return h.request("POST", "/api/v1/suggestions/bulk-delete", json={"suggestionIds": parents},
-                     headers={"X-E2E-Operation-Id": request})
+    return h.request(
+        "POST",
+        "/api/v1/suggestions/bulk-delete",
+        json={"suggestionIds": parents},
+        headers={"X-E2E-Operation-Id": request},
+    )
 
 
 def _bulk_assert_results(response, parents, failed, fault):
@@ -1251,8 +2350,11 @@ def _bulk_assert_results(response, parents, failed, fault):
     assert successes == [parent for i, parent in enumerate(parents) if i not in failed]
     errors = value.get("errors", [])
     assert len(errors) == len(failed)
-    expected = {"lock": (409, "SUGGESTION_IN_PROCESSING"), "vector": (400, "DOMAIN_ERROR"),
-                "sql": (400, "INTERNAL_ERROR")}
+    expected = {
+        "lock": (409, "SUGGESTION_IN_PROCESSING"),
+        "vector": (400, "DOMAIN_ERROR"),
+        "sql": (400, "INTERNAL_ERROR"),
+    }
     status, code = expected[fault]
     for error, index in zip(errors, sorted(failed), strict=True):
         assert str(error["status"]) == str(status)
@@ -1264,7 +2366,11 @@ def _execute_bulk_fault(h, s, c):
     parents = [_seed(h, "bulk-fault") for _ in range(3)]
     before = {parent: h.snapshot(parent) for parent in parents}
     p = s.parameters
-    indexes = {0, 1, 2} if p.get("all_items") else {{"first": 0, "middle": 1, "last": 2}[p.get("position", "middle")]}
+    indexes = (
+        {0, 1, 2}
+        if p.get("all_items")
+        else {{"first": 0, "middle": 1, "last": 2}[p.get("position", "middle")]}
+    )
     request = uuid.uuid4().hex
     fault = p["fault"]
     if fault == "lock":
@@ -1278,7 +2384,18 @@ def _execute_bulk_fault(h, s, c):
             else:
                 _unchanged(before[parent], h.snapshot(parent))
     elif fault == "sql":
-        epoch = c.install([_rule(f"failure{index}", "sql.read", parents[index], request, error="runtime") for index in indexes])
+        epoch = c.install(
+            [
+                _rule(
+                    f"failure{index}",
+                    "sql.read",
+                    parents[index],
+                    request,
+                    error="runtime",
+                )
+                for index in indexes
+            ]
+        )
         response = _bulk(h, parents, request)
         _record(h, s, c, parents)
         c.assert_triggered()
@@ -1289,7 +2406,18 @@ def _execute_bulk_fault(h, s, c):
             else:
                 _unchanged(before[parent], h.snapshot(parent))
     else:
-        epoch = c.install([_rule(f"failure{index}", "vector.purge", parents[index], request, error="vector") for index in indexes])
+        epoch = c.install(
+            [
+                _rule(
+                    f"failure{index}",
+                    "vector.purge",
+                    parents[index],
+                    request,
+                    error="vector",
+                )
+                for index in indexes
+            ]
+        )
         response = _bulk(h, parents, request)
         _record(h, s, c, parents)
         deadline = time.monotonic() + 10.0
@@ -1305,7 +2433,12 @@ def _execute_bulk_fault(h, s, c):
 
 
 def _execute_bulk_mixed(h, s, c):
-    parents = [h.new_id("bulk-missing"), _seed(h, "bulk-lock"), _seed(h, "bulk-domain"), _seed(h, "bulk-success")]
+    parents = [
+        h.new_id("bulk-missing"),
+        _seed(h, "bulk-lock"),
+        _seed(h, "bulk-domain"),
+        _seed(h, "bulk-success"),
+    ]
     request = uuid.uuid4().hex
     c.install([_rule("domain", "sql.soft_delete", parents[2], request, error="domain")])
     with HeldAdvisoryLock(h, [parents[1]]):
@@ -1315,8 +2448,14 @@ def _execute_bulk_mixed(h, s, c):
     _status(response, 207)
     value = response.json()
     assert [item["suggestionId"] for item in value["data"]] == [parents[3]]
-    assert [item["code"] for item in value["errors"]] == ["SUGGESTION_NOT_FOUND", "SUGGESTION_IN_PROCESSING", "DOMAIN_ERROR"]
-    assert [item["source"]["pointer"] for item in value["errors"]] == [f"/data/suggestionIds/{i}" for i in range(3)]
+    assert [item["code"] for item in value["errors"]] == [
+        "SUGGESTION_NOT_FOUND",
+        "SUGGESTION_IN_PROCESSING",
+        "DOMAIN_ERROR",
+    ]
+    assert [item["source"]["pointer"] for item in value["errors"]] == [
+        f"/data/suggestionIds/{i}" for i in range(3)
+    ]
     h.assert_consistent(parents[0], require_exists=False)
     h.assert_consistent(parents[1], expected_version=1, expected_deleted=False)
     h.assert_consistent(parents[2], expected_version=1, expected_deleted=False)
@@ -1325,9 +2464,21 @@ def _execute_bulk_mixed(h, s, c):
 
 def _execute_bulk_crash(h, s, c):
     import httpx
+
     parents = [_seed(h, "bulk-crash") for _ in range(3)]
     request = uuid.uuid4().hex
-    epoch = c.install([_rule("first_complete", "sql.commit", parents[0], request, timing="after", action="barrier")])
+    epoch = c.install(
+        [
+            _rule(
+                "first_complete",
+                "sql.commit",
+                parents[0],
+                request,
+                timing="after",
+                action="barrier",
+            )
+        ]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_bulk, h, parents, request)
         try:
@@ -1341,7 +2492,11 @@ def _execute_bulk_crash(h, s, c):
             try:
                 future.result(timeout=h.config.request_timeout)
             except httpx.TransportError as error:
-                c.record("bulk_interrupted_http", request_id=request, error_type=type(error).__name__)
+                c.record(
+                    "bulk_interrupted_http",
+                    request_id=request,
+                    error_type=type(error).__name__,
+                )
             before = {parent: h.snapshot(parent) for parent in parents}
             _record(h, s, c, parents, label="before_restart")
             c.assert_triggered()
@@ -1358,7 +2513,18 @@ def _execute_bulk_crash(h, s, c):
 def _execute_race_bulk(h, s, c):
     parents = [_seed(h, "bulk-overlap") for _ in range(3)]
     a, b = uuid.uuid4().hex, uuid.uuid4().hex
-    epoch = c.install([_rule("first_bulk_complete", "vector.purge", parents[0], a, timing="after", action="barrier")])
+    epoch = c.install(
+        [
+            _rule(
+                "first_bulk_complete",
+                "vector.purge",
+                parents[0],
+                a,
+                timing="after",
+                action="barrier",
+            )
+        ]
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(_bulk, h, parents[:2], a)
         try:
@@ -1373,8 +2539,11 @@ def _execute_race_bulk(h, s, c):
             c.assert_triggered()
             for parent in parents[:2]:
                 h.assert_consistent(parent, expected_version=2, expected_deleted=True)
-            h.assert_consistent(parents[2], expected_version=1 if s.parameters["single"] else 2,
-                                expected_deleted=not s.parameters["single"])
+            h.assert_consistent(
+                parents[2],
+                expected_version=1 if s.parameters["single"] else 2,
+                expected_deleted=not s.parameters["single"],
+            )
         finally:
             c.release_all()
 
@@ -1385,7 +2554,12 @@ def _execute_bulk_latency(h, s, c):
     _fault(c, parents[49], request, operation="sql.read", error="runtime")
     start = time.monotonic()
     response = _bulk(h, parents, request)
-    c.record("latency", workload="exactly100_bulk_with_middle_vector_failure", elapsed=time.monotonic() - start, sla="none specified")
+    c.record(
+        "latency",
+        workload="exactly100_bulk_with_middle_vector_failure",
+        elapsed=time.monotonic() - start,
+        sla="none specified",
+    )
     _record(h, s, c, parents)
     c.assert_triggered()
     _bulk_assert_results(response, parents, {49}, "sql")
@@ -1400,48 +2574,137 @@ def _execute_bulk_latency(h, s, c):
     h.assert_consistent(fresh, expected_deleted=True)
 
 
-def _observe_direct_http(h, s, *, method, path, headers, body, url, response=None,
-                         transport_error=None, upstream=None):
+def _observe_direct_http(
+    h,
+    s,
+    *,
+    method,
+    path,
+    headers,
+    body,
+    url,
+    response=None,
+    transport_error=None,
+    upstream=None,
+):
     """Persist direct transports using the same sanitizer as ordinary requests."""
-    return h.observe(f"{s.case_id}/{s.variant_id}:direct_http", {
-        "request": {"method": method, "path": path, "url": url, "headers": headers, "json": body},
-        "response": None if response is None else {
-            "status": response.status_code, "headers": dict(response.headers), "body": response.content,
-            "request_id": response.headers.get("X-Request-Id")},
-        "transport_failure": transport_error,
-        "upstream": upstream,
-    })
+    return h.observe(
+        f"{s.case_id}/{s.variant_id}:direct_http",
+        {
+            "request": {
+                "method": method,
+                "path": path,
+                "url": url,
+                "headers": headers,
+                "json": body,
+            },
+            "response": None
+            if response is None
+            else {
+                "status": response.status_code,
+                "headers": dict(response.headers),
+                "body": response.content,
+                "request_id": response.headers.get("X-Request-Id"),
+            },
+            "transport_failure": transport_error,
+            "upstream": upstream,
+        },
+    )
 
 
 def _execute_lost_http(h, s, c):
     import httpx
+
     bulk = s.parameters.get("bulk", False)
     parent, _, request = _prepare(h, "DELETE" if bulk else s.method)
-    path = "/api/v1/suggestions/bulk-delete" if bulk else "/api/v1/suggestions/ingest" if s.method == "POST" else f"/api/v1/suggestions/{parent}"
-    body = {"suggestionIds": [parent]} if bulk else None if s.method == "DELETE" else {"title": _body(parent)["title"]} if s.method == "PATCH" else _body(parent)
+    path = (
+        "/api/v1/suggestions/bulk-delete"
+        if bulk
+        else "/api/v1/suggestions/ingest"
+        if s.method == "POST"
+        else f"/api/v1/suggestions/{parent}"
+    )
+    body = (
+        {"suggestionIds": [parent]}
+        if bulk
+        else None
+        if s.method == "DELETE"
+        else {"title": _body(parent)["title"]}
+        if s.method == "PATCH"
+        else _body(parent)
+    )
     with ForwardingProxy(h.base_url, c, provider="application") as proxy:
-        epoch = c.install([_rule("lost_ack", "http.application", parent, request, timing="after", action="lose_response")])
+        epoch = c.install(
+            [
+                _rule(
+                    "lost_ack",
+                    "http.application",
+                    parent,
+                    request,
+                    timing="after",
+                    action="lose_response",
+                )
+            ]
+        )
         headers = {h.config.api_header: h.config.api_key, **_headers(parent, request)}
-        wire = {"method": s.method, "path": path, "headers": headers, "body": body, "url": proxy.url + path}
+        wire = {
+            "method": s.method,
+            "path": path,
+            "headers": headers,
+            "body": body,
+            "url": proxy.url + path,
+        }
         _observe_direct_http(h, s, **wire)
-        with httpx.Client(base_url=proxy.url, timeout=h.config.request_timeout, trust_env=False) as client:
+        with httpx.Client(
+            base_url=proxy.url, timeout=h.config.request_timeout, trust_env=False
+        ) as client:
             try:
-                client.request(s.method, path, json=body if body is not None else None,
-                               headers=headers)
+                client.request(
+                    s.method,
+                    path,
+                    json=body if body is not None else None,
+                    headers=headers,
+                )
             except httpx.TransportError as error:
-                c.record("lost_http_response", request_id=request, error_type=type(error).__name__)
-                transport_error = {"error_type": type(error).__name__, "detail": str(error), "response_delivered": False}
+                c.record(
+                    "lost_http_response",
+                    request_id=request,
+                    error_type=type(error).__name__,
+                )
+                transport_error = {
+                    "error_type": type(error).__name__,
+                    "detail": str(error),
+                    "response_delivered": False,
+                }
             else:
-                raise AssertionError("Lost application acknowledgement did not disconnect the client")
+                raise AssertionError(
+                    "Lost application acknowledgement did not disconnect the client"
+                )
         applied = c.events(kind="upstream_outcome", epoch=epoch)
-        _observe_direct_http(h, s, **wire, transport_error=transport_error,
-                             upstream={"outcomes": applied, "responses": proxy.upstream_responses(request_id=request)})
-        assert applied and applied[-1]["applied"] and applied[-1]["upstream_status"] in {200, 201}
+        _observe_direct_http(
+            h,
+            s,
+            **wire,
+            transport_error=transport_error,
+            upstream={
+                "outcomes": applied,
+                "responses": proxy.upstream_responses(request_id=request),
+            },
+        )
+        assert (
+            applied
+            and applied[-1]["applied"]
+            and applied[-1]["upstream_status"] in {200, 201}
+        )
         accepted = h.snapshot(parent)
         _record(h, s, c, [parent], label="applied_before_retry")
         c.assert_triggered()
         c.install([])
-        retry = _bulk(h, [parent], uuid.uuid4().hex) if bulk else _request(h, s.method, parent, uuid.uuid4().hex, body=body)
+        retry = (
+            _bulk(h, [parent], uuid.uuid4().hex)
+            if bulk
+            else _request(h, s.method, parent, uuid.uuid4().hex, body=body)
+        )
         _record(h, s, c, [parent])
         if s.method == "POST" and not bulk:
             _status(retry, 409)
@@ -1459,22 +2722,30 @@ def _execute_lost_http(h, s, c):
 def _execute_host_liveness(h, s, c):
     prefix, upstream = _embedding_route(h)
     parent = h.new_id("liveness")
-    with ForwardingProxy(upstream, c, provider="embedding") as proxy:
-        with _overrides(h, {prefix + "_HOST": "127.0.0.1", prefix + "_PORT": str(urlsplit(proxy.url).port), "MAX_RETRIES": "0"}):
-            c.install([FaultRule("offline", "http.embedding", action="reset", attempt=1)])
-            response = h.request("GET", "/health")
-            _status(response, 200)
-            assert response.json()["status"] == "ok"
-            accepted = _request(h, "POST", parent, uuid.uuid4().hex)
-            _status(accepted, 201)
-            response = h.request("GET", "/health")
-            _status(response, 200)
-            assert response.json()["status"] == "ok"
-            _record(h, s, c, [parent], label="liveness_while_mutation_failed")
-            h.drain_outbox()
-            c.assert_triggered()
-            h.assert_consistent(parent, chunks_count=accepted.json()["data"]["chunksCount"])
-
+    with (
+        ForwardingProxy(upstream, c, provider="embedding") as proxy,
+        _overrides(
+            h,
+            {
+                prefix + "_HOST": "127.0.0.1",
+                prefix + "_PORT": str(urlsplit(proxy.url).port),
+                "MAX_RETRIES": "0",
+            },
+        ),
+    ):
+        c.install([FaultRule("offline", "http.embedding", action="reset", attempt=1)])
+        response = h.request("GET", "/health")
+        _status(response, 200)
+        assert response.json()["status"] == "ok"
+        accepted = _request(h, "POST", parent, uuid.uuid4().hex)
+        _status(accepted, 201)
+        response = h.request("GET", "/health")
+        _status(response, 200)
+        assert response.json()["status"] == "ok"
+        _record(h, s, c, [parent], label="liveness_while_mutation_failed")
+        h.drain_outbox()
+        c.assert_triggered()
+        h.assert_consistent(parent, chunks_count=accepted.json()["data"]["chunksCount"])
 
 
 def _execute_debug(h, s, c):
@@ -1482,7 +2753,12 @@ def _execute_debug(h, s, c):
     request = uuid.uuid4().hex
     with _overrides(h, {"ENVIRONMENT": s.parameters["environment"]}):
         if s.parameters["category"] == "validation":
-            response = h.request("POST", "/api/v1/suggestions/ingest", json={"suggestionId": parent}, headers=_headers(parent, request))
+            response = h.request(
+                "POST",
+                "/api/v1/suggestions/ingest",
+                json={"suggestionId": parent},
+                headers=_headers(parent, request),
+            )
             _status(response, 422)
         else:
             _fault(c, parent, request, operation="sql.read", error="runtime")
@@ -1514,8 +2790,22 @@ def _execute_error_source(h, s, c):
 
 def _correlation_failure_response(h, s, parent, request):
     bulk = s.parameters.get("bulk", False)
-    path = "/api/v1/suggestions/bulk-delete" if bulk else "/api/v1/suggestions/ingest" if s.method == "POST" else f"/api/v1/suggestions/{parent}"
-    body = {"suggestionIds": [parent]} if bulk else None if s.method == "DELETE" else {"title": _body(parent)["title"]} if s.method == "PATCH" else _body(parent)
+    path = (
+        "/api/v1/suggestions/bulk-delete"
+        if bulk
+        else "/api/v1/suggestions/ingest"
+        if s.method == "POST"
+        else f"/api/v1/suggestions/{parent}"
+    )
+    body = (
+        {"suggestionIds": [parent]}
+        if bulk
+        else None
+        if s.method == "DELETE"
+        else {"title": _body(parent)["title"]}
+        if s.method == "PATCH"
+        else _body(parent)
+    )
     expected = str(uuid.uuid4()) if s.parameters["supplied"] else None
     headers = _headers(parent, request)
     if expected:
@@ -1525,11 +2815,23 @@ def _correlation_failure_response(h, s, parent, request):
         # Ordinary harness requests supply correlation; direct TCP exercises a
         # genuinely absent caller ID and retains its sanitized wire evidence.
         import httpx
-        wire = {"method": s.method, "path": path, "headers": {h.config.api_header: h.config.api_key, **headers},
-                "body": body, "url": h.base_url + path}
+
+        wire = {
+            "method": s.method,
+            "path": path,
+            "headers": {h.config.api_header: h.config.api_key, **headers},
+            "body": body,
+            "url": h.base_url + path,
+        }
         _observe_direct_http(h, s, **wire)
-        response = httpx.request(s.method, wire["url"], json=body, headers=wire["headers"],
-                                 timeout=h.config.request_timeout, trust_env=False)
+        response = httpx.request(
+            s.method,
+            wire["url"],
+            json=body,
+            headers=wire["headers"],
+            timeout=h.config.request_timeout,
+            trust_env=False,
+        )
         _observe_direct_http(h, s, **wire, response=response)
     observed = response.headers.get("X-Request-Id")
     assert observed and (expected is None or observed == expected)
@@ -1541,12 +2843,24 @@ def _execute_correlation(h, s, c):
     storage = s.parameters.get("dependency") == "qdrant"
     parent, before, request = _prepare(h, "DELETE" if storage else s.method)
     if storage:
-        epoch = c.install([_rule("storage_failure", "qdrant.delete", parent, request, error="runtime")])
+        epoch = c.install(
+            [
+                _rule(
+                    "storage_failure", "qdrant.delete", parent, request, error="runtime"
+                )
+            ]
+        )
         response = _correlation_failure_response(h, s, parent, request)
         _record(h, s, c, [parent])
         c.assert_triggered()
         _status(response, 200)
-        assert c.events(epoch=epoch, request_id=request, operation="sql.soft_delete", timing="after", delegate_called=True)
+        assert c.events(
+            epoch=epoch,
+            request_id=request,
+            operation="sql.soft_delete",
+            timing="after",
+            delegate_called=True,
+        )
         after = h.snapshot(parent)
         assert after["sql"]["is_deleted"] and after["sql"]["version"] == 2
     else:
@@ -1562,8 +2876,12 @@ def _execute_error_logs(h, s, c):
     correlation = str(uuid.uuid4())
     rule_id = f"primary_{parent}"
     c.install([_rule(rule_id, "sql.save", parent, request, error="sql")])
-    response = h.request("POST", "/api/v1/suggestions/ingest", json=_body(parent),
-                         headers={**_headers(parent, request), "X-Request-Id": correlation})
+    response = h.request(
+        "POST",
+        "/api/v1/suggestions/ingest",
+        json=_body(parent),
+        headers={**_headers(parent, request), "X-Request-Id": correlation},
+    )
     _record(h, s, c, [parent])
     c.assert_triggered()
     _status(response, 500)
@@ -1572,17 +2890,25 @@ def _execute_error_logs(h, s, c):
         content = h.app.log_path.read_text(encoding="utf-8")
         assert parent in content, "Error logs must identify the suggestion ID"
         assert correlation in content, "Fault logs lack useful request correlation"
-        assert "/api/v1/suggestions/ingest" in content, "Error logs must identify the request path"
+        assert "/api/v1/suggestions/ingest" in content, (
+            "Error logs must identify the request path"
+        )
     finally:
         h.app.start()
-
 
 
 def _execute_recovered(h, s, c):
     parent = h.new_id("recovered")
     request = uuid.uuid4().hex
     original_pid = h.app.process.pid
-    _fault(c, parent, request, operation="qdrant.upsert", attempt=[1, 2, 3], error="connection")
+    _fault(
+        c,
+        parent,
+        request,
+        operation="qdrant.upsert",
+        attempt=[1, 2, 3],
+        error="connection",
+    )
     _status(_request(h, "POST", parent, request), 201)
     _record(h, s, c, [parent], label="failed")
     deadline = time.monotonic() + 10.0
@@ -1595,8 +2921,12 @@ def _execute_recovered(h, s, c):
     fresh = h.new_id("recovered_fresh")
     recovered = _request(h, "POST", fresh, uuid.uuid4().hex)
     _status(recovered, 201)
-    assert h.app.process.pid == original_pid, "Recovery test restarted instead of proving the same process/pool is usable"
-    h.assert_consistent(fresh, expected_version=1, chunks_count=recovered.json()["data"]["chunksCount"])
+    assert h.app.process.pid == original_pid, (
+        "Recovery test restarted instead of proving the same process/pool is usable"
+    )
+    h.assert_consistent(
+        fresh, expected_version=1, chunks_count=recovered.json()["data"]["chunksCount"]
+    )
 
 
 def _execute_put_failure(h, s, c):
@@ -1618,61 +2948,126 @@ def _execute_put_failure(h, s, c):
         _unchanged(before, h.snapshot(parent))
         return
     else:
-        error = "sparse" if phase == "sparse.embed" else "normalizer" if phase.startswith("normalizer") else "chunker" if phase.startswith("chunker") else "vector" if phase.startswith("vector") else "runtime"
+        error = (
+            "sparse"
+            if phase == "sparse.embed"
+            else "normalizer"
+            if phase.startswith("normalizer")
+            else "chunker"
+            if phase.startswith("chunker")
+            else "vector"
+            if phase.startswith("vector")
+            else "runtime"
+        )
         attempts = [1, 2, 3] if phase in {"vector.promote", "vector.superseded"} else 1
-        rules = [_rule("phase_failure", phase, parent, request, error=error, attempt=attempts)]
+        rules = [
+            _rule(
+                "phase_failure", phase, parent, request, error=error, attempt=attempts
+            )
+        ]
     c.install(rules)
     response = _request(h, "PUT", parent, request)
     _record(h, s, c, [parent])
-    if phase in {"vector.promote", "vector.superseded", "vector.upsert", "sparse.embed"}:
+    if phase in {
+        "vector.promote",
+        "vector.superseded",
+        "vector.upsert",
+        "sparse.embed",
+    }:
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             if not c.unmatched_rules():
                 break
             time.sleep(0.05)
     c.assert_triggered()
-    if phase in {"vector.promote", "vector.superseded", "vector.upsert", "sparse.embed"}:
+    if phase in {
+        "vector.promote",
+        "vector.superseded",
+        "vector.upsert",
+        "sparse.embed",
+    }:
         _status(response, 200)
         after = h.snapshot(parent)
-        assert after["sql"]["version"] == old_version + 1 and not after["sql"]["is_deleted"]
+        assert (
+            after["sql"]["version"] == old_version + 1
+            and not after["sql"]["is_deleted"]
+        )
     elif phase == "vector.delete_ids":
         _status(response, 500)
         _unchanged(before, h.snapshot(parent))
         assert not c.events(operation="vector.delete_ids")
     else:
-        _status(response, 422 if phase in {"chunker.chunk", "normalizer.normalize"} else 500)
+        _status(
+            response, 422 if phase in {"chunker.chunk", "normalizer.normalize"} else 500
+        )
         if phase == "normalizer.normalize":
             error = response.json()["errors"][0]
-            assert error["code"] == "TEXT_NORMALIZATION_FAILED" and error["source"]["pointer"] == "/data"
+            assert (
+                error["code"] == "TEXT_NORMALIZATION_FAILED"
+                and error["source"]["pointer"] == "/data"
+            )
         _unchanged(before, h.snapshot(parent))
 
 
 def _execute_external_qdrant(h, s, c):
     parent, before, request = _prepare(h, s.method)
     p = s.parameters
-    with ForwardingProxy(h.config.database.qdrant_url, c, provider="qdrant", upstream_timeout=h.config.request_timeout) as proxy:
-        overrides = {"QDRANT_HOST": "127.0.0.1", "QDRANT_PORT": str(urlsplit(proxy.url).port), "QDRANT_PREFER_GRPC": "false"}
+    with ForwardingProxy(
+        h.config.database.qdrant_url,
+        c,
+        provider="qdrant",
+        upstream_timeout=h.config.request_timeout,
+    ) as proxy:
+        overrides = {
+            "QDRANT_HOST": "127.0.0.1",
+            "QDRANT_PORT": str(urlsplit(proxy.url).port),
+            "QDRANT_PREFER_GRPC": "false",
+        }
         if p.get("later"):
             overrides["QDRANT_BATCH_SIZE"] = "2"
         with _overrides(h, overrides, qdrant_proxy=proxy):
-            epoch = c.install([FaultRule("network", p["operation"], parent_id=parent,
-                timing="after" if p.get("lost") else "before", action="lose_response" if p.get("lost") else "reject",
-                attempt=p.get("attempts", 1), status=p.get("status", 400))])
+            epoch = c.install(
+                [
+                    FaultRule(
+                        "network",
+                        p["operation"],
+                        parent_id=parent,
+                        timing="after" if p.get("lost") else "before",
+                        action="lose_response" if p.get("lost") else "reject",
+                        attempt=p.get("attempts", 1),
+                        status=p.get("status", 400),
+                    )
+                ]
+            )
             response = _request(h, s.method, parent, request)
             h.drain_outbox()
             _record(h, s, c, [parent])
             c.assert_triggered()
             if p.get("lost"):
                 events = c.events(kind="fault_matched", epoch=epoch, rule_id="network")
-                assert events[0]["forwarded"] and events[0]["applied"], "Lost acknowledgement was not proven applied upstream"
+                assert events[0]["forwarded"] and events[0]["applied"], (
+                    "Lost acknowledgement was not proven applied upstream"
+                )
             if p.get("later"):
-                assert c.events(kind="upstream_outcome", epoch=epoch, operation="http.qdrant.upsert", attempt=1, applied=True)
+                assert c.events(
+                    kind="upstream_outcome",
+                    epoch=epoch,
+                    operation="http.qdrant.upsert",
+                    attempt=1,
+                    applied=True,
+                )
             if s.method == "POST":
                 _status(response, 201)
-                assert h.snapshot(parent)["sql"] is not None and h.snapshot(parent)["sql"]["version"] == 1
+                assert (
+                    h.snapshot(parent)["sql"] is not None
+                    and h.snapshot(parent)["sql"]["version"] == 1
+                )
             elif s.method == "DELETE":
                 _status(response, 200)
-                assert h.snapshot(parent)["sql"]["version"] == 2 and h.snapshot(parent)["sql"]["is_deleted"]
+                assert (
+                    h.snapshot(parent)["sql"]["version"] == 2
+                    and h.snapshot(parent)["sql"]["is_deleted"]
+                )
             else:
                 _status(response, 200)
                 h.assert_consistent(parent, expected_version=2, expected_deleted=False)

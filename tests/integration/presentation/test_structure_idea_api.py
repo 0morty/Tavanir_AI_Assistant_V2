@@ -128,14 +128,14 @@ async def test_http_endpoint_invokes_provider_and_returns_five_parsed_fields(end
     system = body["messages"][0]["content"]
     assert VALID_OUTPUT.split("\n")[0] in system
     expected_format = (
-        "{title}\nmock title\n***\n"
-        "{current problem}\nmock current problem\n***\n"
-        "{solutions}\nmock solutions\n***\n"
-        "{advantage}\nmock advantage\n***\n"
-        "{disadvantage}\nmock disadvantage"
+        "{title}\nعنوان نمونه\n***\n"
+        "{current problem}\nشرح نمونهٔ مشکل فعلی\n***\n"
+        "{solutions}\nراهکارهای پیشنهادی نمونه\n***\n"
+        "{advantage}\nمزیت نمونه\n***\n"
+        "{disadvantage}\nعیب یا خطر نمونه"
     )
     assert expected_format in system
-    assert "Do not return JSON, Markdown headings, code fences" in system
+    assert "خروجی JSON، عنوان‌های مارک‌داون، بلوک کد" in system
     assert "Install occupancy sensors." not in system
     assert URL in app.openapi()["paths"]
 

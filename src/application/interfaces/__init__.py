@@ -31,6 +31,10 @@ from src.application.interfaces.i_skipped_suggestion_repository import (
     ISkippedSuggestionRepository,
 )
 from src.application.interfaces.i_sparse_embedder import ISparseEmbedder
+from src.application.interfaces.i_structure_idea_use_case import IStructureIdeaUseCase
+from src.application.interfaces.i_structured_idea_output_parser import (
+    IStructuredIdeaOutputParser,
+)
 from src.application.interfaces.i_suggestion_prompt_preparer import (
     ISuggestionPromptPreparer,
 )
@@ -54,6 +58,8 @@ __all__ = [
     "IRedistributionAllocator",
     "IReferenceGenerator",
     "ISparseEmbedder",
+    "IStructureIdeaUseCase",
+    "IStructuredIdeaOutputParser",
     "ISuggestionPromptPreparer",
     "ITaskQueueService",
     "ITemplateValidator",

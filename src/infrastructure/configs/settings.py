@@ -78,6 +78,7 @@ class GenerationSettings(BaseSettings):
     LLM_TIMEOUT: float = 60.0
     LLM_TEMPERATURE: float = 0.2
     LLM_MAX_TOKENS: int = 4096
+    IDEA_MAX_PROMPT_TOKENS: int = Field(default=4096, gt=0)
 
     # Local Qwen tokenizer assets for context overflow handling.
     TOKENIZER_MODEL: str = str(

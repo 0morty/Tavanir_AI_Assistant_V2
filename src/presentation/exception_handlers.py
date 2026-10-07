@@ -28,6 +28,8 @@ from src.application.exceptions import (
     EmbedderConnectionError,
     EmbedderContextLengthError,
     InsufficientEvidenceBudgetError,
+    IdeaInputTooLongError,
+    IdeaInputValidationError,
     LLMAPIError,
     LLMAuthenticationError,
     LLMBaseError,
@@ -264,6 +266,16 @@ ERROR_REGISTRY: dict[type[Exception], ErrorSpec] = {
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         code="PROMPT_BUDGET_EXCEEDED",
         default_pointer="/data/maxPromptTokens",
+    ),
+    IdeaInputValidationError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="VALIDATION_ERROR",
+        default_pointer="/data/description",
+    ),
+    IdeaInputTooLongError: ErrorSpec(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        code="VALIDATION_ERROR",
+        default_pointer="/data/description",
     ),
     InsufficientEvidenceBudgetError: ErrorSpec(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

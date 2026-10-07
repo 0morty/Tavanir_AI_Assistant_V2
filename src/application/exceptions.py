@@ -144,6 +144,17 @@ class LLMUnknownCitationError(LLMOutputParseError):
     """Raised when a citation is absent from the fitted prompt's retained map."""
 
 
+class IdeaInputValidationError(LLMBaseError):
+    """Raised when an idea description is not a nonblank string."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, pointer="/data/description", field_name="description")
+
+
+class IdeaInputTooLongError(IdeaInputValidationError):
+    """Raised when an idea exceeds its 512-model-token input limit."""
+
+
 class ChunkSummarizationError(LLMBaseError):
     """Raised when batched LLM chunk summarization cannot produce a strict 1:1 mapping.
 

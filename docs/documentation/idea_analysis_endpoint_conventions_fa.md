@@ -40,7 +40,7 @@
 
 `/` و `/health` مسیرهای میزبان هستند و JSON ساده برمی‌گردانند؛ زیر router محافظت‌شدهٔ v1 نیستند. `/docs`، `/openapi.json` و `/scalar` برای مستندات هستند. `/api/v1/mock/reset` فقط در حالت mock اضافه می‌شود. قالب پاسخ endpointهای عملیاتی را از `/health` یا مسیرهای mock-admin استخراج نکنید.
 
-**پیشنهاد:** endpoint ایده نیز `POST` و هم‌زمان باشد و پاسخ نهایی را با `200` برگرداند. نام پیشنهادی، مطابق الگوی منبع + عملیات، **`/api/v1/suggestions/structure-idea`** است. این URL در پروژه وجود ندارد و انتخاب نهایی آن یک تصمیم API است. برای عملیاتی که چیزی ذخیره نمی‌کند، الگوی `201` مربوط به ingest کاربرد ندارد.
+**پیشنهاد:** endpoint ایده نیز `POST` و هم‌زمان باشد و پاسخ نهایی را با `200` برگرداند. نام پیشنهادی، مطابق الگوی منبع + عملیات، **`/api/v1/suggestions/expand-suggestion`** است. این URL در پروژه وجود ندارد و انتخاب نهایی آن یک تصمیم API است. برای عملیاتی که چیزی ذخیره نمی‌کند، الگوی `201` مربوط به ingest کاربرد ندارد.
 
 مراجع: [router اصلی و پاسخ‌های مشترک](../../src/presentation/routers/router.py#L11)، [مسیرهای پیشنهاد](../../src/presentation/routers/v1/suggestion.py#L34)، [مسیرهای میزبان و mock](../../src/main.py#L88).
 
@@ -248,7 +248,7 @@ preparer جدید باید مانند preparer موجود، ظرفیت کامل 
 درخواست نمونه:
 
 ```http
-POST /api/v1/suggestions/structure-idea
+POST /api/v1/suggestions/expand-suggestion
 X-API-Key: <configured-secret>
 X-Request-Id: 123e4567-e89b-12d3-a456-426614174000
 Content-Type: application/json

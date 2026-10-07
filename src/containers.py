@@ -32,6 +32,8 @@ from src.application.interfaces import (
     IReferenceGenerator,
     IReranker,
     ISparseEmbedder,
+    IStructureIdeaUseCase,
+    IStructuredIdeaOutputParser,
     ISuggestionPromptPreparer,
     ITaskQueueService,
     ITemplateValidator,
@@ -42,6 +44,7 @@ from src.application.interfaces import (
 from src.application.interfaces.i_output_parser import IOutputParser
 from src.application.llm import LLMRequestBuilder
 from src.application.prompt import (
+    StructureIdeaPromptConfig,
     SuggestionAnalysisPromptConfig,
     SuggestionPromptPreparer,
 )
@@ -64,6 +67,7 @@ from src.application.use_cases import (
     ExtractAndIngestHistoricalSuggestionsUseCase,
     IngestSuggestionUseCase,
     ProcessOutboxEventUseCase,
+    StructureIdeaUseCase,
     UpdateSuggestionUseCase,
 )
 from src.application.use_cases.generate_suggestion_use_case import (
@@ -113,6 +117,9 @@ from src.infrastructure.services.extractors import MssqlSuggestionExtractor
 from src.infrastructure.services.llm import OpenAILLMClient
 from src.infrastructure.services.llm.llm_client_registry import LLMClientRegistry
 from src.infrastructure.services.llm.output_parser import GenerationOutputParser
+from src.infrastructure.services.llm.structured_idea_output_parser import (
+    StructuredIdeaOutputParser,
+)
 from src.infrastructure.services.qdrant import QdrantAdminService
 from src.infrastructure.services.reranker import TEIReranker
 from src.infrastructure.services.summarizers import LLMChunkSummarizer, LLMSummarizer
@@ -589,6 +596,24 @@ class Container(containers.DeclarativeContainer):
             output_parser=generation_output_parser,
             max_prompt_tokens=suggestion_analysis_settings.SUGGESTION_ANALYSIS_MAX_PROMPT_TOKENS,
         )
+    )
+
+    # 17.3 Idea structuring through the shared Generation pipeline
+    structure_idea_prompt_config = providers.Object(StructureIdeaPromptConfig())
+
+    structured_idea_output_parser: providers.Provider[IStructuredIdeaOutputParser] = (
+        providers.Singleton(StructuredIdeaOutputParser)
+    )
+
+    structure_idea_use_case: providers.Provider[IStructureIdeaUseCase] = providers.Factory(
+        StructureIdeaUseCase,
+        tokenizer=tokenizer,
+        context_builder=context_builder,
+        request_builder=llm_request_builder,
+        llm_client=llm_client,
+        output_parser=structured_idea_output_parser,
+        config=structure_idea_prompt_config,
+        max_prompt_tokens=generation_settings.IDEA_MAX_PROMPT_TOKENS,
     )
 
     # 18. Reranker Infrastructure & Port

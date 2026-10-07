@@ -16,6 +16,7 @@ from src.application.use_cases.ingest_suggestion_use_case import (
 from src.application.use_cases.process_outbox_event_use_case import (
     ProcessOutboxEventUseCase,
 )
+from src.application.use_cases.structure_idea_use_case import StructureIdeaUseCase
 from src.application.use_cases.update_suggestion_use_case import (
     UpdateSuggestionUseCase,
 )
@@ -23,6 +24,7 @@ from src.application.use_cases.update_suggestion_use_case import (
 __all__ = [
     "AnalyzeSuggestionUseCase",
     "IngestSuggestionUseCase",
+    "StructureIdeaUseCase",
     "ExtractAndIngestHistoricalSuggestionsUseCase",
     "UpdateSuggestionUseCase",
     "DeleteSuggestionUseCase",

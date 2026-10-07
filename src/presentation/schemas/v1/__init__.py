@@ -22,6 +22,8 @@ from src.presentation.schemas.v1.mutation_response import (
 from src.presentation.schemas.v1.patch_suggestion_request import (
     PatchSuggestionRequest,
 )
+from src.presentation.schemas.v1.structure_idea_request import StructureIdeaRequest
+from src.presentation.schemas.v1.structure_idea_response import StructuredIdeaDataResponse
 from src.presentation.schemas.v1.update_suggestion_request import (
     UpdateSuggestionRequest,
 )
@@ -38,4 +40,6 @@ __all__ = [
     "UpdateSuggestionDataResponse",
     "DeleteSuggestionDataResponse",
     "BulkDeleteDataResponse",
+    "StructureIdeaRequest",
+    "StructuredIdeaDataResponse",
 ]

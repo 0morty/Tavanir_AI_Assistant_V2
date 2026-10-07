@@ -12,6 +12,7 @@ from src.presentation.schemas.responses import (
     SuccessResponse,
 )
 
+from src.application.interfaces import IStructureIdeaUseCase
 from src.application.use_cases import (
     AnalyzeSuggestionUseCase,
     BulkDeleteSuggestionsUseCase,
@@ -27,11 +28,46 @@ from src.presentation.schemas.v1 import (
     IngestSuggestionDataResponse,
     IngestSuggestionRequest,
     PatchSuggestionRequest,
+    StructureIdeaRequest,
+    StructuredIdeaDataResponse,
     UpdateSuggestionDataResponse,
     UpdateSuggestionRequest,
 )
 
 router = APIRouter(tags=["Suggestions"])
+
+
+@router.post(
+    "/suggestions/expand-suggestion",
+    status_code=status.HTTP_200_OK,
+    summary="Structure an idea into five generated fields",
+    description=(
+        "Accepts one idea description of at most 512 model tokens. Processes prompt "
+        "sections through the context budget pipeline, invokes the configured LLM, "
+        "and returns the five parsed fields in the standard success envelope."
+    ),
+    responses={
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+)
+@inject
+async def structure_idea(
+    request: StructureIdeaRequest,
+    use_case: Annotated[
+        IStructureIdeaUseCase,
+        Depends(Provide[Container.structure_idea_use_case]),
+    ],
+) -> SuccessResponse[StructuredIdeaDataResponse]:
+    result = await use_case.execute(request.to_dto())
+    response_data = StructuredIdeaDataResponse(
+        title=result.title,
+        current_problem=result.current_problem,
+        solution=result.solution,
+        advantage=result.advantage,
+        disadvantage=result.disadvantage,
+    )
+    return SuccessResponse.create(data=response_data, status=status.HTTP_200_OK)
 
 
 @router.post(

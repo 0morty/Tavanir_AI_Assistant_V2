@@ -503,6 +503,27 @@ class GenerationResult:
     uncertainty: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class StructureIdeaDTO:
+    """Idea description supplied for structuring.
+
+    Token-limit validation belongs to the use case and its injected tokenizer.
+    """
+
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredIdeaResult:
+    """Structured text fields returned by idea generation."""
+
+    title: str
+    current_problem: str
+    solution: str
+    advantage: str
+    disadvantage: str
+
+
 __all__ = [
     "AnalyzeSuggestionResponse",
     "SectionOutput",
@@ -533,4 +554,6 @@ __all__ = [
     "GenerationInput",
     "PreparedGeneration",
     "GenerationResult",
+    "StructureIdeaDTO",
+    "StructuredIdeaResult",
 ]

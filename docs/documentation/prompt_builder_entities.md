@@ -1,6 +1,6 @@
 # Prompt-Builder Architecture
 
-This document describes the prompt-builder feature: a generic, extensible set of domain entities that model a prompt as ordered, renderable sections.
+This document describes the prompt-builder feature: an extensible set of prompt sections assembled in a stable order.
 
 ## Design Goals
 
@@ -12,10 +12,10 @@ This document describes the prompt-builder feature: a generic, extensible set of
 
 ## Location
 
-The architecture is split across layers: the data entities (`Chunk`, `HistoryMessage`) live in the Domain layer alongside the other domain entities. The `PromptSection` concept is **prompt-scoped**: it represents a logical part of a prompt (not a generic section of anything else). Its abstract base class lives in `src/application/context/sections/`, alongside the developer-designed sections that implement it. `PromptBuilder` — the prompt consumer — lives under `prompt/` and composes `IPromptSection` instances into an ordered prompt:
+The architecture is split across layers: the generation input entities (`GenerationChunk`, `HistoryMessage`) live in the Domain layer. The `PromptSection` concept is **prompt-scoped**: it represents a logical part of a prompt (not a generic section of anything else). Its abstract base class lives in `src/application/context/sections/`, alongside the developer-designed sections that implement it. `PromptBuilder` — the prompt consumer — lives under `prompt/` and composes `IPromptSection` instances into an ordered prompt:
 
 ```
-src/domain/entities.py                  # Chunk, HistoryMessage (entities)
+src/domain/entities.py                  # GenerationChunk, HistoryMessage (generation input)
 src/domain/enums.py                     # HistoryRole, OverflowStrategy (enums)
 src/domain/overflow_strategy_stack.py   # OverflowStrategyStack (config value object)
 
@@ -26,6 +26,8 @@ src/application/interfaces/
 
 src/application/context/
 ├── __init__.py
+├── context_builder.py                  # ContextBuilder (budgeted section pipeline)
+├── overflow_strategy_dispatcher.py    # Dispatches section overflow operations
 └── sections/
     ├── __init__.py
     ├── prompt_section.py      # PromptSection (skeleton: IPromptSection + default behavior)
@@ -41,20 +43,19 @@ src/application/prompt/
 └── prompt_builder.py           # PromptBuilder (name-keyed registry)
 ```
 
-The Application layer depends inward on the Domain: sections consume `Chunk`/`HistoryMessage` and render them for the LLM, and the `PromptSection` contract is typed against domain config (`OverflowStrategyStack`). The packages stay pure stdlib. A future context/token-allocation component consumes the same concept (via its `importance`, `demand`, and `overflow_strategies` values) without touching the prompt layer.
+The Application layer depends inward on the Domain: sections consume `GenerationChunk`/`HistoryMessage` and render them for the LLM, and the `PromptSection` contract is typed against domain config (`OverflowStrategyStack`). The implemented `ContextBuilder` consumes sections through `prepare()`, allocates token capacity, applies overflow handling, and asks `PromptBuilder` to assemble the fitted text. `PromptBuilder` itself remains responsible only for section order and concatenation.
 
 ## Entities
 
-### `Chunk` (domain-agnostic content unit, `src/domain/entities.py`)
+### `GenerationChunk` (generation input, `src/domain/entities.py`)
 
-A `Suggestion`, `StatuteDocument`, or any future document type is mapped into a `Chunk` before prompt assembly.
+Retrieved content is mapped into a `GenerationChunk` before it enters the generation prompt. The retrieval-side `Chunk` is a separate entity and is not the input type accepted by `ChunksSection`.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `str` | Unique identifier |
-| `title` | `str` | Display title |
-| `content` | `str` | The text content |
-| `metadata` | `dict[str, Any]` | Optional source-specific data (status, similarity, citation, ...) |
+| `chunk_id` | `str` | Source chunk identifier |
+| `content` | `str` | Text that may enter the prompt |
+| `reference` | `Reference | None` | Optional reference used when rendering the chunk |
 
 ### `HistoryMessage` (a conversation turn, `src/domain/entities.py`)
 
@@ -81,11 +82,11 @@ The prompt-section abstraction is split into two tiers: the pure port `IPromptSe
 
 ### `IPromptSection` (port, `src/application/interfaces/i_prompt_section.py`)
 
-Declares the prompt-section contract: `section_type`, `importance`, `demand`, `overflow_strategies`, `pre_context`/`post_context`, `body()`, and `render()`. Every section must satisfy this contract; the port itself carries no implementation. Overflow *handling capacity* is a separate capability (`CompressibleSection`), not part of this port.
+Declares the prompt-section contract: `section_type`, `importance`, `demand`, `overflow_strategies`, `pre_context`/`post_context`, `body()`, `render()`, and `prepare()`. `prepare()` returns the complete section input, including structured collection metadata where applicable, for `ContextBuilder`. The port itself carries no implementation. Overflow *handling capacity* is a separate capability (`CompressibleSection`), not part of this port.
 
 ### `PromptSection` (skeleton, `src/application/context/sections/prompt_section.py`)
 
-Implements `IPromptSection` and ships the **general rendering algorithm** plus the **default (`CompressibleSection`) interpretation** of the overflow policy. It is the prompt-section abstraction, not a generic section of anything else: a section participates in prompt construction, so its `importance`, `demand`, and `overflow_strategies` are part of what a prompt section *is*. `PromptBuilder` is one consumer; a future context/token-allocation component operates on the same abstraction (via those values) without touching the prompt layer.
+Implements `IPromptSection` and ships the **general rendering algorithm** plus the **default (`CompressibleSection`) interpretation** of the overflow policy. It is the prompt-section abstraction, not a generic section of anything else: a section participates in prompt construction, so its `importance`, `demand`, and `overflow_strategies` are part of what a prompt section *is*. `PromptBuilder` and the implemented `ContextBuilder` both consume this abstraction; token allocation remains outside the prompt layer.
 
 ```
 +--------------+
@@ -114,10 +115,11 @@ Implements `IPromptSection` and ships the **general rendering algorithm** plus t
 | `post_context` | property (default `""`) | Framing after the body |
 | `body()` | abstract method | Constructs the section's main content — behaves conceptually like a property |
 | `render()` | method | Joins `pre_context` + `body()` + `post_context` into one string; returns `""` when the body is empty |
+| `prepare()` | method | Returns the complete `SectionProcessingResult` consumed by `ContextBuilder`; collection sections include aligned items, item bodies, and citation IDs |
 
 The base class holds **no** domain/business-specific implementation; it ships the generic default behavior of a prompt section — framing (`pre_context`/`post_context`/`separator`/`render()`), capacity weights (`importance`/`demand`), the overflow policy (`overflow_strategies`) and its default `CompressibleSection` execution (`truncate`/`summarize`/`ignore`). Subclasses override `section_type` and `body()` (and any hook they vary) and pass their default `importance`, `demand`, and overflow strategies to the base constructor. There is **no central enum of section names** — a subclass's `section_type` is its identity. `importance` and `demand` are instance properties owned by the base class; their values for several sections are independent and never normalized: the base class validates each value against `[0.0, 1.0]` but never enforces a sum of `1.0`. Normalization and allocation are the responsibility of the context/token-allocation logic.
 
-**Collection sections** (`ReferencedCollectionSection` subclasses) expose their held collection as `items` and join entries with `item_separator` — independent of the framing `separator` used by `render()`.
+**Collection sections** (`ReferencedCollectionSection` subclasses) expose their held collection as `items` and join entries with `item_separator` — independent of the framing `separator` used by `render()`. Their `truncate()` operation deliberately leaves content unchanged; `ignore()` drops trailing whole items, and `summarize()` processes prepared items individually when a summarizer is injected.
 
 ### Concrete sections
 
@@ -125,7 +127,7 @@ One concrete section per canonical section type, each owning its `body()`, defau
 
 - **`RoleSection`** (`src/application/context/sections/role_section.py`) — `ROLE`, default importance `0.5`, default demand `0.3`. Assigns the model its role.
 - **`HistorySection`** (`src/application/context/sections/history_section.py`) — `HISTORY`, default importance `0.3`, default demand `0.4`. Renders `HistoryMessage` turns as the body (each as `role: content`), framed by `pre_context = "History of previous interactions:"`.
-- **`ChunksSection`** (`src/application/context/sections/chunks_section.py`) — `CHUNKS`, default importance `0.4`, default demand `0.5`. Renders RAG context as numbered `Chunk N:` blocks, framed by `pre_context = "Relevant context chunks:"`.
+- **`ChunksSection`** (`src/application/context/sections/chunks_section.py`) — `CHUNKS`, default importance `0.4`, default demand `0.5`. Renders `GenerationChunk` items with stable citation markers such as `[chunk 001]`, framed by `pre_context = "Relevant context chunks:"`.
 - **`SystemInputSection`** (`src/application/context/sections/system_input_section.py`) — `SYSTEM-INPUT`, default importance `0.5`, default demand `0.5`. System-level input passed to the model.
 - **`UserInputSection`** (`src/application/context/sections/user_input_section.py`) — `USER-INPUT`, default importance `0.5`, default demand `0.4`. User-provided input passed to the model.
 - **`OutputFormatSection`** (`src/application/context/sections/output_format_section.py`) — `OUTPUT-FORMAT`, default importance `0.1`, default demand `0.2`. Describes the expected output format.
@@ -186,4 +188,4 @@ builder.set_section("INSTRUCTIONS", InstructionsSection("Be concise."))
 2. `PromptBuilder.render()` renders every registered section and delegates the concatenation to `assemble()`, which joins the results with the `SECTION_SEPARATOR` in registration order.
 3. The final result is a single assembled prompt string (not a multi-turn conversation).
 
-Capacity budgeting (how many tokens each section may use) is **out of scope** for `PromptBuilder`. The `ContextBuilder` orchestration pipeline (`src/application/context/context_builder.py`) renders the sections, allocates capacity via `CapacityAllocator`, fits over-budget sections through their overflow chain, and then hands the fitted content to `PromptBuilder.assemble()` for the final join. See [Dynamic Section Capacity Allocation](../../dynamic_section_capacity_allocation.md).
+Capacity budgeting (how many tokens each section may use) is **out of scope** for `PromptBuilder`. The `ContextBuilder` orchestration pipeline (`src/application/context/context_builder.py`) prepares complete section inputs, allocates capacity via `CapacityAllocator`, fits over-budget sections through their overflow chain, and then hands the fitted content to `PromptBuilder.assemble()` for the final join. See [Token budget and overflow](llm_generation_api.md#5-token-budget-and-overflow).

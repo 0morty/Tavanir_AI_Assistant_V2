@@ -1,22 +1,27 @@
 # AGENTS.md
 
-Early-stage FastAPI project (Tavanir AI Assistant V2) on a Clean Architecture scaffold. Most of the architecture is NOT implemented yet.
+FastAPI project (Tavanir AI Assistant V2) on a Clean Architecture scaffold. The LLM / Generation API has implemented orchestration, adapters, HTTP integration, and tests; source remains authoritative for other subsystem status.
 
 ## Repo state (read this first)
-- Docs (`docs/architecture/clean_architecture.md`, `docs/architecture/high_level_architecture.md`, `docs/index.md`) describe the **target** design and name the domain "JadooChatRAG". Do not assume they match the code — most referenced files are empty placeholders. `high_level_architecture.md` marks each part `[implemented]`/`[planned]`; `docs/planning/v2_unimplemented_features.md` is the authoritative backlog.
-- API wire contracts live in `docs/contracts/` (JSON:API envelope, camelCase external / snake_case internal mapping, internal error-code dictionary, API-key auth). Follow them when building the HTTP layer; auth is a **target** contract only — `src/presentation/security.py` is empty. Error codes map to real exceptions in `src/application/exceptions.py` / `src/domain/exceptions.py`.
-- `docs/technology-stacks.md` lists verified deps (`[pinned]`/`[gap]`/`[planned]` legend) and confirms the `requirements.txt` gaps below. Docs are English; Persian domain terms (suggestion statuses, context titles) appear inline where the code uses them.
-- Implemented so far: domain entities/enums/exceptions (`src/domain/`), application DTOs/exceptions + `IDenseEmbedder` port + section/context architecture (`src/application/context/` for the `IPromptSection` port, the `PromptSection` skeleton, the predefined sections, the `CompressibleSection` Section overflow capability, the `OverflowStrategyDispatcher`, the allocation engine `DemandAllocator`/`RedistributionAllocator`/`CapacityAllocator`, and the `ContextBuilder` token-budget pipeline; `src/application/prompt/` for `PromptBuilder`, which owns section ordering + concatenation only; `src/application/reference/` for the reference-enrichment architecture — `Reference`/`ReferenceDetails` entities, `DeterministicReferenceGenerator`, `TemplateValidator`, `LLMBaseReferenceGenerator` with retry, and the `ReferenceCache` shape-hash template cache), and infrastructure: settings + TEI/vLLM OpenAI-compatible client config, `BaseOpenAIService`, `OpenAIDenseEmbedder`, `LLMClientRegistry`, and DI wiring in `src/containers.py`.
-- Empty/unwired placeholders: `src/main.py`, `src/worker.py`, everything under `src/presentation/` (lifespan, security, routers, schemas), `src/infrastructure/db/`, repositories, use cases, all `tests/`. There is no runnable entrypoint yet — `uvicorn src.main:app` cannot work.
-- `docs/planning/v2_unimplemented_features.md` is the authoritative backlog of what still needs building.
+- Architecture docs include target design and the domain name "JadooChatRAG". Verify implementation from code. Generation's current reference is `docs/documentation/llm_generation_api.md`; remaining Generation work is in `docs/next_steps.md` and `docs/planning/v2_unimplemented_features.md`.
+- API wire contracts are in `docs/contracts/`: JSON response envelopes, camelCase external / snake_case internal mapping, error codes, and `X-API-Key`. The existing security implementation is shared and outside Generation ownership.
+- Implemented Generation: input/output DTOs and ports; section/context allocation and overflow; reference/citation enrichment; prompt preparers/configuration; role-bearing request builder; pooled OpenAI-compatible client; output parsers; `GenerateSuggestionUseCase`; `StructureIdeaUseCase`; and composition-root providers.
+- `POST /api/v1/suggestions/analyze` calls the injected generator when usable prepared evidence exists and returns its parsed answer/citations/uncertainty. No-evidence requests deliberately short-circuit without Generation.
+- `POST /api/v1/suggestions/expand-suggestion` accepts `description`, validates at most 512 model tokens, executes the full section/context/chat/parser pipeline, and returns five fields. Internal `StructureIdea*` names remain.
+- `src/main.py` exposes `create_app` and `app`; presentation lifespan initializes and wires resources. Do not describe all presentation code, use cases, or tests as empty scaffolds.
+- Current working-tree caveat: the expansion prompt example has Persian markers, but the parser's `IDEA_OUTPUT_MARKERS` are English. Preserve the original exact marker contract in Generation work; the discrepancy is tracked in the Generation guide/backlog. Documentation-only tasks must not silently fix source edits.
+- Documentation descriptions are English. Persian prompt instructions and domain terms can appear where code requires them. Keep unrelated existing working-tree changes intact.
 
 ## Environment gotchas
-- `requirements.txt` is out of sync with imports: `src/containers.py` and `src/infrastructure/configs/llm_provider_configs.py` import `openai` and `dependency-injector`, which are NOT in `requirements.txt`. Install/add them before running anything that imports `src.containers`.
-- Settings (`src/infrastructure/configs/settings.py`) load `.env` from the repo root via `Path(__file__).resolve().parents[3]`. Defaults target local TEI (localhost:8080) and vLLM (localhost:8000) with an `EMPTY` API key; providers are configured through `TEI_HOST/TEI_PORT`/`VLLM_HOST/VLLM_PORT`.
-- Always run commands from the repo root: internal imports are absolute (`from src....`), and `alembic.ini` sets `prepend_sys_path = .`.
+- `openai`, `dependency-injector`, and `transformers` are declared in `requirements.txt`; install the declared environment before importing the container. Declaration does not prove installation.
+- Settings (`src/infrastructure/configs/settings.py`) load `.env` from the repo root via `Path(__file__).resolve().parents[3]`. Defaults target local TEI (localhost:8080) and vLLM (localhost:8000) with an `EMPTY` API key; providers are configured through `TEI_HOST/TEI_PORT`/`VLLM_HOST/VLLM_PORT`. Generation defaults to `Qwen/Qwen2.5-7B-Instruct`; environment overrides must match the actual served model.
+- Production Generation uses `QwenTokenizer` over an injected fast tokenizer loaded from `assets/tokenizers/Qwen2.5-7B-Instruct` with `local_files_only=True`. Keep idea validation and ContextBuilder on the same tokenizer.
+- Always run commands from the repository root because internal imports are absolute (`from src....`).
 
 ## Tests / tooling
-- No `pyproject.toml`, `setup.cfg`, `pytest.ini`, `conftest.py`, or lint/format config exists; `tests/{unit,integration,e2e}` are empty scaffolds. Test deps pinned in requirements: pytest, pytest-asyncio, pytest-cov, pytest-mock, pytest-xdist.
+- `pytest.ini` and `tests/conftest.py` exist; asyncio mode is strict. Generation unit/integration tests are implemented. Use injected fakes in unit tests and mock provider transport in controlled integration tests.
+- Expansion HTTP tests exercise the actual Generation pipeline with a local Qwen tokenizer and mocked provider, without production lifespan. Analyze presentation tests override its use case; unit tests cover the real generator handoff.
+- Database tests require their explicit configured opt-in. Do not run uncontrolled external-service checks or claim live model/API verification from mocks. Record fresh results and distinguish historical live evidence in `docs/documentation/llm_generation_test_summary.md`.
 
 ## Migrations
 - Alembic (async) is scaffolded but not wired: `migrations/env.py` has `target_metadata = None` and `alembic.ini` still has the placeholder `sqlalchemy.url`. No models or version files exist.
@@ -32,7 +37,7 @@ Early-stage FastAPI project (Tavanir AI Assistant V2) on a Clean Architecture sc
 The project follows a .NET-style DI procedure: components are **composed**, never assembled by themselves. Every component receives its collaborators through its constructor, depends on an abstraction where a seam is warranted, and is registered in the single composition root (`src/containers.py`). There are four mandatory steps for any dependency, in order: **define → inject → compose → test**.
 
 #### 1. Define — where dependencies are declared as abstractions
-- Application-layer ports live in `src/application/interfaces/` as `I<Capability>` ABCs. Existing ones (all exported from `src/application/interfaces/__init__.py` via `__all__`): `ICapacityAllocator`, `IDemandAllocator`, `IRedistributionAllocator`, `IOverflowStrategyDispatcher`, `IContextBuilder`, `ITemplateValidator`, `IReferenceGenerator`, `ILLMClient`, `IPromptSection`, `ICompressibleSection` (marker `CompressibleSection`), `IDenseEmbedder`, `ISparseEmbedder`, `ITextNormalizer`, `ITokenizer`.
+- Application-layer ports live in `src/application/interfaces/` as `I<Capability>` ABCs. Generation ports include `ICapacityAllocator`, `IDemandAllocator`, `IRedistributionAllocator`, `IOverflowStrategyDispatcher`, `IContextBuilder`, `ITemplateValidator`, `IReferenceGenerator`, `ILLMClient`, `ILLMRequestBuilder`, `IPromptSection`, `ISuggestionPromptPreparer`, `IOutputParser`, `IGenerateSuggestionUseCase`, `IStructureIdeaUseCase`, and `IStructuredIdeaOutputParser`; `CompressibleSection` is the overflow capability marker. Import from the defining module when a port is not exported by `__all__` (notably `IOutputParser`). Other subsystem ports retain their existing ownership.
 - Domain-boundary ports live in `src/domain/interfaces/` (`IUnitOfWork`, `ISuggestionVectorRepository`, `IRegulatoryVectorRepository`, `IVectorRepository`, `ISuggestionRepository`). Domain-owned capabilities that Generation consumes are abstractions under `src/domain/context/` (`Tokenizer`, `Summarizer`).
 - A concrete class implements its interface explicitly — `class CapacityAllocator(ICapacityAllocator)`, `class TemplateValidator(ITemplateValidator)` — and lives in the layer it belongs to (application implementation or infrastructure adapter).
 - Interfaces must stay dependency-light: import only what is needed at runtime; reference heavier sibling types under `TYPE_CHECKING` with `from __future__ import annotations` (see `src/application/interfaces/i_context_builder.py`).
@@ -46,7 +51,7 @@ The project follows a .NET-style DI procedure: components are **composed**, neve
   - `LLMBaseReferenceGenerator(llm_client, *, validator: ITemplateValidator, context_builder: IContextBuilder, cache: ReferenceCache, max_attempts=3, max_tokens=2048)`
   - `LLMClientRegistry(client_factory: Callable[[str, float], AsyncOpenAI])`
 - Store the injected reference on `self._<name>` and never re-instantiate or default it later.
-- The ONLY permitted internal instantiations are (a) immutable configuration data (`ReferenceGenerationPrompts()`, settings) and (b) documented default strategies behind an explicit injection seam (the `reference_generator: IReferenceGenerator | None` default on `ReferencedSection`, the default `OverflowStrategyStack`s on `PromptSection`). **If you add a new collaborator, add it as a required constructor parameter — do not add another fallback default.**
+- Permitted internal construction covers immutable configuration data, per-call DTO/prompt/section data (`PromptBuilder`, sections, strategy stacks), and existing documented default strategies behind an explicit seam (`ReferencedSection.reference_generator`, default `PromptSection` stacks). Per-call data construction is not permission to construct runtime service collaborators. **If you add a new collaborator, add it as a required constructor parameter — do not add another fallback default.**
 - A component must never import or instantiate a concrete implementation from an outer layer (`src/application` must never import `src.infrastructure`).
 
 #### 3. Compose — how the graph is assembled
@@ -54,7 +59,7 @@ The project follows a .NET-style DI procedure: components are **composed**, neve
 - Register each dependency by name with the interface as the provider type, passing the concrete class and its wired dependencies to the provider: `provider_name: providers.Provider[IInterface] = providers.Singleton(Concrete, dep=other_provider, ...)` (example: `capacity_allocator: providers.Provider[ICapacityAllocator] = providers.Singleton(CapacityAllocator, demand_allocator=..., redistribution_allocator=...)`).
 - Wire providers reference other providers by attribute name; pass static values/factories with `providers.Object`/`providers.Callable`; manage lifecycle with `providers.Resource` (`client_registry`, `embedding_client`); use `providers.Factory` for per-call construction (`unit_of_work`).
 - The container is booted exactly once, in `src/presentation/lifespan.py`: `container = Container()`, `await container.init_resources()`, `container.wire(packages=["src.presentation.routers"])`, stored on `app.state.container`. `Container()` must never be constructed inside a service, router, or use case, and `app.state.container` is never used to manually resolve dependencies in application code.
-- Known gap: `context_builder` and a concrete Generation LLM client cannot be fully wired yet because no runnable `Tokenizer` adapter is installed (`GemmaTokenizer` needs `transformers`). Their injection seams exist and are test-covered; complete the wiring in `containers.py` once a tokenizer adapter exists (do not add it outside the composition root).
+- Generation tokenizer, `context_builder`, shared `llm_client`, request builder, parsers, and both Generation use cases are wired in the composition root. Resource teardown closes pooled clients and their event-loop thread. Remaining gaps include full chat-framing/completion-reserve accounting and expansion mock-mode parity; do not treat these as missing core DI wiring.
 
 #### 4. Test DI behavior
 - Unit tests construct components with test doubles that implement the relevant interface — recording subclasses (`RecordingCapacityAllocator(CapacityAllocator)`, `RecordingDispatcher(OverflowStrategyDispatcher)`, `StrictValidator(TemplateValidator)`) or fakes (`FakeTokenizer(Tokenizer)`, `CallingContextBuilder`). Do not build the real container in unit tests.
@@ -76,7 +81,7 @@ This section defines the exclusive ownership boundary for the **LLM / Generation
 
 ### 1. Responsibility
 
-The LLM / Generation API is responsible for everything that happens **after** retrieval produces structured input and **before** the result is returned to the caller. Specifically:
+The LLM / Generation API accepts either a raw idea or structured information already prepared upstream. It owns prompt/context preparation, LLM invocation, parsing, and Generation result mapping. It does not own retrieval or decide how evidence was obtained. Specifically:
 
 - Preparing the input/context passed to the LLM
 - Defining the input contract for the Generation API
@@ -96,43 +101,47 @@ The LLM / Generation API is responsible for everything that happens **after** re
 
 ### 2. In-Scope Components
 
-#### 2.1 Already Implemented (owned, may be modified)
+#### 2.1 Already Implemented (Generation-owned portions may be modified)
 
-| File | What belongs to Generation |
+| File / directory | Generation ownership |
 |---|---|
-| `src/application/dtos.py` | `AnalyzeSuggestionResponse` — the output contract |
-| `src/application/exceptions.py` | LLM exception hierarchy only: `LLMBaseError`, `LLMConfigurationError`, `LLMConnectionError`, `LLMAPIError`, `LLMAuthenticationError` (lines 55-85). Do NOT touch `ApplicationError`, `ApplicationAPIError`, or any Embedder exception. |
-| `src/application/context/` | `IPromptSection` port (in `src/application/interfaces/`) implemented by the `PromptSection` skeleton and the predefined sections (`RoleSection`, `HistorySection`, `ChunksSection`, `SystemInputSection`, `UserInputSection`, `OutputFormatSection`). Reference-aware section bases (`ReferencedSection`, `ReferencedCollectionSection`). The `CompressibleSection` Section overflow capability (`truncate`/`summarize`/`ignore`) with the `OverflowStrategyDispatcher`. The allocation engine in `allocation/` (`DemandAllocator`, `RedistributionAllocator`, `ExpansionRequest`, `CapacityAllocator`) and the `ContextBuilder` token-budget pipeline (`ContextBuilder`, `SectionOutput`, `ContextBuilderResult`). New sections are developer-designed `Section` subclasses — there is no generic string section. |
-| `src/application/prompt/` | `PromptBuilder` — owns section ordering (registry) and concatenation (`assemble`/`SECTION_SEPARATOR`) only; capacity budgeting is `ContextBuilder`'s job |
-| `src/infrastructure/configs/settings.py` | `LLMSettings` class (lines 30-52) and `llm_settings` singleton. Do NOT touch `CoreSettings`, `EmbeddingSettings`, or `embedding_settings`. |
-| `src/infrastructure/configs/llm_provider_configs.py` | Entire file — `LLMProvider`, `APIKeyProvider`, `AsyncOpenAIClientFactory` |
-| `src/infrastructure/services/base_openai_service.py` | Entire file — shared base for OpenAI-compatible error handling |
-| `src/infrastructure/services/llm/llm_client_registry.py` | Entire file — `LLMClientRegistry` connection pooling |
+| `src/application/dtos.py` | Generation input/result DTOs, `PreparedGeneration`, `StructureIdeaDTO`, `StructuredIdeaResult`, and Generation fields of `AnalyzeSuggestionResponse`; unrelated DTOs remain out of scope. |
+| `src/application/exceptions.py` | LLM hierarchy, output/citation errors, prompt/evidence budget errors, duplicate evidence, idea validation/length errors, and Generation summarization errors. Do not modify application base or embedder exceptions. |
+| `src/application/interfaces/` | Generation ports named in the DI policy; unrelated retrieval, embedding, storage, and queue ports remain out of scope. |
+| `src/application/context/` | Prompt sections, reference-aware collections, allocation, ContextBuilder, overflow capabilities/dispatcher, and fitted-section results. New Generation sections belong here. |
+| `src/application/prompt/` | PromptBuilder ordering/concatenation, SuggestionPromptPreparer, SuggestionAnalysisPromptConfig, StructureIdeaPromptConfig, and exact expansion marker constants. Budget processing belongs to ContextBuilder. |
+| `src/application/reference/` | Generation reference entities, generators, validator, template cache, and supporting formatting. |
+| `src/application/llm/` | LLMRequestBuilder and role mapping from processed ContextBuilder output. |
+| `src/application/use_cases/generate_suggestion_use_case.py` | Final evidence-based Generation orchestration. |
+| `src/application/use_cases/structure_idea_use_case.py` | Idea validation and full section/context/chat/strict-parser orchestration. |
+| `src/infrastructure/configs/settings.py` | `LLMSettings`, `GenerationSettings`, their singletons, and the Generation prompt-budget field of `SuggestionAnalysisSettings`. Do not change core, embedding, or retrieval settings. |
+| `src/infrastructure/configs/llm_provider_configs.py` | LLMProvider, APIKeyProvider, AsyncOpenAIClientFactory; preserve existing embedding consumers. |
+| `src/infrastructure/services/base_openai_service.py` | Shared compatible-provider error handling; preserve embedding behavior. |
+| `src/infrastructure/services/llm/` | Shared Generation client/registry, JSON output parser, strict idea output parser, and Generation helpers. |
+| `src/infrastructure/services/tokenizers/qwen_tokenizer.py` | Generation model-token counting/encoding adapter; domain tokenizer abstraction remains read-only. |
+| `src/infrastructure/services/summarizers/` | Generation context summarization adapters only. |
+| `tests/unit/`, `tests/integration/` | Generation tests only; do not modify unrelated test cases or shared test configuration without explicit authorization. |
 
-#### 2.2 Shared (read-only, do NOT modify)
+#### 2.2 Shared components (precise exceptions to read-only ownership)
 
-| File | Why shared |
+| File | Allowed Generation change |
 |---|---|
-| `src/domain/entities.py` | `Suggestion`, `SuggestionContent`, `CommitteeEvaluation`, `StatuteDocument`, `ShamsiDate`, `Chunk`, `HistoryMessage` — consumed by Generation but owned by Domain |
-| `src/domain/enums.py` | `SuggestionStatus`, `HistoryRole` — used across all layers |
-| `src/domain/exceptions.py` | Base `DomainError` and subtypes |
-| `src/containers.py` | DI composition root — may add Generation providers but must NOT remove or restructure existing embedder providers |
+| `src/domain/entities.py`, `src/domain/enums.py`, `src/domain/exceptions.py`, `src/domain/context/` | Read-only. Consume existing domain entities and abstractions; do not modify them. |
+| `src/containers.py` | Add or adjust Generation providers only. Never remove/restructure embedder, retrieval, database, queue, or other teams' providers. |
+| `src/application/use_cases/analyze_suggestion_use_case.py` | Generator injection, prepared GenerationInput handoff, and mapping parsed Generation results only. Normalization, retrieval, reranking, pooling, hydration, and their existing policies remain out of scope. |
+| `src/presentation/routers/v1/suggestion.py` | Expansion route and Generation-related response mapping only. Existing retrieval orchestration and mutation routes remain out of scope. |
+| `src/presentation/schemas/v1/analyze_suggestion_response.py` | Generation answer, uncertainty, and cited-evidence response fields only. |
+| `src/presentation/schemas/v1/structure_idea_request.py`, `src/presentation/schemas/v1/structure_idea_response.py` | Expansion request/response contract. |
+| `src/presentation/exception_handlers.py` | Generation exception mappings only; preserve security, domain, retrieval, and embedding mappings. |
+| Documentation and `AGENTS.md` | Generation-specific documents/instructions and Generation paragraphs of shared docs when requested. Do not revise retrieval sections or unrelated working-tree documentation. |
 
-#### 2.3 To Be Created (within Generation scope)
+These exceptions identify existing mixed Generation integration points; they do not authorize changes to the rest of a shared file. `src/presentation/security.py`, lifespan/mock infrastructure, and application startup remain outside Generation source ownership unless separately authorized.
 
-| Planned File | Purpose |
-|---|---|
-| `src/application/interfaces/i_llm_client.py` | Application-layer port for LLM invocation |
-| `src/application/interfaces/i_output_parser.py` | Application-layer port for parsing/validating LLM output |
-| `src/application/dtos.py` (extend) | Generation input DTOs: `GenerationInput`, `CurrentSuggestionInput`, `SimilarSuggestionInput`, `RegulationInput` |
-| `src/application/use_cases/analyze_suggestion_use_case.py` | Generation orchestration use case |
-| `src/infrastructure/configs/settings.py` (extend) | `GenerationSettings` — temperature, max_tokens, model name, token budgets |
-| `src/infrastructure/services/llm/openai_llm_client.py` | Concrete LLM client adapter implementing `ILLMClient` |
-| `src/infrastructure/services/llm/output_parser.py` | Concrete output parser implementing `IOutputParser` |
-| `src/infrastructure/services/llm/templates/suggestion_analysis_system.jinja2` | System prompt template |
-| `src/infrastructure/services/llm/templates/suggestion_analysis_user.jinja2` | User prompt template |
-| `tests/unit/` (Generation tests) | Unit tests for prompt building, output parsing, use case logic |
-| `tests/integration/` (Generation tests) | Integration tests for LLM client against mock provider |
+#### 2.3 Planned work (not implemented; not required for the existing endpoints)
+
+- Optional Jinja prompt files under `src/infrastructure/services/llm/templates/` are a target alternative. Current prompts are Python configuration dataclasses; do not claim the Jinja files exist or are required.
+- Future supplied-regulation rendering/citation support belongs to Generation sections, DTOs, preparers, parsers, and their tests. Fetching regulations remains upstream ownership.
+- Full model-context accounting, final-output retry policy, and Generation observability must reuse existing injected boundaries; do not create duplicate clients/context pipelines.
 
 ### 3. Out-of-Scope Components
 
@@ -156,7 +165,7 @@ Do NOT create, modify, refactor, rename, or delete any of the following:
 
 ### 4. Code Ownership Rules
 
-1. **Only modify files listed in Section 2.1 or Section 2.3.** Everything else is off-limits.
+1. **Only modify Generation-owned files/portions in Section 2.1, the explicit Generation exceptions in Section 2.2, or authorized planned work in Section 2.3.** Everything else is off-limits.
 2. **If a file has mixed responsibilities**, identify only the Generation-related parts. Do not touch non-Generation code in the same file.
 3. **If completing a task appears to require changing out-of-scope code**, stop and report the dependency. Do not modify the out-of-scope code.
 4. **Do not silently expand scope.** Do not refactor neighboring modules because you are already working nearby.
@@ -205,48 +214,40 @@ The Generation API **consumes** already-prepared information. It does **not** de
 - Generation does NOT interact with the legacy MSSQL database directly.
 - Generation does NOT manage suggestion lifecycle, committee workflows, or business state.
 
-### 7. Generation Input Contract (Preliminary)
+### 7. Implemented Generation Input Contracts
 
-The Generation API is designed around structured input. The input DTO models represent information **already retrieved** by the RAG layer:
+Evidence-based Generation consumes `GenerationInput`:
 
 ```text
 GenerationInput
 ├── current_suggestion: CurrentSuggestionInput
-│   ├── id: str
-│   ├── title: str
-│   ├── problem: str | None
-│   ├── solution: str | None
-│   ├── date: str | None          # Shamsi date string
-│   ├── status: SuggestionStatus
+│   ├── title, problem, solution: str          # required, substantive
+│   ├── id: str | None                        # optional; no date field
+│   ├── status: SuggestionStatus = PENDING
 │   └── context_title: str | None
 ├── similar_suggestions: list[SimilarSuggestionInput]
-│   ├── id: str
-│   ├── title: str
-│   ├── problem: str | None
-│   ├── solution: str | None
+│   ├── id, title, problem, solution: str
 │   ├── status: SuggestionStatus
-│   ├── similarity: float
-│   └── context_title: str | None
-├── regulations: list[RegulationInput]
-│   ├── id: str
-│   ├── title: str
-│   ├── content: str
-│   └── citation: str | None
+│   ├── similarity: float                     # finite; raw scores may exceed [0, 1]
+│   ├── context_title: str | None
+│   └── reference: Reference | None
+└── regulations: list[RegulationInput] = []
+    ├── id, title, content: str
+    └── citation: str | None
 ```
 
+Regulations are accepted as DTO data but are not currently rendered/cited by SuggestionPromptPreparer. `PreparedGeneration` carries fitted context and a direct retained `citation_id → original item` map; do not replace that map with intermediate source IDs.
 
-These are starting points. Refine them as implementation progresses. Do not add fields merely because they exist in the source database — include information only when it has a meaningful purpose for generation.
+Idea expansion independently consumes `StructureIdeaDTO(description: str)`. Trim and validate its maximum 512 model tokens using the injected Generation tokenizer before sending it to USER-INPUT. Both flows must use PromptBuilder sections, ContextBuilder processing, the existing request builder, and the shared provider abstraction.
 
-### 8. Generation Output Contract
+### 8. Implemented Generation Output Contracts
 
-The Generation API returns a structured result. The existing `AnalyzeSuggestionResponse` is the baseline; it must be extended to include:
+- Analyze's model completion is JSON: nonblank `answer`, `citations` list, optional `uncertainty`. Parse and resolve citations against the **retained** map. HTTP `analysis` contains the validated answer on the normal path; no usable evidence yields diagnostic text without a model call.
+- `citedSuggestionIds` identifies actually cited original suggestions. Existing status-grouped candidate lists are separate. `groundingRatio` is citation coverage, not calibrated model confidence; `isFallbackMode` reflects upstream fallback. Regulation citations are not connected and `appliedStatuteIds` is empty.
+- Expansion's model completion is plain text, in the exact order `{title}`, `{current problem}`, `{solutions}`, `{advantage}`, `{disadvantage}`, separated by exactly `\n***\n`. Preserve these English machine-readable labels even with Persian instructions/content. The HTTP envelope exposes `title`, `currentProblem`, `solution`, `advantage`, `disadvantage`, not the raw completion. The current working-tree prompt/marker disagreement must be resolved before claiming this contract succeeds against a real model.
+- Malformed output/citations map to HTTP 500 `GENERATION_FAILED`; no unvalidated completion is returned as success. Final Generation currently has no semantic-output retry loop.
 
-- **AI-generated analysis** (markdown text — already present as `analysis`)
-- **Evidence/context used** — which similar suggestions and regulations the model relied on (partially present as ID lists)
-- **Confidence/uncertainty** — where the model is uncertain or data was insufficient
-- **Citations/references** — statute references used in the analysis
-
-The LLM output must **not** be treated as the final organizational decision. The Generation API provides **decision support**, not authoritative business decisions.
+The output provides decision support, never an authoritative organizational decision. See `docs/documentation/llm_generation_api.md` for exact contracts, errors, budgets, and observed gaps.
 
 ### 9. Change Discipline
 
@@ -254,7 +255,7 @@ Before modifying any file:
 
 1. Check Section 2.1 — is this file in my scope?
 2. Check Section 2.3 — is this a file I am authorized to create?
-3. If the file is in Section 2.2 — do NOT modify it.
+3. If the file is in Section 2.2 — change only an explicitly allowed Generation portion; all other portions are read-only.
 4. If the file is not listed anywhere — treat it as out of scope.
 5. If ownership is ambiguous — treat it as out of scope.
 6. If an out-of-scope change appears necessary — stop and report it.
@@ -277,7 +278,7 @@ Owner:
 
 Before finishing any task:
 
-- [ ] Every changed file is listed in Section 2.1 or is a new file per Section 2.3.
+- [ ] Every changed file/portion falls under Section 2.1, an explicit Generation exception in Section 2.2, or authorized Section 2.3 work.
 - [ ] No out-of-scope code was modified.
 - [ ] No unrelated refactoring was introduced.
 - [ ] No Retrieval/RAG implementation was changed.

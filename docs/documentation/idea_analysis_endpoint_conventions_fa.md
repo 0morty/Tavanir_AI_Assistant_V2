@@ -1,5 +1,7 @@
 # استانداردهای موجود پروژه برای endpoint ساختاربندی ایده
 
+> **Historical audit:** The pre-implementation findings below describe the earlier repository state. The endpoint is now `/api/v1/suggestions/expand-suggestion`, with a full section/context/LLM/parser pipeline and five-field JSON envelope. Use the [current Generation guide](llm_generation_api.md) for implementation contracts, verification, and the working-tree prompt/marker mismatch; do not treat earlier “not implemented” statements as current status.
+
 تاریخ بررسی: **۲۰۲۶-۱۰-۰۷**. مبنا: کد و مستندات موجود در working tree، با HEAD برابر `dce346a`. این سند برای آماده‌سازی پیاده‌سازی نوشته شده است؛ endpoint جدید هنوز پیاده‌سازی نشده است.
 
 نیاز مورد بررسی: دریافت یک شرح ایده، با حداکثر **۵۱۲ توکن**، و تولید پنج فیلد قابل استخراج: **عنوان، مسئلهٔ فعلی، راهکار، مزیت و عیب**.

@@ -385,10 +385,11 @@ Key points:
   Reference-enriched per-item texts obtained from `_enriched_item_texts()`
   (skipping empty items), then re-joins the 1:1 summaries with the section's
   `item_separator`. The legacy `content` parameter is ignored when items exist.
-- `ChunksSection` renders items as `Chunk N: <content>` before enrichment;
+- `ChunksSection` renders each chunk's content with any reference text and a
+  section-owned `Unique ID: [chunk NNN]` marker; it does not add `Chunk N:`.
   `HistorySection` renders `role: content`. Both forward `chunk_summarizer` to
   the base.
-- An injected `char_summarizer` takes precedence over the plain `Summarizer`.
+- An injected `chunk_summarizer` takes precedence over the plain `Summarizer`.
 
 ### 8.3 Reachability via the overflow pipeline
 
@@ -396,9 +397,9 @@ Key points:
 section's `OverflowStrategyStack` in priority order, dispatching each strategy
 to the matching Section operation through `OverflowStrategyDispatcher`
 (`src/application/context/overflow_strategy_dispatcher.py`) — `SUMMARIZE →
-section.summarize(content, capacity)`. A final `TRUNCATE` safety net guarantees
-the fitted content never exceeds the section's allocated capacity, even when
-the summarizer returned a longer result than requested.
+section.summarize(content, capacity)`. The final safety net truncates
+a single-text section or drops whole trailing collection items with `IGNORE`;
+it never returns content above the section's allocated capacity.
 
 ## 9. Composition root wiring
 
@@ -407,10 +408,11 @@ summarizers are fully wired:
 
 ```python
 generation_client  = providers.Resource(init_generation_client, ...)   # pooled AsyncOpenAI
-llm_client         = providers.Singleton(OpenAILLMClient, client=generation_client,
-                                         model=generation_settings.LLM_MODEL, ...)
+llm_client         = providers.Resource(init_llm_client, client=generation_client,
+                                        model=generation_settings.LLM_MODEL, ...)
 llm_summarizer     = providers.Singleton(LLMSummarizer, llm_client=llm_client)
 chunk_summarizer   = providers.Singleton(LLMChunkSummarizer, llm_client=llm_client)
+tokenizer          = providers.Resource(init_tokenizer)
 ```
 
 - `generation_settings` (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_TIMEOUT`,
@@ -418,10 +420,10 @@ chunk_summarizer   = providers.Singleton(LLMChunkSummarizer, llm_client=llm_clie
 - `OpenAILLMClient` (`src/infrastructure/services/llm/openai_llm_client.py`)
   drives chat completions through the pooled `AsyncOpenAI` client from
   `LLMClientRegistry` (`src/infrastructure/services/llm/llm_client_registry.py`),
-  mapping provider failures onto the LLM exception hierarchy. Its `complete()` /
-  `complete_many()` are **synchronous by contract** (the whole Generation
-  pipeline is synchronous); they bridge the async client with `asyncio.run` and
-  must run in a thread without a running event loop.
+  mapping provider failures onto the LLM exception hierarchy. Its helper
+  `complete()` / `complete_many()` operations are synchronous by contract; the
+  final-answer `complete_chat()` is async. The adapter runs provider calls on
+  its own persistent event-loop thread, which is closed by the DI resource.
 - **Batching strategy:** `complete_many` first tries vLLM's OpenAI-compatible
   batch endpoint `POST /v1/chat/completions/batch` (all prompts in one HTTP
   request, one conversation per prompt, response carries one choice per
@@ -432,11 +434,12 @@ chunk_summarizer   = providers.Singleton(LLMChunkSummarizer, llm_client=llm_clie
   which also closes the former tokenizer wiring gap.
 
 **Known wiring seam:** the `chunk_summarizer` and `llm_summarizer` providers
-exist in the composition root, but the prompt Sections that *consume* them
-(`ReferencedCollectionSection`, `ReferencedSection`) are not yet wired to these
-providers — that wiring belongs to the `context_builder` provider, which is
-still gated on the `GemmaTokenizer` install gap (`transformers` not installed).
-The summarizers themselves are fully runnable.
+exist in the composition root, but the current suggestion prompt preparer
+does not inject them into its sections. Its `SimilarSuggestionsSection` uses
+`IGNORE` for overflow. Generic sections can receive the summarizers through
+their constructors. The tokenizer resource is registered, and `transformers`
+is listed in `requirements.txt`; a runtime still needs those dependencies
+installed before container startup.
 
 ## 10. Error model
 
@@ -514,4 +517,4 @@ needed.
 - [Prompt-Builder Architecture](prompt_builder_entities.md) — `PromptBuilder`, canonical sections, rendering.
 - [Section Mechanism](section_mechanism.md) — the `IPromptSection` port and `PromptSection` skeleton.
 - [Reference Architecture](reference_architecture.md) — reference enrichment that feeds `_enriched_item_texts()`.
-- [Gemma Tokenizer Usage](gemma_tokenizer_usage.md) — the runnable tokenizer adapter and its install gap.
+- [Tokenizer Usage](gemma_tokenizer_usage.md) — historical Gemma notes and the current Qwen runtime distinction.

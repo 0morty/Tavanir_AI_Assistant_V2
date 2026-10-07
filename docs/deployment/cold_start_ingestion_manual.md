@@ -85,7 +85,7 @@ Ensure the following services are reachable:
 - **PostgreSQL (v16+):** Target relational database.
 - **Qdrant (v1.17+):** Target vector store.
 - **MSSQL:** Source legacy database.
-- **TEI / vLLM:** Dense embedding microservice (`/v1/embeddings`).
+- **TEI:** Dense embedding microservice (`/v1/embeddings`). vLLM serves chat completions for the separate Generation path and is not an ingestion prerequisite. The analysis API invokes final Generation when usable prepared evidence exists, and expansion uses the same shared provider. See the [Generation API guide](../documentation/llm_generation_api.md) and [test summary](../documentation/llm_generation_test_summary.md) for the current marker mismatch and live-verification boundary.
 
 ### B. Database Migrations
 Apply all Alembic migrations to ensure the relational schema is up to date:

@@ -4,6 +4,9 @@ This directory is the central documentation repository for the **Tavanir AI Assi
 
 Documentation follows the **Docs-as-Code** philosophy and the **Diátaxis Framework** (Tutorials, How-To Guides, Technical Reference, and Architectural Explanations).
 
+> **Current Generation status:** Analyze invokes the injected final generator when usable evidence exists and returns validated model output/citations/uncertainty; its no-evidence branch deliberately skips generation. `POST /api/v1/suggestions/expand-suggestion` executes the section/context/chat/parser pipeline and returns five fields. The current expansion prompt example and parser markers disagree in the working tree; see the [Generation guide](documentation/llm_generation_api.md), [test evidence](documentation/llm_generation_test_summary.md), and [remaining Generation work](next_steps.md).
+
+
 ---
 
 ## 📁 Scaffolding & Section Roadmap
@@ -104,7 +107,11 @@ docs/
   * **Section Properties (`section_properties.md`)**: The Section weights `importance` and `demand`.
   * **Overflow Strategies (`overflow_strategies.md`)**: `OverflowStrategy` enum and `OverflowStrategyStack` semantics.
   * **Word-Boundary Binary Search Truncation (`word_boundary_binary_search_truncation.md`)**: Deterministic token-budget truncation via binary search on word boundaries (the `TRUNCATE` overflow implementation).
-  * **Gemma Tokenizer Usage (`gemma_tokenizer_usage.md`)**: Fast Gemma tokenizer integration for the ContextBuilder — offset mapping, token counting, and exact-substring truncation.
+  * **Gemma Tokenizer Usage (`gemma_tokenizer_usage.md`)**: Optional/historical Gemma adapter details; the active Generation composition root loads the local Qwen tokenizer through `QwenTokenizer`.
+  * **LLM / Generation API (`llm_generation_api.md`)**: Both Generation endpoint pipelines, section/context budgets, provider/DI patterns, exact output contracts, and verified gaps.
+  * **Generation Test Summary (`llm_generation_test_summary.md`)**: Dated controlled tests, working-tree marker mismatch, and the limits of historical live vLLM evidence.
+  * **Implementation Steps (`docs/next_steps.md`)**: Remaining Generation validation, full context accounting, supplied-regulation support, and operational gaps.
+
 
 ---
 
@@ -119,7 +126,7 @@ docs/
 ### 10. `docs/technology-stacks.md` (Current & Target Stack)
 * **Purpose**: Single reference of verified dependencies and planned technologies, with gaps flagged.
 * **What is stored here**:
-  * The de-facto library set from `requirements.txt` plus imported-but-missing packages (`openai`, `dependency-injector`) and target components (Qdrant, ARQ, MSSQL/Excel extractors).
+  * The declared library set from `requirements.txt` (including `openai` and `dependency-injector`), current adapter status, and remaining deployment gaps.
 
 ---
 

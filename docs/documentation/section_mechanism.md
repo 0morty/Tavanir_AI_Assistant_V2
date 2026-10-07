@@ -34,13 +34,14 @@ The contract itself is declared on the pure port `IPromptSection` (`src/applicat
 
 | Member | Role |
 |---|---|
-| `section_type` (abstract property) | String identity, e.g. `"HISTORY"`, `"CHUNKS"`, `"REGULATION"`. Cannot be empty and is normalized to uppercase |
+| `section_type` (abstract property) | String identity, e.g. `"HISTORY"`, `"CHUNKS"`, `"REGULATION"`. `PromptBuilder` rejects a blank registry name and normalizes names with `strip().upper()` |
 | `body()` (abstract method) | The section's main content |
 | `importance` (base-owned property) | Intrinsic semantic importance in `[0.0, 1.0]`, used as a weight when redistributing unused token capacity. **Not** a token percentage |
 | `demand` (base-owned property) | Relative context-capacity demand in `[0.0, 1.0]`, used to calculate the section's initial proportional token capacity |
 | `overflow_strategies` (base-owned property) | The section's `OverflowStrategyStack`: ordered overflow strategies (lower index = higher priority) plus the restart policy. The base ships the **default interpretation** of the policy through the `CompressibleSection` operations; subclasses inherit them or override them |
-| `truncate` / `summarize` / `ignore` (from `CompressibleSection`) | The section's overflow operations. `PromptSection` ships plain-text defaults (`truncate` applies the universal `TruncateStrategy`, `summarize` delegates to an injected `Summarizer`, `ignore` is not applicable to a single plain text). `ReferencedCollectionSection` overrides them for a collection: `truncate`/`summarize` apply the universal algorithms to the joined (reference-enriched) text, `IGNORE` keeps items in order while they fit |
+| `truncate` / `summarize` / `ignore` (from `CompressibleSection`) | The section's overflow operations. `PromptSection` ships single-text defaults (`truncate` applies `TruncateStrategy`, `summarize` delegates to an injected `Summarizer`, `ignore` returns `None`). `ReferencedCollectionSection` overrides them: `truncate` is a no-op, `summarize` processes prepared items individually when a summarizer is present, and `ignore` retains a fitting prefix of whole items |
 | `render()` (base default) | Joins `pre_context`, `body()`, and `post_context` (skipping empty parts) into a single string |
+| `prepare()` (base default) | Wraps the complete rendered input in `SectionProcessingResult` for `ContextBuilder`; collection sections add aligned items and citation metadata |
 | `default_importance` (base-constructor parameter, default `0.5`) | Default importance used when no explicit `importance` is passed; each subclass passes its own via `super().__init__(..., default_importance=...)` |
 | `default_demand` (base-constructor parameter, default `0.5`) | Default demand used when no explicit `demand` is passed; each subclass passes its own via `super().__init__(..., default_demand=...)` |
 | `default_overflow_strategies` (base-constructor parameter) | Default overflow stack used when no explicit `overflow_strategies` is passed; falls back to `OverflowStrategyStack()` (`(TRUNCATE, IGNORE)`, no restart) |
@@ -48,11 +49,11 @@ The contract itself is declared on the pure port `IPromptSection` (`src/applicat
 
 Neither `importance` nor `demand` is a token percentage, neither needs to sum to `1.0` across sections, and `PromptSection` never normalizes them or allocates capacity itself.
 
-On a **collection section** (`ReferencedCollectionSection`), the held collection is exposed as `items` and its entries are joined with `item_separator` — independent of the framing `separator` used by `render()`.
+On a **collection section** (`ReferencedCollectionSection`), the held collection is exposed as `items` and its entries are joined with `item_separator` — independent of the framing `separator` used by `render()`. The collection's `prepare()` preserves per-item bodies, inputs, and citation IDs so overflow can drop or summarize whole items without losing their alignment.
 
 ## Adding a new section
 
-1. Create an `PromptSection` subclass in `src/application/context/sections/` (the port contract lives in `src/application/interfaces/i_prompt_section.py`; the `PromptSection` skeleton that implements it lives in `src/application/context/sections/prompt_section.py`).
+1. Create a `PromptSection` subclass in `src/application/context/sections/` (the port contract lives in `src/application/interfaces/i_prompt_section.py`; the `PromptSection` skeleton that implements it lives in `src/application/context/sections/prompt_section.py`).
 2. Give it a stable `section_type` and a `body()`.
 3. Choose a default importance and a default demand, each in `[0.0, 1.0]`, and pass them to the base constructor (both default to `0.5` when omitted). Configure `overflow_strategies` only when the section needs a non-default overflow stack.
 4. Export it from `src/application/context/sections/__init__.py` (and `src/application/context/__init__.py` if it should be part of the public `context` API).
@@ -122,7 +123,7 @@ builder.set_section("REGULATION", RegulationSection("Law 137 ..."))
    OutputFormat
 ```
 
-Custom sections live in the same package as the canonicals and are plain subclasses. Adding one never touches `PromptBuilder`, a central enum, or any framework code.
+Custom sections live in the same package as the canonicals and are plain subclasses. Adding one never touches `PromptBuilder`, a central enum, or any framework code. At runtime, `ContextBuilder.build(builder, max_tokens)` calls each section's `prepare()`, allocates capacity, and fits overflowed sections before asking `PromptBuilder.assemble()` to join the fitted content. Calling `PromptBuilder.render()` alone renders the full sections without this budgeting step.
 
 ## Related documents
 

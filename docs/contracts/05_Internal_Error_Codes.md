@@ -38,7 +38,7 @@ Whenever a new capability is added or a new error scenario is defined:
 | `API_KEY_MISSING` | 401 | — | the `X-API-Key` header was not sent |
 | `API_KEY_INVALID` | 401 | — | the API key value is invalid |
 | `FORBIDDEN` | 403 | — | no access permission for this operation |
-| `VALIDATION_ERROR` | 422 | — | general input validation error |
+| `VALIDATION_ERROR` | 422 | Pydantic validation; `IdeaInputValidationError`, `IdeaInputTooLongError` | general input validation; idea errors include blank/non-string descriptions and more than 512 model tokens, pointer `/data/description` |
 | `MISSING_REQUIRED_FIELD` | 422 | — | a required field was not provided |
 | `PAYLOAD_MISMATCH` | 400 | — | array item counts do not match (e.g. suggestionIds ≠ items) |
 | `INVALID_SUGGESTION_STATUS` | 422 | `InvalidSuggestionStatusError` | status string/id is not a known `SuggestionStatus` |
@@ -56,12 +56,13 @@ Whenever a new capability is added or a new error scenario is defined:
 | `LLM_CONNECTION_FAILED` | 503 | `LLMConnectionError` | network/timeout communicating with the LLM provider |
 | `LLM_API_ERROR` | 502 | `LLMAPIError` | the LLM provider returned an API error |
 | `LLM_AUTH_FAILED` | 401 | `LLMAuthenticationError` | LLM provider authentication failed |
+| `LLM_SUMMARIZATION_FAILED` | 502 | `ChunkSummarizationError` | Generation chunk summarization failed |
 | `PROMPT_BUDGET_EXCEEDED` | 422 | `PromptBudgetExceededError` | fixed prompt sections (system instruction, user query, output format) exceed token budget |
 | `INSUFFICIENT_EVIDENCE_BUDGET` | 422 | `InsufficientEvidenceBudgetError` | remaining token capacity cannot fit even the highest-ranked similar suggestion |
 | `INVALID_SUGGESTION_CONTENT` | 422 | `InvalidSuggestionContentError` | suggestion title, problem, or solution is empty or non-substantive |
 | `DUPLICATE_EVIDENCE_ID` | 422 | `DuplicateEvidenceIdError` | duplicate similar suggestion ID detected in generation input |
 | `RETRIEVAL_FAILED` | 500 | — | vector retrieval from Qdrant failed **[planned]** |
-| `GENERATION_FAILED` | 500 | — | answer generation by the model failed |
+| `GENERATION_FAILED` | 500 | `LLMOutputParseError`, `LLMOutputSchemaError`, `LLMInvalidCitationError`, `LLMUnknownCitationError` | malformed model output or invalid/unretained citation |
 | `MSSQL_EXTRACTION_FAILED` | 500 | — | error extracting suggestions from legacy MSSQL **[planned]** |
 | `STATUTE_PARSE_FAILED` | 422 | — | error parsing an Excel statute file **[planned]** |
 | `TEXT_NORMALIZATION_FAILED` | 422 | `TextNormalizationError` | Persian text cleaning or normalization failed |
@@ -69,6 +70,8 @@ Whenever a new capability is added or a new error scenario is defined:
 | `RATE_LIMITED` | 429 | — | too many requests |
 | `INTERNAL_ERROR` | 500 | `ApplicationError` | unexpected internal service error |
 | `NOT_IMPLEMENTED` | 501 | — | this capability is not yet implemented |
+
+**Generation implementation note:** `src/presentation/exception_handlers.py` explicitly registers output parse/schema and invalid/unknown citation errors as HTTP 500 `GENERATION_FAILED`; they no longer fall through to `LLM_CONFIGURATION_ERROR`. Analyze invokes final Generation with usable prepared evidence; expansion invokes it for an accepted idea. Idea validation/length errors use the existing HTTP 422 `VALIDATION_ERROR` with `/data/description`. The existing default budget pointer `/data/maxPromptTokens` can describe a server-configured limit even though expansion has no request field with that name. See the [Generation guide](../documentation/llm_generation_api.md) and [test evidence](../documentation/llm_generation_test_summary.md).
 
 ---
 

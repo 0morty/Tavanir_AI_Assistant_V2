@@ -1,7 +1,7 @@
 # Suggestion Analysis Pipeline: Tri-Track Hybrid Retrieval, Cross-Encoder Reranking & Hydration
 
 - **Document Version:** 2.0.0
-- **Status:** Approved Architectural Specification
+- **Status:** Existing retrieval reference; Generation handoff now invokes the injected generator with usable prepared evidence. Retrieval sections are unchanged in this Generation-only update.
 - **Component:** Core Retrieval-Augmented Generation (RAG) Subsystem / Suggestion Analysis
 - **Service:** Tavanir AI Assistant V2 (`tavanir-ai-assistant-v2`)
 - **System of Record:** PostgreSQL (`suggestions` table)
@@ -14,7 +14,7 @@
 
 ## 1. Executive Summary & Problem Space
 
-The **Suggestion Analysis Workflow** is the central information retrieval and precedent evaluation pipeline in the Tavanir AI Assistant. When an employee or committee submits a technical suggestion, this subsystem searches the historical corporate database to satisfy two vital business objectives:
+The **Suggestion Analysis Workflow** is the current information retrieval, precedent evaluation, and prompt-preparation pipeline in the Tavanir AI Assistant. After prepared evidence exists, the production route delegates to final Generation and returns its parsed answer; its existing no-evidence branch returns diagnostics. See the [Generation API test summary](../documentation/llm_generation_test_summary.md) for the separate lower-level vLLM validation. When an employee or committee submits a technical suggestion, this subsystem searches the historical corporate database to satisfy two vital business objectives:
 
 1. **Semantic Similarity & Duplicate Suggestion Detection:** Identifying prior suggestions that addressed the same operational problem or proposed the exact same engineering, software, or organizational fix to prevent double-spending and redundant committee deliberations.
 2. **Precedent & Evaluation Mining:** Surfacing historical committee reviews, rejections, legal obstacles, and budget objections for similar suggestions to supply decision-support context to evaluators and downstream generation models.
@@ -125,10 +125,10 @@ Incoming Request: POST /api/v1/suggestions/analyze
                                   │
                                   ▼
  ┌─────────────────────────────────────────────────────────────────────────────────────────┐
- │ Stage 8: Response Assembly & Deferred Generation Placeholders                           │
- │ - applied_statute_ids = [] (Statute retrieval placeholder)                              │
- │ - analysis = "## تحلیل اولیه و سوابق مشابه بازیابی‌شده\n..." (LLM handoff placeholder) │
- │ - Return AnalyzeSuggestionResponse                                                      │
+ │ Stage 8: Generation & Response Assembly                                                 │
+ │ - Injected generator → sections/context → chat LLM → retained-citation parser            │
+ │ - analysis = generation_result.answer; applied_statute_ids = []                          │
+ │ - Return parsed answer, cited IDs, uncertainty, and coverage metadata                   │
  └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -410,37 +410,36 @@ for status, candidate_list in partition_map.items():
 
 ---
 
-### Stage 8: Structured Response Assembly & Generation Placeholders
+### Stage 8: Generation & Response Assembly
 
-The final stage maps the validated, ordered IDs into the application contract DTO [`AnalyzeSuggestionResponse`](file:///d:/Jco_Projects/tavanir-ai-assistant-v2/src/application/dtos.py#L10-L25):
+After already-prepared evidence is available, `AnalyzeSuggestionUseCase` builds `GenerationInput` and awaits its injected `IGenerateSuggestionUseCase`. The container supplies `GenerateSuggestionUseCase`, which runs `SuggestionPromptPreparer.prepare_with_citations → PromptBuilder/ContextBuilder → LLMRequestBuilder → ILLMClient.complete_chat → GenerationOutputParser` under the configured prompt budget.
+
+The parser resolves model-selected short IDs only against the retained fitted citation map, returning the original cited objects. The use case maps the answer and uncertainty into the response, deduplicates cited original suggestion IDs in first-seen order, and restricts them to the active pool. Existing candidate lists remain separate from model-selected citations.
 
 ```python
 return AnalyzeSuggestionResponse(
-    analysis=(
-        "## تحلیل اولیه و سوابق مشابه بازیابی‌شده\n\n"
-        "فرآیند بازیابی سه‌مسیره (Tri-Track) و بازرتبه‌بندی متقاطع با موفقیت انجام شد. "
-        "سوابق پیشنهادات مرتبط بر اساس بالاترین میزان تطابق ساختاری در بخش‌های پنج‌گانه گروه‌بندی شدند."
-    ),
+    analysis=generation_result.answer,
     similar_executed_ids=similar_executed_ids,
     similar_approved_ids=similar_approved_ids,
     similar_pending_ids=similar_pending_ids,
     similar_rejected_ids=similar_rejected_ids,
     similar_not_accepted_ids=similar_not_accepted_ids,
-    applied_statute_ids=[],  # Statute retrieval placeholder
+    applied_statute_ids=[],
+    uncertainty=generation_result.uncertainty,
+    cited_suggestion_ids=cited_ids,
+    is_fallback_mode=is_fallback_mode,
+    grounding_ratio=grounding_ratio,
 )
 ```
 
-- **Statutes Placeholder:** `applied_statute_ids` is returned as an empty list (`[]`) until the regulatory retrieval service is implemented.
-- **Generation Handoff:** The `analysis` field provides diagnostic handoff text confirming successful retrieval. In the subsequent LLM integration phase, the hydrated master suggestions and `PooledSuggestionCandidate` records will be formatted into Jinja2 prompt templates and dispatched to vLLM.
-
----
+`grounding_ratio` is unique cited active suggestions divided by all active suggestions, rounded to two decimals and bounded to [0, 1]; it is a coverage proxy, not calibrated model confidence. The existing no-hits/no-active-evidence guard still returns diagnostic analysis and uncertainty, empty lists, and grounding zero without Generation. Regulation rendering/citations remain missing. See the [Generation guide](../documentation/llm_generation_api.md) for the implemented downstream contract; retrieval behavior above is unchanged.
 
 ## 4. Failure Modes & Resilience Matrix
 
 | Failure Mode                     | Trigger / Cause                                                                  | System Behavior & Mitigation                                                                                                                 |
 | :------------------------------- | :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Invalid Input Data**           | Title, problem, or solution $< 5$ chars or contains noise strings (`"ندارد"`).   | Halts at Stage 1. Raises `InvalidSuggestionContentError`; returns HTTP 422 with pointer `/data/{field}`.                                     |
-| **Zero Qdrant Hits**             | Novel vocabulary or cold database.                                               | All 5 queries return `[]`. Pipeline short-circuits gracefully: skips reranker and SQL query; returns empty ID lists in HTTP 200.             |
+| **Zero Qdrant Hits**             | Novel vocabulary or cold database.                                               | All 5 queries return `[]`. Pipeline short-circuits: skips reranker, SQL hydration, prompt preparation, and LLM invocation; returns an empty result in HTTP 200.             |
 | **Qdrant Outage / Network Drop** | Qdrant gRPC/HTTP unreachable.                                                    | Fails fast. Raises `VectorSearchError`; caught by presentation exception handler; returns HTTP 503 Service Unavailable.                      |
 | **Reranker Overload (HTTP 429)** | High concurrent evaluation volume.                                               | Caught by `TEIReranker` retry policy with exponential jitter. If exhausted, activates degraded fallback mode.                                |
 | **Reranker 5xx / Timeout**       | TEI container crash, CUDA OOM, or $>3$s read timeout.                            | Activates Degraded Fallback Mode: falls back to Qdrant RRF scores (`is_fallback_mode = True`), logs warning, and completes pipeline.         |
@@ -509,34 +508,8 @@ All runtime limits and thresholds are defined in `src.infrastructure.configs.set
 
 ---
 
-## 7. Verification & Testing Specifications
+## 7. Verification Boundary
 
-The pipeline is validated by an automated test suite across three test files:
+The source tests under `tests/unit/application/services/test_max_passage_pooler.py` and `tests/unit/application/use_cases/test_analyze_suggestion_use_case.py` cover pooling and use-case orchestration with test doubles. `tests/integration/presentation/test_suggestion_analysis_api.py` checks the HTTP contract with the use case overridden. These tests do not prove an API-originated vLLM request.
 
-### 1. `tests/unit/application/services/test_max_passage_pooler.py` (Pure Function, 0 Mocks)
-
-- **`test_maxp_picks_highest_scoring_chunk`:** Asserts multiple chunks for the same suggestion resolve to the single highest score and winning chunk metadata.
-- **`test_tied_scores_deterministic_selection`:** Asserts deterministic selection when multiple chunks share identical scores.
-- **`test_threshold_drops_negative_logits`:** Asserts candidates with score $< 0.0$ are excluded when `is_fallback_mode = False`.
-- **`test_fallback_mode_bypasses_threshold`:** Asserts low positive RRF scores (e.g. $0.02$) are preserved when `is_fallback_mode = True`.
-- **`test_threshold_none_preserves_negative_scores`:** Asserts negative scores pass when `min_score_threshold = None`.
-- **`test_partitioning_and_top_n_clamping`:** Asserts partitions are clamped to `top_n_per_status` and sorted descending.
-- **`test_all_candidates_below_threshold`:** Returns dictionary with empty lists for all 5 statuses without throwing exceptions.
-
-### 2. `tests/unit/application/use_cases/test_analyze_suggestion_use_case.py` (Orchestration)
-
-- **`test_execute_success_full_flow`:** End-to-end execution verifying 5 concurrent Qdrant queries, deduplication, reranking, pooling, and hydration.
-- **`test_tri_track_retrieval_query_composition`:** Verifies exact arguments passed to `search_suggestions` across all 3 tracks.
-- **`test_zero_vector_hits_short_circuits`:** Verifies reranker and SQL queries are skipped if all vector queries return empty.
-- **`test_pending_protection_scenario`:** Simulates Track 1 saturated with `REJECTED`; verifies Track 3 surfaces an active `PENDING` suggestion.
-- **`test_reranker_transient_failure_triggers_fallback`:** Simulates `RerankerConnectionError`; asserts graceful switch to RRF fallback.
-- **`test_hydration_order_preservation`:** Injects scrambled SQL query rows; verifies output IDs strictly follow reranked score order.
-- **`test_hydration_filters_soft_deleted`:** Verifies soft-deleted suggestions in SQL are omitted from output lists.
-
-### 3. `tests/unit/presentation/test_suggestion_analysis_endpoint.py` (HTTP & API Contract)
-
-- **`test_post_analyze_suggestion_success`:** Verifies HTTP 200, JSON:API response envelope, and camelCase attributes (`similarExecutedIds`, etc.).
-- **`test_wire_field_current_problem_accepted`:** Verifies incoming `currentProblem` binds to internal `problem`.
-- **`test_post_analyze_validation_errors`:** Verifies HTTP 422 on short fields ($< 5$ chars) or noise strings (`"ندارد"`).
-- **`test_post_analyze_extra_fields_forbidden`:** Verifies HTTP 422 when unrecognized extra properties are passed.
-- **`test_post_analyze_missing_or_invalid_api_key`:** Verifies HTTP 401 Unauthorized when security headers are missing.
+`tests/integration/context_builder_vllm/` exercises the lower-level prompt/context/request/client chain, including a real local vLLM completion, but bypasses the production analysis route and output parser. The [Generation API test summary](../documentation/llm_generation_test_summary.md) records what passed, failed, or remains blocked. The expansion HTTP tests separately exercise `API → real Generation use case/context → mocked provider → parser → response`, without production lifespan. Analyze unit tests verify its generator handoff; its presentation tests still override the use case. Live endpoint-to-provider validation remains open for both routes; see the current working-tree expansion marker caveat in the Generation guide.

@@ -3,7 +3,7 @@
 # راهنمای جامع اتصال و یکپارچه‌سازی وب‌سرویس‌های دستیار هوشمند توانیر (نسخه ۲)
 ## ویژه توسعه‌دهندگان سامانه نظام پیشنهادات (API Integration Guide)
 
-> **وضعیت سند:** نهایی و مصوب (Approved)  
+> **Generation status:** Analyze returns parsed model analysis with usable evidence; expansion returns five parsed fields. See the [Generation guide](../documentation/llm_generation_api.md) for the current expansion marker mismatch and verification limits.
 > **مخاطب:** تیم فنی و توسعه‌دهندگان سامانه نظام پیشنهادات  
 > **پروتکل ارتباطی:** RESTful HTTP API / JSON:API  
 > **نسخه وب‌سرویس:** `2.0.0`  
@@ -35,7 +35,7 @@
 
 - **کشف سوابق و پیشنهادات مشابه:** جستجوی معنایی و هیبریدی در کل سوابق پیشنهادات ادوار گذشته صنعت برق بر اساس محتوای مسئله و راهکار.
 - **تطبیق با اسناد بالادستی و مصوبات:** ارزیابی پیشنهاد ارائه‌شده در برابر قوانین، آیین‌نامه‌ها و بخشنامه‌های معتبر توانیر *(این بخش در حال حاضر در دست توسعه است و تحلیل جاری صرفاً بر اساس پیشنهادات مشابه صورت می‌گیرد)*.
-- **تولید گزارش تحلیلی هوشمند:** ایجاد پیش‌نویس توصیه کارشناسی جهت تصمیم‌یاری به دبیرخانه و کمیته‌های ارزیابی.
+- **Generated decision support:** Analyze maps validated model output to `analysis`, with cited IDs and uncertainty. Expansion turns a short idea into five parsed fields. These results require human review.
 - **مدیریت پایگاه دانش برداری:** همگام‌سازی لحظه‌ای بردارها و سوابق پیشنهادات هم‌زمان با چرخه تغییر وضعیت در سامانه نظام پیشنهادات.
 
 ---
@@ -115,7 +115,7 @@ https://<HOST>:<PORT>/api/v1
 
 ### ۴.۱. تحلیل پیشنهادات جدید (`POST /suggestions/analyze`)
 
-این اندپوینت پیشنهاد ثبت‌شده یا در دست بررسی را دریافت کرده و با اجرای جستجوی شباهت معنایی و استخراج پیشنهادات مشابه در ادوار گذشته، استنتاج مدل زبانی را جهت تولید گزارش ارزیابی انجام می‌دهد.
+After usable evidence has been prepared by the existing upstream flow, this endpoint invokes the injected generator, fits sections through ContextBuilder, calls the shared LLM, and validates its answer/citations/uncertainty. The existing no-evidence branch returns diagnostics without a model call.
 
 > **توجه:** بخش تطبیق با اسناد بالادستی و قوانین در حال حاضر در دست توسعه است و تحلیل فعلی صرفاً بر اساس پیشنهادات مشابه موجود در سوابق انجام می‌پذیرد.
 
@@ -152,13 +152,17 @@ curl -X POST "https://ai-assistant.tavanir.org.ir/api/v1/suggestions/analyze" \
 #### مشخصات بدنه پاسخ (Response Body - 200 OK):
 | فیلد | نوع داده | شرح فیلد |
 | :--- | :---: | :--- |
-| `analysis` | string (Markdown) | متن گزارش تحلیلی مدل هوش مصنوعی شامل ارزیابی فنی، بررسی نقاط قوت، سوابق و توصیه کارشناسی |
+| `analysis` | string | Parsed model answer on the normal path; diagnostic text when no usable evidence exists. |
 | `similarExecutedIds` | string[] | آرایه شناسه‌های پیشنهادات مشابهی که در سازمان قبلاً اجرا شده‌اند |
 | `similarApprovedIds` | string[] | آرایه شناسه‌های پیشنهادات مشابهی که مصوب شده و در نوبت اجرا هستند |
 | `similarPendingIds` | string[] | آرایه شناسه‌های پیشنهادات مشابهی که هم‌اکنون در حال پیاده‌سازی هستند |
 | `similarRejectedIds` | string[] | آرایه شناسه‌های پیشنهادات مشابهی که قبلاً در کمیته رد شده‌اند |
 | `similarNotAcceptedIds` | string[] | آرایه شناسه‌های پیشنهادات مشابهی که در بررسی اولیه عدم پذیرش خورده‌اند |
 | `appliedStatuteIds` | string[] | آرایه شناسه‌های قوانین مورد ارجاع (در فاز فعلی رزرو و مربوط به توسعه آتی است) |
+| `citedSuggestionIds` | string[] | Unique original IDs actually cited by the model; separate from the candidate lists. |
+| `uncertainty` | string or null | Parsed model uncertainty or the explicit no-evidence explanation. |
+| `isFallbackMode` | boolean | Existing upstream fallback flag; not a model fallback indicator. |
+| `groundingRatio` | number | Citation coverage of active candidates, rounded to two decimals; not calibrated confidence. |
 
 #### نمونه پاسخ:
 <div dir="ltr" style="text-align: left;">
@@ -167,13 +171,17 @@ curl -X POST "https://ai-assistant.tavanir.org.ir/api/v1/suggestions/analyze" \
 {
   "status": 200,
   "data": {
-    "analysis": "### ارزیابی کارشناسی و انطباق با سوابق\n\nپیشنهاد حاضر از نظر هدف کلی با سوابق پیشین در حوزه خنک‌کاری پست‌ها هم‌پوشانی دارد...",
+    "analysis": "Illustrative generated analysis: assess sensor reliability and installation costs before deployment.",
     "similarExecutedIds": ["sug-1042", "sug-879"],
     "similarApprovedIds": [],
     "similarPendingIds": ["sug-2210"],
     "similarRejectedIds": ["sug-451"],
     "similarNotAcceptedIds": [],
-    "appliedStatuteIds": []
+    "appliedStatuteIds": [],
+    "citedSuggestionIds": ["sug-1042"],
+    "uncertainty": "Installation costs have not been established.",
+    "isFallbackMode": false,
+    "groundingRatio": 0.25
   }
 }
 ```
@@ -349,7 +357,21 @@ curl -X PATCH "https://ai-assistant.tavanir.org.ir/api/v1/suggestions/sug-4892" 
 بررسی در دسترس بودن سرویس بدون نیاز به کلید دسترسی (عمومی).
 - **مسیر:** `/health`
 - **متد:** `GET`
-- **پاسخ:** `{"status": 200, "data": {"status": "ok"}}`
+- **پاسخ فعلی:** `{"status": "ok", "service": "tavanir-ai-assistant-v2", "mockMode": false}` (پاسخ مستقیم بررسی زنده‌بودن، بدون پوشش `data`)
+
+---
+
+### 4.8. Expand Suggestion (`POST /suggestions/expand-suggestion`)
+
+Send one flat JSON object to `/api/v1/suggestions/expand-suggestion` with the existing `X-API-Key` and optional `X-Request-Id` headers:
+
+```json
+{"description": "Use temperature sensors to control cooling fans."}
+```
+
+`description` must be a nonblank strict string of at most 512 **model tokens**, not characters. Extra fields are rejected. Success is HTTP 200 with `{"status": 200, "data": {...}}`; `data` contains `title`, `currentProblem`, `solution`, `advantage`, and `disadvantage`. The server parses the LLM's marked plain text; clients receive JSON fields and should not split the HTTP response on `***`.
+
+Invalid/over-limit descriptions return 422 `VALIDATION_ERROR`, missing input returns 422 `MISSING_REQUIRED_FIELD`, insufficient essential-section budget returns 422 `PROMPT_BUDGET_EXCEEDED`, malformed completions return 500 `GENERATION_FAILED`, and provider failures use the existing LLM codes. The current working-tree prompt uses translated labels while the parser requires English labels; consult the [Generation guide](../documentation/llm_generation_api.md) before live integration. This section documents the implemented contract and its open issue, not a verified live-model success.
 
 ---
 
@@ -363,9 +385,8 @@ curl -X PATCH "https://ai-assistant.tavanir.org.ir/api/v1/suggestions/sug-4892" 
 1. با دریافت این شناسه‌ها، رکوردهای متناظر را مستقیماً از دیتابیس بومی خود واکشی (Query) کند.
 2. مشخصات کامل پیشنهاد نظیر نام پیشنهاددهنده، تاریخچه تصمیمات، واحد سازمانی و کد پیگیری را در قالب کاردها یا جدول سوابق مرتبط به ارزیاب یا کاربر نمایش دهد.
 
-### ۵.۲. نمایش و رندرینگ متن تحلیل کارشناسی (`analysis`)
-متن تحلیلی بازگردانده‌شده در فیلد `analysis` با فرمت استاندارد **Markdown** تدوین شده است و شامل تیتربندی‌ها (`###`)، نشانه‌گذاری‌ها، لیست‌های نقطه‌ای و عبارات تأکیدی است.  
-توصیه می‌شود در رابط کاربری (UI) سامانه از یک مؤلفه رندرکننده مارک‌داون استاندارد (Markdown Parser Component) استفاده شود تا متن به صورت راست‌چین (RTL) و با جلوه بصری زیبا برای کاربران نمایش داده شود.
+### ۵.۲. تفسیر فیلد `analysis` در وضعیت فعلی
+On the normal path, `analysis` is the model's validated decision-support answer. The existing no-usable-evidence branch returns diagnostic text instead and does not call the model. Display `uncertainty` with the answer, distinguish `citedSuggestionIds` from candidate IDs, and treat `groundingRatio` as coverage rather than confidence. Human review remains required. See the [Generation guide](../documentation/llm_generation_api.md), [test summary](../documentation/llm_generation_test_summary.md), and [remaining work](../next_steps.md).
 
 ---
 
@@ -402,7 +423,7 @@ curl -X PATCH "https://ai-assistant.tavanir.org.ir/api/v1/suggestions/sug-4892" 
 | `SUGGESTION_NOT_FOUND` | 404 | شناسه در پایگاه داده یافت نشد | بررسی صحت شناسه پیش از فراخوانی ویرایش یا حذف |
 | `SUGGESTION_ALREADY_INGESTED` | 409 | شناسه تکراری است و قبلاً ایندکس شده | استفاده از متد ویرایش (`PUT`) به جای اینجست |
 | `PROMPT_BUDGET_EXCEEDED` | 422 | طول متن از سقف مجاز توکن‌ها فراتر است | ترغیب کاربر به خلاصه‌سازی متن ورودی |
-| `LLM_CONNECTION_FAILED` | 503 | ارتباط با سرور مدل زبانی برقرار نشد | نمایش پیام قطعی موقت سرویس و امکان بررسی مجدد |
+| `LLM_CONNECTION_FAILED` | 503 | Generation provider connection or timeout failure | Apply the caller's bounded retry policy and retain `X-Request-Id` for diagnostics. |
 | `RATE_LIMITED` | 429 | تعداد درخواست‌های هم‌زمان بیش از سقف مجاز | کاهش نرخ فراخوانی‌ها و ایجاد صف میانی |
 | `INTERNAL_ERROR` | 500 | خطای غیرمنتظره داخلی سرور | ثبت خطا در لاگ همراه با `X-Request-Id` |
 
@@ -415,7 +436,7 @@ curl -X PATCH "https://ai-assistant.tavanir.org.ir/api/v1/suggestions/sug-4892" 
 - [ ] اطمینان از نام‌گذاری کلیه فیلدهای ارسالی در قالب `camelCase`.
 - [ ] اعمال جدول نگاشت وضعیت‌های بومی به مقادیر استاندارد `SuggestionStatus`.
 - [ ] پیاده‌سازی منطق واکشی اطلاعات بر اساس شناسه‌های خروجی متد تحلیل (`similarExecutedIds` و ...).
-- [ ] به‌کارگیری رندرکننده مارک‌داون در رابط کاربری جهت نمایش گزارش کارشناسی (`analysis`).
+- [ ] Display generated analysis as decision support with uncertainty and human review; handle the existing no-evidence diagnostic response explicitly.
 - [ ] ارسال هدر `X-Request-Id` در تمامی درخواست‌ها جهت تسهیل خطایابی مشترک.
 - [ ] پشتیبانی از هندلینگ وضعیت `207 Multi-Status` در متد حذف دسته‌ای.
 

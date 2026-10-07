@@ -1,6 +1,12 @@
-# Gemma Tokenizer Usage in the RAG ContextBuilder (Internal Engineering Reference)
+# Gemma Tokenizer Adapter (Optional Engineering Reference)
 
-**Status:** Reference material (no code changes)
+**Runtime status:** `GemmaTokenizer` exists as an optional adapter, but the current
+composition root does **not** register it. `src/containers.py` loads a local fast
+tokenizer from `GenerationSettings.TOKENIZER_MODEL` and injects `QwenTokenizer`
+into `ContextBuilder`. The default generation model and tokenizer settings are
+Qwen 2.5 7B; a deployment must provide matching local tokenizer assets and
+provider model configuration. The Gemma example below does not describe the
+active request path.
 
 **Sources used (official only):**
 
@@ -17,28 +23,30 @@
 
 ---
 
-## 0. Scope note: "Gemma 4"
+## 0. Scope
 
-The two official sources above do **not** document a "Gemma 4" model or a "Gemma 4 Tokenizer":
-
-- The docs page `model_doc/gemma` documents the original Gemma family (2B/7B checkpoints, e.g. `google/gemma-2b`) `[D]`.
-- The tokenizer source lives at `src/transformers/models/gemma/tokenization_gemma.py` and defines the `GemmaTokenizer` used by the Gemma family `[S]`.
-
-This document therefore describes the **Gemma tokenizer as officially documented**. If a future Gemma-family checkpoint ships with a tokenizer, the same integration points (fast BPE/byte-fallback backend, offset mapping) are expected to hold, but that expectation is **not** asserted from these sources.
+The Gemma details below describe the cited Hugging Face documentation and
+source snapshot, plus this repository's optional adapter. They do not establish
+behavior for every Gemma checkpoint or the active Qwen serving path. For the
+active path, inspect `src/containers.py` and
+`src/infrastructure/services/tokenizers/qwen_tokenizer.py`.
 
 ---
 
-## 1. `GemmaTokenizer` architecture and why to use it
+## 1. Referenced `GemmaTokenizer` architecture
 
 ### 1.1 It *is* the fast tokenizer
 
-In current transformers, `GemmaTokenizer` is the **fast** tokenizer:
+In the cited Transformers v5 source, `GemmaTokenizer` is the **fast** tokenizer:
 
 - The class docstring states: "Construct a **fast** Gemma tokenizer (backed by HuggingFace's tokenizers library)." `[D]`
 - In source it is `class GemmaTokenizer(TokenizersBackend)` — the `TokenizersBackend` base class wraps the Rust `tokenizers` library. `[S]`
 - `VOCAB_FILES_NAMES = {"tokenizer_file": "tokenizer.json"}` — the tokenizer is loaded from a serialized `tokenizer.json` produced by the Rust library. `[S]`
 
-There is **no separate `GemmaTokenizerFast`** class in the current API; the fast backend is what `GemmaTokenizer` is. (Older transformers releases exposed a distinct `GemmaTokenizerFast`; the v5 API folds that into `GemmaTokenizer`.)
+The cited v5 API uses this fast backend directly; other Transformers versions
+may expose a separate `GemmaTokenizerFast` class. This repository's adapter
+requires an injected `PreTrainedTokenizerFast` instance, not a particular
+Gemma class name.
 
 ### 1.2 The tokenization pipeline (from source)
 
@@ -70,7 +78,8 @@ Key documented/source facts:
 
 ## 2. Correct initialization with `from_pretrained`
 
-Use the tokenizer-loading API exactly as the official docs show — it is a **model-loading step** and must resolve `tokenizer.json` from the checkpoint: `[D]`
+The following is a Hugging Face loading example for this optional adapter,
+**not** the application's startup configuration: `[D]`
 
 ```python
 from transformers import AutoTokenizer
@@ -89,13 +98,13 @@ Required when loading: the `transformers` package installed with the Rust tokeni
 This is an **architecture decision** of our codebase (`[A]`), not a HF-documented requirement:
 
 ```
-Application Tokenizer Interface (src/domain/context/tokenizer.py)
+Domain Tokenizer abstraction (src/domain/context/tokenizer.py)
         │
         v
-GemmaTokenizer Adapter (src/infrastructure/services/tokenizers/gemma_tokenizer.py)
+Optional GemmaTokenizer adapter (src/infrastructure/services/tokenizers/gemma_tokenizer.py)
         │
         v
-GemmaTokenizerFast / GemmaTokenizer (Hugging Face, created externally)
+Injected Hugging Face fast tokenizer
 ```
 
 - The adapter's constructor receives an **already-created** HF tokenizer instance and stores it as a private attribute.
@@ -103,7 +112,10 @@ GemmaTokenizerFast / GemmaTokenizer (Hugging Face, created externally)
 
 Rationale (engineering, not HF-documented):
 
-1. **Single instance / connection reuse** — loading is done once at composition root and injected everywhere, instead of per-call.
+1. **Reusable instance** — if this adapter were composed, tokenizer loading
+   should happen in the composition root and the instance should be injected,
+   rather than loaded per call. The current composition root follows that
+   pattern with `QwenTokenizer`.
 2. **Startup isolation** — importing the adapter module must not trigger network I/O or model downloads.
 3. **Testability** — a fake/stand-in tokenizer can be injected in unit tests without `transformers` installed.
 4. **Layer separation** — the domain abstraction stays pure stdlib; the concrete adapter stays a thin translation layer.
@@ -142,9 +154,16 @@ The tokenizer has two configuration flags: `[D]`
 
 ### 4.3 Counting in our adapter
 
-Our `Tokenizer.count_tokens(text)` is implemented as `len(self._tokenizer.encode(text))` — i.e. it counts exactly the token IDs that `encode` produces, including the default BOS. This keeps `count_tokens` consistent with what will actually be sent to the LLM, at the cost of counting `<bos>`.
+The optional `GemmaTokenizer` adapter implements `count_tokens(text)` as
+`len(self.encode(text))`. Its `encode` calls the injected Hugging Face tokenizer
+without overriding special-token behavior, so the count follows that
+tokenizer's configuration (including a default BOS when enabled). This is a
+count of the adapter's encoded text, not a guarantee that it equals the final
+chat-template request count reported by an LLM server.
 
-If a token budget should exclude special tokens, that is a per-call decision made *outside* the adapter (e.g. passing `add_special_tokens=False` in the HF call). It is a policy choice, not something the adapter decides.
+The active `QwenTokenizer` adapter instead passes `add_special_tokens=False`
+to the injected fast tokenizer in `encode` and uses `len(self.encode(text))`
+for local context budgeting. Special-token handling is adapter-specific.
 
 ---
 
@@ -190,7 +209,7 @@ choose k-th token end = offsets[k][1] such that:
     count_tokens(text[:offsets[k][1]]) <= capacity
          │
          ▼
-result = text[:offsets[k][1]]         # byte-exact prefix of original input
+result = text[:offsets[k][1]]         # exact prefix of the original string
 ```
 
 - `text[:end]` is a guaranteed **exact substring** of the original input — no whitespace is added, removed, or replaced.
@@ -253,15 +272,18 @@ Concrete mapping (`src/domain/context/tokenizer.py` ↔ `src/infrastructure/serv
 | Abstraction member | GemmaAdapter implementation | Notes |
 |---|---|---|
 | `supports_offset_mapping` (read-only property, no setter) | `return True` | Part of the interface contract; the flag documents that offsets are available (the fast backend provides them, `[L]`). |
-| `encode(text) -> list[tuple[int, tuple[int,int]]]` | `self._tokenizer(text, return_offsets_mapping=True)` → `zip(ids, offset_mapping)` | Each element is `(token_id, (start, end))` **including default `<bos>`** (see §4.2); offsets are into the original string; skip `(0,0)` special-token entries before using cut indices (see §5, §6). |
-| `count_tokens(text) -> int` | `len(self.encode(text))` | Counts exactly what `encode` produces; consistent with the budget sent to the LLM. |
+| `encode(text) -> list[tuple[int, tuple[int,int]]]` | `self._tokenizer(text, return_offsets_mapping=True)` → `zip(ids, offset_mapping)` | Each element is `(token_id, (start, end))`; a BOS entry appears when enabled by the injected tokenizer (see §4.2). Offsets refer to the original string; skip `(0,0)` special-token entries before using cut indices (see §5, §6). |
+| `count_tokens(text) -> int` | `len(self.encode(text))` | Counts this adapter's encoded text; final chat-template/server usage may differ. |
 
 Design rules that follow:
 
 - The abstraction stays minimal and pure-stdlib; it never imports `transformers`. `[A]`
 - The adapter is a thin translation layer; it contains **no** truncation, summarizing, or overflow logic. `[A]`
 - Offsets are part of the `encode` contract; `supports_offset_mapping` remains a read-only indicator that every concrete adapter must expose, and current implementations return `True`. `[A]`
-- BOS-inclusive counting is the current contract of `count_tokens`. If the token budget must exclude `<bos>`, the exclusion is applied at the call site (via `add_special_tokens=False`), not inside the adapter. `[L][A]`
+- BOS-inclusive counting applies to this Gemma adapter only when the injected
+  tokenizer adds BOS by default. The active Qwen adapter explicitly disables
+  special tokens in its encoding call. Neither adapter's local section count
+  includes every token added later by the provider's chat template. `[A]`
 
 ---
 
